@@ -8,7 +8,7 @@ import {
   type WordBankValidationPolicy,
   type WordCandidate,
   type WordDifficulty,
-} from './types.js'
+} from './types'
 
 export const DEFAULT_WORD_BANK_VALIDATION_POLICY: WordBankValidationPolicy =
   Object.freeze({

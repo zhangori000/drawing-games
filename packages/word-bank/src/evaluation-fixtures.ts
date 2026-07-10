@@ -2,9 +2,9 @@ import type {
   WordBank,
   WordBankGenerationRequest,
   WordDifficulty,
-} from './types.js'
-import { WORD_DIFFICULTIES } from './types.js'
-import { normalizeForLookup } from './validation.js'
+} from './types'
+import { WORD_DIFFICULTIES } from './types'
+import { normalizeForLookup } from './validation'
 
 export interface WordBankEvaluationFixture {
   readonly id: string

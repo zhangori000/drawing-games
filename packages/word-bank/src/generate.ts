@@ -1,4 +1,4 @@
-import { createDeterministicFallbackGenerator } from './fallback.js'
+import { createDeterministicFallbackGenerator } from './fallback'
 import type {
   FallbackReason,
   GeneratorMetadata,
@@ -11,13 +11,13 @@ import type {
   WordBankGenerator,
   WordBankRoute,
   WordBankValidationPolicy,
-} from './types.js'
-import { WORD_BANK_CONTRACT_VERSION } from './types.js'
+} from './types'
+import { WORD_BANK_CONTRACT_VERSION } from './types'
 import {
   mergeWordBankValidationPolicy,
   parseWordBankGenerationRequest,
   validateGeneratorOutput,
-} from './validation.js'
+} from './validation'
 
 export const DEFAULT_GENERATOR_TIMEOUT_MS = 2_000
 const MAX_GENERATOR_TIMEOUT_MS = 60_000

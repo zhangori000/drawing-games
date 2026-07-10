@@ -3,7 +3,7 @@ import type {
   CustomWordCollection,
   WordCatalogRepository,
   WordCatalogTransaction,
-} from './catalog.js'
+} from './catalog'
 
 interface RepositoryState {
   readonly words: Map<string, CatalogWord>

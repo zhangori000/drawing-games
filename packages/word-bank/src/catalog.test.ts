@@ -7,7 +7,7 @@ import {
   validateCatalogWordInput,
   type CatalogWord,
   type CreateCatalogWordInput,
-} from './index.js'
+} from './index'
 
 const strawberry: CreateCatalogWordInput = {
   term: 'Strawberry',

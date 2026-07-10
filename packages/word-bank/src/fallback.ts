@@ -3,8 +3,8 @@ import type {
   WordBankGenerator,
   WordBankGeneratorEnvelope,
   WordDifficulty,
-} from './types.js'
-import { normalizeForLookup } from './validation.js'
+} from './types'
+import { normalizeForLookup } from './validation'
 
 export interface CuratedWord {
   readonly text: string

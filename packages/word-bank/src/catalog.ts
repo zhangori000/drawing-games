@@ -1,9 +1,5 @@
-import type {
-  GeneratorIdentity,
-  ModelIdentity,
-  WordDifficulty,
-} from './types.js'
-import { normalizeForLookup } from './validation.js'
+import type { GeneratorIdentity, ModelIdentity, WordDifficulty } from './types'
+import { normalizeForLookup } from './validation'
 
 export const MASTER_WORD_COLLECTION_ID = 'master' as const
 export const MASTER_WORD_COLLECTION_NAME = 'Master' as const
