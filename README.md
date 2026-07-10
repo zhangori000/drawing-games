@@ -79,10 +79,19 @@ Focused feedback loops are also available:
 
 ```bash
 pnpm test:unit
+pnpm test:drawing
 pnpm test:simulation
 pnpm test:integration
 pnpm check:all
 ```
+
+`pnpm test:drawing` checks the vector model, real desktop controls (tap, drag,
+object erase, undo, redo, and clear), Android touch, and mobile WebKit touch.
+For a visual check, run `pnpm dev`, open
+`http://localhost:3000/games/dual-draw/lab`, and draw directly with a mouse,
+finger, or pen. The lab is local-only, so this needs no account or API key.
+If `pnpm dev` is already running on port 3000, reuse it with
+`PLAYWRIGHT_PORT=3000 pnpm test:drawing`.
 
 No external account, API key, database, or paid AI service is required for
 local development or tests.

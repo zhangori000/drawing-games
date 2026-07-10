@@ -1,4 +1,4 @@
-import { expect, test, type Locator } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 interface InkBounds {
   readonly count: number
@@ -98,6 +98,77 @@ test('a pen tap uses the same Pointer Events drawing path', async ({
     .poll(async () => (await getInkBounds(canvas)).count)
     .toBeGreaterThan(0)
 })
+
+test('object erase, undo, redo, and clear work through the real toolbar', async ({
+  page,
+}) => {
+  await page.goto('/games/dual-draw/lab')
+
+  const canvas = page.getByLabel('Local drawing canvas')
+  const box = await canvas.boundingBox()
+  expect(box).not.toBeNull()
+  if (!box) return
+
+  const firstStroke = {
+    start: { x: box.x + box.width * 0.2, y: box.y + box.height * 0.35 },
+    end: { x: box.x + box.width * 0.4, y: box.y + box.height * 0.35 },
+  }
+  const secondStroke = {
+    start: { x: box.x + box.width * 0.6, y: box.y + box.height * 0.65 },
+    end: { x: box.x + box.width * 0.8, y: box.y + box.height * 0.65 },
+  }
+
+  await drawLine(page, firstStroke.start, firstStroke.end)
+  await drawLine(page, secondStroke.start, secondStroke.end)
+  await expect
+    .poll(async () => (await getInkBounds(canvas)).count)
+    .toBeGreaterThan(0)
+  const beforeErase = (await getInkBounds(canvas)).count
+
+  await page.getByRole('button', { name: 'Object erase' }).click()
+  await expect(page.getByText('Tap a stroke to erase it')).toBeVisible()
+  await page.mouse.click(
+    (firstStroke.start.x + firstStroke.end.x) / 2,
+    firstStroke.start.y,
+  )
+
+  await expect
+    .poll(async () => (await getInkBounds(canvas)).count)
+    .toBeLessThan(beforeErase)
+  const afterErase = (await getInkBounds(canvas)).count
+  expect(afterErase).toBeGreaterThan(0)
+
+  await page.getByRole('button', { name: 'Undo' }).click()
+  await expect
+    .poll(async () => (await getInkBounds(canvas)).count)
+    .toBe(beforeErase)
+
+  await page.getByRole('button', { name: 'Redo' }).click()
+  await expect
+    .poll(async () => (await getInkBounds(canvas)).count)
+    .toBe(afterErase)
+
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: 'Clear' }).click()
+  await expect.poll(async () => (await getInkBounds(canvas)).count).toBe(0)
+
+  // Clear is a semantic action too: undo restores the post-erase drawing.
+  await page.getByRole('button', { name: 'Undo' }).click()
+  await expect
+    .poll(async () => (await getInkBounds(canvas)).count)
+    .toBe(afterErase)
+})
+
+async function drawLine(
+  page: Page,
+  start: { readonly x: number; readonly y: number },
+  end: { readonly x: number; readonly y: number },
+) {
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.down()
+  await page.mouse.move(end.x, end.y, { steps: 8 })
+  await page.mouse.up()
+}
 
 async function getInkBounds(canvas: Locator): Promise<InkBounds> {
   return canvas.evaluate((element) => {

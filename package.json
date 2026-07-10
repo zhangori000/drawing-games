@@ -16,6 +16,7 @@
     "format:check": "prettier --check .",
     "lint": "turbo run lint",
     "test": "turbo run test",
+    "test:drawing": "pnpm --filter @drawing-games/drawing-model test && playwright test e2e/canvas-lab.spec.ts --project=chromium && PLAYWRIGHT_MOBILE=1 playwright test e2e/canvas-lab.mobile.spec.ts --project=mobile-chromium --project=mobile-webkit",
     "test:e2e": "playwright test --project=chromium",
     "test:e2e:mobile": "PLAYWRIGHT_MOBILE=1 playwright test --project=mobile-chromium --project=mobile-webkit",
     "test:integration": "pnpm --filter @drawing-games/realtime test",
