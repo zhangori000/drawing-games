@@ -1,6 +1,17 @@
 import { defineConfig, devices } from '@playwright/test'
 
 const includeMobileProjects = process.env.PLAYWRIGHT_MOBILE === '1'
+const requestedPort = Number(process.env.PLAYWRIGHT_PORT ?? 3100)
+
+if (
+  !Number.isInteger(requestedPort) ||
+  requestedPort < 1 ||
+  requestedPort > 65535
+) {
+  throw new Error('PLAYWRIGHT_PORT must be an integer between 1 and 65535')
+}
+
+const baseURL = `http://127.0.0.1:${requestedPort}`
 
 const mobileProjects = [
   {
@@ -27,7 +38,7 @@ export default defineConfig({
     : [['list']],
   expect: { timeout: 5_000 },
   use: {
-    baseURL: 'http://127.0.0.1:3100',
+    baseURL,
     trace: process.env.CI ? 'on-first-retry' : 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -41,9 +52,8 @@ export default defineConfig({
     ...(includeMobileProjects ? mobileProjects : []),
   ],
   webServer: {
-    command:
-      'pnpm --filter @drawing-games/web dev --hostname 127.0.0.1 --port 3100',
-    url: 'http://127.0.0.1:3100',
+    command: `pnpm --filter @drawing-games/web dev --hostname 127.0.0.1 --port ${requestedPort}`,
+    url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
