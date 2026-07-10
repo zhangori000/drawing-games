@@ -57,6 +57,9 @@ importers:
       '@drawing-games/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@drawing-games/word-bank':
+        specifier: workspace:*
+        version: link:../../packages/word-bank
       next:
         specifier: 16.2.10
         version: 16.2.10(@babel/core@7.29.7)(@playwright/test@1.61.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)

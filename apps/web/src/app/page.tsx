@@ -39,6 +39,12 @@ export default function Home() {
           className="flex items-center gap-2"
           aria-label="Primary navigation"
         >
+          <Link
+            href="/admin/words"
+            className="hidden rounded-full px-4 py-2 text-sm font-semibold transition hover:bg-black/5 md:block"
+          >
+            Word library
+          </Link>
           <a
             href="#dual-draw"
             className="hidden rounded-full px-4 py-2 text-sm font-semibold transition hover:bg-black/5 sm:block"

@@ -13,6 +13,7 @@
     "@drawing-games/drawing-model": "workspace:*",
     "@drawing-games/game-core": "workspace:*",
     "@drawing-games/protocol": "workspace:*",
+    "@drawing-games/word-bank": "workspace:*",
     "next": "16.2.10",
     "react": "19.2.4",
     "react-dom": "19.2.4",
