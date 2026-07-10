@@ -117,6 +117,29 @@ test('four isolated seats share room updates without leaking final words', async
     await expect(
       teamBGuesser.getByText('lighthouse', { exact: true }),
     ).toHaveCount(0)
+
+    // Team A solving does not cut Team B off. Its clock and scoring opportunity
+    // remain live until Team B solves or the authoritative deadline expires.
+    await expect(teamBGuesser.getByLabel('Your guess')).toBeEnabled()
+    await teamBGuesser.getByLabel('Your guess').fill('volcano')
+    await teamBGuesser.getByLabel('Your guess').press('Enter')
+    await expect(
+      teamBGuesser.getByTestId('guess-composer').getByRole('status'),
+    ).toHaveText('Correct — your team solved it.')
+    await expect(
+      teamAGuesser.getByText('Theo solved it for their team.'),
+    ).toBeVisible()
+
+    await expect(
+      teamAGuesser
+        .getByRole('article', { name: 'Team Sun' })
+        .getByText('800', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      teamBGuesser
+        .getByRole('article', { name: 'Team Moon' })
+        .getByText('730', { exact: true }),
+    ).toBeVisible()
   } finally {
     await Promise.all(contexts.map((context) => context.close()))
   }

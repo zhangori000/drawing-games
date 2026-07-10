@@ -1,6 +1,7 @@
 import 'server-only'
 
 import {
+  calculateGuessScore,
   projectPublicRoomView,
   type AuthoritativeRoomViewSource,
   type TeamId,
@@ -26,6 +27,7 @@ interface StoredPlaytestRoom {
   revision: number
   readonly guesses: StoredGuess[]
   readonly solvedTeams: Set<PlaytestTeamId>
+  readonly scores: Record<PlaytestTeamId, number>
 }
 
 const MAX_ROOMS = 32
@@ -35,6 +37,15 @@ const TEAM_WORDS: Readonly<Record<PlaytestTeamId, string>> = {
   'team-a': 'lighthouse',
   'team-b': 'volcano',
 }
+const STARTING_SCORES: Readonly<Record<PlaytestTeamId, number>> = {
+  'team-a': 680,
+  'team-b': 610,
+}
+const PLAYTEST_SOLVE_POINTS = calculateGuessScore({
+  secondsRemaining: 54,
+  roundSeconds: 90,
+  difficulty: 'hard',
+})
 const DOMAIN_TEAMS: Readonly<Record<PlaytestTeamId, TeamId>> = {
   'team-a': 'A',
   'team-b': 'B',
@@ -95,7 +106,10 @@ export function submitPlaytestGuess(
     correct,
   })
   if (room.guesses.length > MAX_GUESSES_PER_ROOM) room.guesses.shift()
-  if (correct) room.solvedTeams.add(participant.teamId)
+  if (correct && !room.solvedTeams.has(participant.teamId)) {
+    room.solvedTeams.add(participant.teamId)
+    room.scores[participant.teamId] += PLAYTEST_SOLVE_POINTS
+  }
 
   return projectRoom(roomCode, room, participantId)
 }
@@ -119,6 +133,7 @@ function createRoom(): StoredPlaytestRoom {
     revision: 0,
     guesses: [],
     solvedTeams: new Set(),
+    scores: { ...STARTING_SCORES },
   }
 }
 
@@ -172,7 +187,7 @@ function createAuthoritativeViewSource(
     roomCode,
     roomSeq: room.revision,
     phase: 'drawing',
-    scores: { A: 680, B: 610 },
+    scores: { A: room.scores['team-a'], B: room.scores['team-b'] },
     opponentDraftVisibility: 'options-and-actions',
     players: Object.values(PLAYTEST_PARTICIPANTS).map((player) => ({
       id: player.id,
@@ -221,7 +236,7 @@ function createTeamViews(room: StoredPlaytestRoom): PlaytestTeamView[] {
     {
       id: 'team-a',
       name: 'Team Sun',
-      score: 680,
+      score: room.scores['team-a'],
       solved: room.solvedTeams.has('team-a'),
       members: [
         PLAYTEST_PARTICIPANTS['team-a-drawer'],
@@ -231,7 +246,7 @@ function createTeamViews(room: StoredPlaytestRoom): PlaytestTeamView[] {
     {
       id: 'team-b',
       name: 'Team Moon',
-      score: 610,
+      score: room.scores['team-b'],
       solved: room.solvedTeams.has('team-b'),
       members: [
         PLAYTEST_PARTICIPANTS['team-b-drawer'],
