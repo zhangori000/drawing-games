@@ -52,6 +52,28 @@ Applied here: room rules form one consistency boundary, full event sourcing is
 deferred, fitness functions guard architecture, and future AI sits behind a
 validated `WordSource` with a curated fallback.
 
+### Product families, structured content, and test design
+
+- Hassan Gomaa, _Designing Software Product Lines with UML_ (2004), Chapters 1
+  and 3 — reuse a tested architectural kernel with explicit variation, but grow
+  the kernel iteratively from real product members instead of guessing a broad
+  framework up front.
+- Mike Atherton and Carrie Hane,
+  [_Designing Connected Content_](https://learning.oreilly.com/library/view/designing-connected-content/9780134764061/)
+  (2017), Chapters 3, 6, and 8 — model reusable semantic entities with typed
+  fields, stable relationships, validation, editorial workflow, and governance
+  outside any one page or storage product.
+- Maurício Aniche,
+  [_Effective Software Testing_](https://learning.oreilly.com/library/view/effective-software-testing/9781633439931/)
+  (2022), Chapters 2, 5, and 9 — derive examples from behavioral partitions and
+  time boundaries, use generated sequences for invariants, and reserve browser
+  tests for valuable integration risks.
+
+Applied here: future games stay in one product family until measured boundaries
+justify another repository; the shared game kernel is extracted only from
+proven reuse; catalog collections reference canonical word IDs; and new rules
+receive example, property, and browser tests at the cheapest trustworthy layer.
+
 ## Current platform documentation
 
 ### Cloudflare Durable Objects and Workers

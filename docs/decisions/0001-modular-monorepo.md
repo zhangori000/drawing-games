@@ -35,6 +35,19 @@ Future games start as their own rules module/package and reuse the existing apps
 where appropriate. If a game proves that it needs a different runtime, add a
 separate deployable under `apps/` while keeping versioned package contracts.
 
+Do not create an empty `packages/games/shared` framework before a second game
+provides evidence of genuine commonality. Dual Draw remains cohesive in
+`game-core` for the first playable loop. When game two arrives, move each game's
+rules behind an explicit game contract and extract only behavior used by both:
+
+```text
+packages/games/dual-draw
+packages/games/<second-game>
+packages/game-kernel        # only proven shared contracts and primitives
+```
+
+This is a compatibility-preserving package migration, not a repository split.
+
 Do not create a service or repository merely because a noun exists. Extract a
 physical boundary only when an independently measured need—scaling, release
 cadence, security isolation, technology, data ownership, or team ownership—pays

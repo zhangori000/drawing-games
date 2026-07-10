@@ -89,6 +89,9 @@ needed only when an external system is intentionally enabled:
 Secrets belong in provider environment settings or ignored local files. They
 must never be committed or placed in browser-visible configuration.
 
+The current checklist and exact local admin instructions live in
+[manual-steps.md](../operations/manual-steps.md).
+
 ## Current pricing references
 
 Recheck these before creating a production account or entering billing data:

@@ -12,6 +12,11 @@ network milestone is one complete vertical slice: create a room, join by code,
 draft words, draw and guess in real time, refresh the browser, and resume the
 same match.
 
+A local word-library console lives at `/admin/words`. It can create custom
+collections, add or edit canonical words, derive the Master list, validate
+atomic JSON imports, and export a backup. It intentionally uses browser-local
+storage until production authentication and durable admin storage exist.
+
 ## Why this shape
 
 - **One modular monorepo:** future games share product, identity, UI, and
@@ -38,7 +43,7 @@ packages/
   game-core/    Deterministic game state and rules
   drawing-model/Vector stroke operations and undo/redo semantics
   protocol/     Versioned client/server messages and validation
-  word-bank/    Curated words and provider-neutral future generation port
+  word-bank/    Canonical catalog, collections, and future generation port
 docs/           Product, architecture, decisions, research, and quality gates
 ```
 
@@ -88,10 +93,12 @@ local development or tests.
 - [ADR 0002: authoritative room actor](docs/decisions/0002-authoritative-room-actor.md)
 - [ADR 0003: vector drawing model](docs/decisions/0003-vector-drawing-model.md)
 - [ADR 0004: provider-neutral word-bank generation](docs/decisions/0004-provider-neutral-word-bank-generation.md)
+- [ADR 0005: governed word catalog](docs/decisions/0005-governed-word-catalog.md)
 - [Testing strategy](docs/quality/testing-strategy.md)
 - [Cost and scaling plan](docs/quality/cost-and-scaling.md)
 - [AI word-generation quality contract](docs/quality/ai-word-generation.md)
 - [Architecture fitness functions](docs/quality/fitness-functions.md)
+- [Manual steps and credential status](docs/operations/manual-steps.md)
 - [Research sources](docs/research/sources.md)
 
 ## Product principle

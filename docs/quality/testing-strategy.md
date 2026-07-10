@@ -36,7 +36,14 @@ properties include:
 - legal command sequences never create an impossible phase or roster;
 - drawer turns remain balanced within one turn;
 - a chosen word is visible only to its authoritative active drawer;
+- either team may solve first while the other retains exactly one scoring
+  opportunity through the shared deadline;
+- every word-replacement reason consumes one shared anti-abuse allowance;
+- the Master collection equals the active playable catalog set, and failed
+  imports leave both words and memberships unchanged;
 - undo followed by redo restores the same drawing document;
+- a tap remains one round, single-point vector stroke, while threshold-crossing input
+  becomes a drag without creating another drawing object;
 - malformed or out-of-order drawing operations cannot corrupt state;
 - the same seed and command sequence produce the same result.
 
@@ -90,7 +97,10 @@ storage behave like separate devices. Keep only valuable user journeys:
 2. a wrong guess followed by another guess keeps the drawing viewport stable;
 3. refresh/background/reconnect restores the current room and role;
 4. drawing, object erase, undo, redo, and clear work through real controls;
-5. the critical flow passes in Chromium and mobile WebKit.
+5. mouse, pen, Android touch, and mobile WebKit touch all create a visible dot;
+6. a local admin can create a collection, add a word, refresh, and recover the
+   same stable catalog state; and
+7. the critical flow passes in Chromium and mobile WebKit.
 
 Use semantic roles and labels rather than CSS selectors. Create state through a
 fast owned test driver instead of clicking through every setup screen. Wait on

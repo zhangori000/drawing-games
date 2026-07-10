@@ -62,7 +62,7 @@ The measurable guards for these claims live in
 | `packages/game-core`     | Deterministic commands, state transitions, settings, scoring, role rotation                      | Clocks, sockets, databases, Cloudflare, or React        |
 | `packages/drawing-model` | Strokes, semantic operations, object erase, undo/redo, snapshots                                 | Network transport or DOM canvas APIs                    |
 | `packages/protocol`      | Versioned envelopes, runtime schemas, public projections                                         | Hidden room state or business decisions                 |
-| `packages/word-bank`     | Validated candidates, curated fallback, generation port, and provenance                          | AI SDKs, credentials, prompts, or realtime room I/O     |
+| `packages/word-bank`     | Canonical words, derived collections, validated candidates, generation port, and provenance      | AI SDKs, credentials, prompts, or realtime room I/O     |
 
 Each additional game gets a rules module and protocol vocabulary. It may reuse
 the existing room runtime. If it later proves a different operational profile,
@@ -155,6 +155,12 @@ generate topic-specific banks, but its output must
 pass deterministic validation, moderation, deduplication, cost limits, and a
 fallback bank before entering a room. No model call belongs in the realtime
 stroke path.
+
+Administrators curate a canonical word catalog through a storage-neutral
+repository contract. The Master list is derived from every active eligible
+word, while custom collections retain stable word IDs. The initial local editor
+can export a portable snapshot; authenticated durable storage later replaces
+only the application adapter, not catalog or game rules.
 
 ## Decisions versus hypotheses
 

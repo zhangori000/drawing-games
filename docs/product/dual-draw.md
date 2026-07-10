@@ -31,7 +31,7 @@ stateDiagram-v2
   [*] --> Lobby
   Lobby --> WordSelection: both teams ready
   WordSelection --> Drawing: selected or 15s deadline
-  Drawing --> RoundResult: solved or round deadline
+  Drawing --> RoundResult: both teams solved or round deadline
   RoundResult --> WordSelection: rounds remain
   RoundResult --> Showdown: standard rounds complete
   Showdown --> FinalStats
@@ -43,21 +43,21 @@ The room server, not a browser, owns every transition and deadline.
 
 ## Proposed default settings
 
-| Setting                    |                                                Default | Allowed initially                          |
-| -------------------------- | -----------------------------------------------------: | ------------------------------------------ |
-| Players                    |                                              4 minimum | 2–8 per team, 16 total                     |
-| Standard rounds            |                                                      6 | 4–16, even numbers                         |
-| Word-selection time        |                                             15 seconds | Fixed for the first version                |
-| Drawing time               |                                             90 seconds | 45, 60, 75, or 90 seconds                  |
-| Round results              |                                              8 seconds | Fixed for the first version                |
-| Word choices               |                                                      3 | 2–7                                        |
-| “Seen before” replacements |                                           1 per drawer | 0–5                                        |
-| Opponent draft visibility  |                                 Options + Seen actions | Options + actions, actions only, or hidden |
-| Word length                | Hidden; team-majority reveal after 30s costs 10 points | Shown, hidden, or reveal disabled          |
-| Prompt difficulty          |                                                  Mixed | Easy, mixed, or hard-biased                |
-| Colors                     |                   Accessible palette plus custom color | Host may restrict for modes later          |
-| Stroke sizes               |                                              4 presets | Thin through extra thick                   |
-| Showdown                   |                                        On; 120 seconds | On or off                                  |
+| Setting                   |                                                Default | Allowed initially                          |
+| ------------------------- | -----------------------------------------------------: | ------------------------------------------ |
+| Players                   |                                              4 minimum | 2–8 per team, 16 total                     |
+| Standard rounds           |                                                      6 | 4–16, even numbers                         |
+| Word-selection time       |                                             15 seconds | Fixed for the first version                |
+| Drawing time              |                                             90 seconds | 45, 60, 75, or 90 seconds                  |
+| Round results             |                                              8 seconds | Fixed for the first version                |
+| Word choices              |                                                      3 | 2–7                                        |
+| Word replacements         |                                           1 per drawer | 0–5; shared across replacement reasons     |
+| Opponent draft visibility |                                      Options + actions | Options + actions, actions only, or hidden |
+| Word length               | Hidden; team-majority reveal after 30s costs 10 points | Shown, hidden, or reveal disabled          |
+| Prompt difficulty         |                                                  Mixed | Easy, mixed, or hard-biased                |
+| Colors                    |                   Accessible palette plus custom color | Host may restrict for modes later          |
+| Stroke sizes              |                                              4 presets | Thin through extra thick                   |
+| Showdown                  |                                        On; 120 seconds | On or off                                  |
 
 Room settings are visible to everyone before ready-up. The host proposes
 changes; the game starts only when every connected player marks ready.
@@ -69,21 +69,28 @@ players only after their reconnect grace expires. Each team has one active
 drawer and its own draft, prompt, canvas, guesses, and round score.
 
 During the 15-second draft, each active drawer sees their candidate words and
-difficulty labels and may select or mark one word “seen before.” A Seen action
-replaces that candidate up to the configured cap. At the deadline, the server
-randomly selects one of that drawer's remaining candidates. The two drafts do
-not block each other.
+difficulty labels and may select one or replace it for either of two explicit
+reasons: **seen before** or **I do not know this word's definition**. Both
+reasons consume the same configured replacement allowance; unfamiliarity does
+not create an unlimited reroll path. At the deadline, the server randomly
+selects one of that drawer's remaining candidates. The two drafts do not block
+each other.
+
+Replacement actions retain their reason, actor, and server timestamp for room
+history and moderation. Opponents may observe the action only when the room's
+draft-visibility setting permits it. A word's stored definition is editorial
+metadata for the catalog and is never sent to guessers with a live answer.
 
 To honor the intended social transparency, the casual-room default shows the
-**opposing team** that drawer's offered options and every Seen action while the
-drawer’s own guessers see only their team's selection status. Once selection
-locks, each final answer is hidden from every guesser and from the other drawer;
-it is delivered only to the drawer who chose it. The setting is explicit and
-reversible before a match or between rounds:
+**opposing team** that drawer's offered options and every replacement action
+while the drawer’s own guessers see only their team's selection status. Once
+selection locks, each final answer is hidden from every guesser and from the
+other drawer; it is delivered only to the drawer who chose it. The setting is
+explicit and reversible before a match or between rounds:
 
-- **Options + Seen actions (default):** each opposing team sees the other
+- **Options + actions (default):** each opposing team sees the other
   drawer's candidate pool and replacements, but not a final-answer message.
-- **Seen actions only:** the opposing team sees replacements without word text.
+- **Actions only:** the opposing team sees replacements without word text.
 - **Hidden:** opponents see neither options nor draft actions.
 
 Showing options creates a collusion path when friends share voice chat: an
@@ -105,6 +112,8 @@ must be deleted globally.
 Each team has its own canvas. The initial tool set is:
 
 - freehand strokes with several sizes and an accessible color palette;
+- tap-to-dot marks whose diameter follows the selected stroke size, for details
+  such as strawberry seeds or eyes;
 - object eraser that removes an entire stroke selected by hit testing;
 - precise eraser as an optional later tool, not the only eraser;
 - undo and redo for the active drawer's semantic actions;
@@ -113,6 +122,8 @@ Each team has its own canvas. The initial tool set is:
 
 The drawer sees local ink immediately. Guessers receive ordered vector updates
 and can keep submitting guesses until their team solves the word or time ends.
+A short tap commits one round, single-point stroke; beginning a drag must not
+add a second dot beneath the line.
 Guess matching is server-side, case-insensitive, whitespace-normalized, and
 accent-tolerant. Fuzzy spelling tolerance is a later, bounded setting because
 overly broad matching can reveal answers or accept wrong words.
@@ -165,6 +176,28 @@ answer can be as low as 40. The continuous time term avoids a large “first
 place” step, so ordinary network jitter has limited impact. The active drawer
 receives a successful-drawing credit and difficulty credit in personal stats;
 team score remains the competitive source of truth.
+
+The first team to solve does **not** end the round. Its first accepted correct
+guess locks that team's points and ignores duplicate correct submissions for
+scoring, while the other team keeps drawing and guessing against the original
+server deadline. The round ends early only after both teams solve; otherwise it
+ends at the deadline. This preserves a real chance to redeem diminishing speed
+points instead of turning the first solve into a winner-take-all cutoff.
+
+## Word catalog and collections
+
+The canonical **Master list** is the derived set of every active, eligible word
+known to the game. An administrator may create custom collections—such as
+“Animals,” “Movie night,” or “Orien's favorites”—whose memberships reference
+stable word IDs rather than copying word text.
+
+Each catalog word records its display term, normalized term, locale,
+definition, difficulty, tags, source/provenance, active status, and version.
+The same canonical term cannot be duplicated within a locale. Removing a word
+from a custom collection does not remove it from the Master list; deactivating
+the word removes it from every playable selection while preserving its stable
+identity and history. Bulk imports validate completely before changing the
+catalog so one bad row cannot leave a half-imported word bank.
 
 ### Shutdown bonus
 
