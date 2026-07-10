@@ -3,13 +3,7 @@ packages:
   - packages/*
 
 allowBuilds:
-  esbuild: set this to true or false
-  sharp: set this to true or false
-  unrs-resolver: set this to true or false
-  workerd: set this to true or false
-
-onlyBuiltDependencies:
-  - esbuild
-  - sharp
-  - unrs-resolver
-  - workerd
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+  workerd: true

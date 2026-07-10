@@ -5,3 +5,4 @@ dist
 node_modules
 pnpm-lock.yaml
 apps/realtime/worker-configuration.d.ts
+apps/web/next-env.d.ts
