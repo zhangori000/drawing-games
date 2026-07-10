@@ -18,6 +18,7 @@ export interface StrokeStyle {
 export interface Stroke {
   readonly id: StrokeId
   readonly style: StrokeStyle
+  /** One point is a tap/dot; two or more points form one continuous drag. */
   readonly points: readonly NormalizedPoint[]
 }
 

@@ -22,6 +22,7 @@ import {
 
 const COLORS = ['#181713', '#5c4cf2', '#ff6b4a', '#1f9d72', '#f0b429']
 const WIDTHS = [0.006, 0.012, 0.022] as const
+const TAP_MOVEMENT_THRESHOLD_PX = 3
 const SCORE_PREVIEW = getGuessScoreBreakdown({
   secondsRemaining: 54,
   roundSeconds: 90,
@@ -33,6 +34,10 @@ type Tool = 'pen' | 'object-eraser'
 interface ActivePointer {
   readonly pointerId: number
   readonly strokeId: string
+  readonly startPoint: NormalizedPoint
+  pendingPoints: NormalizedPoint[]
+  lastAppendedPoint: NormalizedPoint
+  dragStarted: boolean
   nextPointIndex: number
 }
 
@@ -122,6 +127,10 @@ export function CanvasLab() {
     activePointerRef.current = {
       pointerId: event.pointerId,
       strokeId,
+      startPoint: point,
+      pendingPoints: [],
+      lastAppendedPoint: point,
+      dragStarted: false,
       nextPointIndex: 1,
     }
     dispatch({
@@ -136,22 +145,14 @@ export function CanvasLab() {
     const active = activePointerRef.current
     if (!active || active.pointerId !== event.pointerId) return
 
-    const points = coalescedPoints(event, event.currentTarget)
-    if (points.length === 0) return
-
-    dispatch({
-      type: 'stroke.append',
-      strokeId: active.strokeId,
-      startPointIndex: active.nextPointIndex,
-      points,
-    })
-    active.nextPointIndex += points.length
+    appendPointerSamples(event, active)
   }
 
   function handlePointerEnd(event: ReactPointerEvent<HTMLCanvasElement>) {
     const active = activePointerRef.current
     if (!active || active.pointerId !== event.pointerId) return
 
+    appendPointerSamples(event, active)
     dispatch({
       type: 'stroke.end',
       strokeId: active.strokeId,
@@ -161,6 +162,44 @@ export function CanvasLab() {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
+  }
+
+  function appendPointerSamples(
+    event: ReactPointerEvent<HTMLCanvasElement>,
+    active: ActivePointer,
+  ) {
+    const canvas = event.currentTarget
+    const previousPoint = active.dragStarted
+      ? active.lastAppendedPoint
+      : (active.pendingPoints.at(-1) ?? active.startPoint)
+    const samples = distinctPoints(
+      previousPoint,
+      coalescedPoints(event, canvas),
+    )
+    if (samples.length === 0) return
+
+    if (!active.dragStarted) {
+      active.pendingPoints.push(...samples)
+      const movedBeyondTap = active.pendingPoints.some(
+        (point) =>
+          distanceInCanvasPixels(active.startPoint, point, canvas) >
+          TAP_MOVEMENT_THRESHOLD_PX,
+      )
+      if (!movedBeyondTap) return
+
+      active.dragStarted = true
+    }
+
+    const points =
+      active.pendingPoints.length > 0 ? active.pendingPoints.splice(0) : samples
+    dispatch({
+      type: 'stroke.append',
+      strokeId: active.strokeId,
+      startPointIndex: active.nextPointIndex,
+      points,
+    })
+    active.nextPointIndex += points.length
+    active.lastAppendedPoint = points.at(-1) ?? active.lastAppendedPoint
   }
 
   function handlePointerCancel(event: ReactPointerEvent<HTMLCanvasElement>) {
@@ -314,7 +353,7 @@ export function CanvasLab() {
             />
             <div className="pointer-events-none absolute left-3 top-3 rounded-full bg-[#181713]/80 px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-white">
               {tool === 'pen'
-                ? 'Local ink · zero wait'
+                ? 'Drag to draw · tap for dots'
                 : 'Tap a stroke to erase it'}
             </div>
           </div>
@@ -529,8 +568,37 @@ function coalescedPoints(
   canvas: HTMLCanvasElement,
 ): NormalizedPoint[] {
   const nativeEvent = event.nativeEvent
-  const samples = nativeEvent.getCoalescedEvents?.() ?? [nativeEvent]
+  const coalesced = nativeEvent.getCoalescedEvents?.() ?? []
+  const samples = coalesced.length > 0 ? coalesced : [nativeEvent]
   return samples.map((sample) => eventPoint(sample, canvas))
+}
+
+function distinctPoints(
+  previousPoint: NormalizedPoint,
+  points: readonly NormalizedPoint[],
+) {
+  const distinct: NormalizedPoint[] = []
+  let previous = previousPoint
+
+  for (const point of points) {
+    if (point.x === previous.x && point.y === previous.y) continue
+    distinct.push(point)
+    previous = point
+  }
+
+  return distinct
+}
+
+function distanceInCanvasPixels(
+  start: NormalizedPoint,
+  end: NormalizedPoint,
+  canvas: HTMLCanvasElement,
+) {
+  const rect = canvas.getBoundingClientRect()
+  return Math.hypot(
+    (end.x - start.x) * rect.width,
+    (end.y - start.y) * rect.height,
+  )
 }
 
 function clampUnit(value: number) {

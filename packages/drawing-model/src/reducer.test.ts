@@ -42,6 +42,28 @@ function finishStroke(
 }
 
 describe('drawingReducer', () => {
+  it('commits a tap as one single-point stroke that can be hit, undone, and redone', () => {
+    const started = drawingReducer(createDrawingState(), begin('dot', 0.4))
+    const tapped = drawingReducer(started, {
+      type: 'stroke.end',
+      strokeId: 'dot',
+      pointCount: 1,
+    })
+
+    expect(tapped.document.strokeOrder).toEqual(['dot'])
+    expect(tapped.document.strokesById.dot).toMatchObject({
+      style: { width: blackPen.width },
+      points: [{ x: 0.4, y: 0.1, pressure: 0.5 }],
+    })
+    expect(findTopStrokeAtPoint(tapped, { x: 0.4, y: 0.1 }, 0)?.id).toBe('dot')
+
+    const undone = drawingReducer(tapped, { type: 'drawing.undo' })
+    expect(undone.document.strokeOrder).toEqual([])
+    expect(drawingReducer(undone, { type: 'drawing.redo' }).document).toEqual(
+      tapped.document,
+    )
+  })
+
   it('builds a normalized stroke without mutating earlier states', () => {
     const empty = createDrawingState()
     const started = drawingReducer(empty, begin('stroke-1'))
