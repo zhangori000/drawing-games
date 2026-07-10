@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "commandId": "compat_command_1",
+  "sessionId": "compat_session_1",
+  "roomCode": "MIGR8",
+  "clientSeq": 1,
+  "lastRoomSeq": 0,
+  "command": {
+    "type": "room.resume"
+  }
+}

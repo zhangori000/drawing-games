@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+.next/
+.turbo/
+dist/
+coverage/
+.wrangler/
+*.tsbuildinfo
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+!.dev.vars.example
+
+# Editors and operating systems
+.DS_Store
+*.swp
+
+# Test artifacts
+playwright-report/
+test-results/
+
+# Logs
+*.log

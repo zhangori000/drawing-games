@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "roomCode": "MIGR8",
+  "roomSeq": 7,
+  "serverTimeMs": 1800000000000,
+  "event": {
+    "type": "room.snapshot",
+    "state": {
+      "phase": "drawing",
+      "deadlineAtMs": 1800000090000
+    }
+  }
+}
