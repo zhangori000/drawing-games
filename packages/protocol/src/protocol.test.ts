@@ -26,6 +26,16 @@ describe('commandEnvelopeV1Schema', () => {
     { type: 'room.join', displayName: 'Orien' },
     { type: 'draft.select', optionId: 'word_1' },
     { type: 'draft.seen', optionId: 'word_1' },
+    {
+      type: 'draft.replace',
+      optionId: 'word_1',
+      reason: 'seen-before',
+    },
+    {
+      type: 'draft.replace',
+      optionId: 'word_2',
+      reason: 'unknown-definition',
+    },
     { type: 'guess.submit', text: 'otter' },
     { type: 'hint.vote', hint: 'word-length', approve: true },
     {
@@ -98,6 +108,48 @@ describe('commandEnvelopeV1Schema', () => {
         strokeId: 'stroke_1',
         startPointIndex: 1,
         points: [],
+      }).success,
+    ).toBe(false)
+  })
+
+  it('accepts a tap as one begin point followed by an end count of one', () => {
+    const command: ClientCommand = {
+      type: 'drawing.batch',
+      operations: [
+        {
+          type: 'stroke.begin',
+          strokeId: 'strawberry_seed_1',
+          point: { x: 0.45, y: 0.55, pressure: 0.8 },
+          style: { color: '#181713', width: 0.012, opacity: 1 },
+        },
+        {
+          type: 'stroke.end',
+          strokeId: 'strawberry_seed_1',
+          pointCount: 1,
+        },
+      ],
+    }
+
+    expect(parseCommandEnvelopeV1(envelopeFor(command)).command).toEqual(
+      command,
+    )
+  })
+
+  it('requires an explicit supported reason for a word replacement', () => {
+    expect(
+      commandEnvelopeV1Schema.safeParse({
+        ...envelopeFor({ type: 'room.resume' }),
+        command: { type: 'draft.replace', optionId: 'word_1' },
+      }).success,
+    ).toBe(false)
+    expect(
+      commandEnvelopeV1Schema.safeParse({
+        ...envelopeFor({ type: 'room.resume' }),
+        command: {
+          type: 'draft.replace',
+          optionId: 'word_1',
+          reason: 'too-hard',
+        },
       }).success,
     ).toBe(false)
   })

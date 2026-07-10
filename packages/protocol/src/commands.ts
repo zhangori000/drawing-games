@@ -37,6 +37,21 @@ export const draftSeenCommandSchema = z.strictObject({
   optionId: optionIdSchema,
 })
 
+export const draftReplacementReasonSchema = z.enum([
+  'seen-before',
+  'unknown-definition',
+])
+
+/**
+ * Reasoned replacement command. `draft.seen` remains accepted so a rolling
+ * deployment can drain older clients without translating their command ids.
+ */
+export const draftReplaceCommandSchema = z.strictObject({
+  type: z.literal('draft.replace'),
+  optionId: optionIdSchema,
+  reason: draftReplacementReasonSchema,
+})
+
 export const guessCommandSchema = z.strictObject({
   type: z.literal('guess.submit'),
   text: z.string().trim().min(1).max(120),
@@ -71,6 +86,7 @@ export const clientCommandSchema = z.discriminatedUnion('type', [
   joinCommandSchema,
   draftSelectCommandSchema,
   draftSeenCommandSchema,
+  draftReplaceCommandSchema,
   guessCommandSchema,
   hintCommandSchema,
   drawingBatchCommandSchema,
@@ -94,6 +110,10 @@ export type ResumeCommand = z.infer<typeof resumeCommandSchema>
 export type JoinCommand = z.infer<typeof joinCommandSchema>
 export type DraftSelectCommand = z.infer<typeof draftSelectCommandSchema>
 export type DraftSeenCommand = z.infer<typeof draftSeenCommandSchema>
+export type DraftReplacementReason = z.infer<
+  typeof draftReplacementReasonSchema
+>
+export type DraftReplaceCommand = z.infer<typeof draftReplaceCommandSchema>
 export type GuessCommand = z.infer<typeof guessCommandSchema>
 export type HintCommand = z.infer<typeof hintCommandSchema>
 export type DrawingBatchCommand = z.infer<typeof drawingBatchCommandSchema>

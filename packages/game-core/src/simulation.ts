@@ -9,6 +9,7 @@ import {
   projectPublicRoomView,
   type AuthoritativeRoundViewSource,
   type AuthoritativeTeamDraft,
+  type AuthoritativeWordReplacementAction,
   type AuthoritativeWordOption,
   type RoomPlayer,
 } from './public-view'
@@ -20,7 +21,9 @@ import type {
   TeamScores,
   WinStreak,
   WordDifficulty,
+  WordReplacementReason,
 } from './types'
+import { WORD_REPLACEMENT_REASONS } from './types'
 
 export interface SimulationWord {
   readonly id: string
@@ -53,7 +56,15 @@ export interface SimulationSolution {
   readonly points: number
 }
 
-export interface SimulationRoundState extends AuthoritativeRoundViewSource {
+export interface SimulationTeamDraft extends AuthoritativeTeamDraft {
+  readonly replacementActions: readonly AuthoritativeWordReplacementAction[]
+}
+
+export interface SimulationRoundState extends Omit<
+  AuthoritativeRoundViewSource,
+  'drafts'
+> {
+  readonly drafts: Readonly<Record<TeamId, SimulationTeamDraft>>
   readonly startedAtMs: number
   readonly drawingStartedAtMs: number | null
   readonly scoresBeforeRound: TeamScores
@@ -98,6 +109,13 @@ export type SimulationCommand =
       readonly team: TeamId
       readonly actorId: PlayerId
       readonly optionIndex: number
+    })
+  | (SimulationCommandBase & {
+      readonly type: 'word.replace'
+      readonly team: TeamId
+      readonly actorId: PlayerId
+      readonly optionIndex: number
+      readonly reason: WordReplacementReason
     })
   | (SimulationCommandBase & {
       readonly type: 'word.select'
@@ -197,6 +215,8 @@ export function applySimulationCommand(
         return startRound(state, command.serverTimeMs)
       case 'word.seen':
         return markWordSeen(state, command)
+      case 'word.replace':
+        return replaceWord(state, command)
       case 'word.select':
         return selectWord(state, command)
       case 'drawing.start':
@@ -261,12 +281,13 @@ export function runSeededRounds(
       if (state.settings.seenRerollsPerDrawer > 0 && decision % 3 === 0) {
         now += 1
         state = applySimulationCommand(state, {
-          type: 'word.seen',
+          type: 'word.replace',
           seq: state.roomSeq + 1,
           serverTimeMs: now,
           team,
           actorId: requireRound(state).drawers[team],
           optionIndex: decision % state.settings.wordChoiceCount,
+          reason: decision % 2 === 0 ? 'seen-before' : 'unknown-definition',
         })
       }
 
@@ -440,9 +461,55 @@ export function assertSimulationInvariants(state: SimulationRoomState): void {
       draft.options.every((option) => option.word.trim().length > 0),
       `Team ${team} has an empty word`,
     )
+    const replacementActions = draft.replacementActions
     invariant(
-      draft.seenOptionIds.length <= state.settings.seenRerollsPerDrawer,
-      `Team ${team} exceeded Seen rerolls`,
+      replacementActions.length <= state.settings.seenRerollsPerDrawer,
+      `Team ${team} exceeded word replacements`,
+    )
+    invariant(
+      draft.seenOptionIds.length <= replacementActions.length,
+      `Team ${team} Seen history exceeds replacement audit history`,
+    )
+
+    replacementActions.forEach((action, index) => {
+      invariant(
+        (WORD_REPLACEMENT_REASONS as readonly string[]).includes(action.reason),
+        `Team ${team} has an invalid replacement reason`,
+      )
+      invariant(
+        action.actorId === round.drawers[team],
+        `Team ${team} replacement was not made by its drawer`,
+      )
+      invariant(
+        action.serverTimeMs >= round.startedAtMs &&
+          action.serverTimeMs < round.draftDeadlineAtMs,
+        `Team ${team} replacement is outside the draft window`,
+      )
+      invariant(
+        action.replacedOptionId !== action.replacementOptionId,
+        `Team ${team} replacement did not change the option`,
+      )
+      if (index > 0) {
+        invariant(
+          action.serverTimeMs >=
+            (
+              replacementActions[
+                index - 1
+              ] as AuthoritativeWordReplacementAction
+            ).serverTimeMs,
+          `Team ${team} replacement timestamps are not monotonic`,
+        )
+      }
+    })
+
+    invariant(
+      arraysEqual(
+        draft.seenOptionIds,
+        replacementActions
+          .filter((action) => action.reason === 'seen-before')
+          .map((action) => action.replacedOptionId),
+      ),
+      `Team ${team} Seen history disagrees with replacement audit history`,
     )
 
     if (draft.chosenOptionId !== null) {
@@ -575,6 +642,7 @@ function startRound(
   const emptyDraft = (options: readonly AuthoritativeWordOption[]) => ({
     options,
     seenOptionIds: [],
+    replacementActions: [],
     chosenOptionId: null,
   })
 
@@ -610,6 +678,17 @@ function markWordSeen(
   state: SimulationRoomState,
   command: Extract<SimulationCommand, { type: 'word.seen' }>,
 ): SimulationRoomState {
+  return replaceWord(state, {
+    ...command,
+    type: 'word.replace',
+    reason: 'seen-before',
+  })
+}
+
+function replaceWord(
+  state: SimulationRoomState,
+  command: Extract<SimulationCommand, { type: 'word.replace' }>,
+): SimulationRoomState {
   const round = requireDraftCommand(
     state,
     command.team,
@@ -617,22 +696,38 @@ function markWordSeen(
     command.serverTimeMs,
   )
   const draft = round.drafts[command.team]
-  rule(draft.chosenOptionId === null, 'a chosen word cannot be marked Seen')
+  rule(draft.chosenOptionId === null, 'a chosen word cannot be replaced')
   rule(
-    draft.seenOptionIds.length < state.settings.seenRerollsPerDrawer,
-    'Seen reroll limit reached',
+    (WORD_REPLACEMENT_REASONS as readonly string[]).includes(command.reason),
+    'unsupported word replacement reason',
+  )
+  const replacementActions = draft.replacementActions
+  rule(
+    replacementActions.length < state.settings.seenRerollsPerDrawer,
+    'Word replacement limit reached',
   )
   const replaced = optionAt(draft, command.optionIndex)
   const replacement = drawReplacement(
     state.rngState,
     draft.options,
-    draft.seenOptionIds,
+    replacementActions.map((action) => action.replacedOptionId),
   )
   const options = [...draft.options]
   options[command.optionIndex] = replacement.option
-  const nextDraft: AuthoritativeTeamDraft = {
+  const replacementAction: AuthoritativeWordReplacementAction = {
+    reason: command.reason,
+    actorId: command.actorId,
+    replacedOptionId: replaced.id,
+    replacementOptionId: replacement.option.id,
+    serverTimeMs: command.serverTimeMs,
+  }
+  const nextDraft: SimulationTeamDraft = {
     options,
-    seenOptionIds: [...draft.seenOptionIds, replaced.id],
+    seenOptionIds:
+      command.reason === 'seen-before'
+        ? [...draft.seenOptionIds, replaced.id]
+        : draft.seenOptionIds,
+    replacementActions: [...replacementActions, replacementAction],
     chosenOptionId: null,
   }
 
@@ -808,7 +903,7 @@ function requireDraftCommand(
 function updateDraft(
   state: SimulationRoomState,
   team: TeamId,
-  draft: AuthoritativeTeamDraft,
+  draft: SimulationTeamDraft,
   rngState = state.rngState,
 ): SimulationRoomState {
   const round = requireRound(state)
@@ -894,11 +989,11 @@ function drawWordOptions(
 function drawReplacement(
   rngState: number,
   currentOptions: readonly AuthoritativeWordOption[],
-  seenOptionIds: readonly string[],
+  previouslyReplacedOptionIds: readonly string[],
 ): { readonly option: AuthoritativeWordOption; readonly rngState: number } {
   const excluded = new Set([
     ...currentOptions.map((option) => option.id),
-    ...seenOptionIds,
+    ...previouslyReplacedOptionIds,
   ])
   const candidates = SIMULATION_WORD_BANK.filter(
     (word) => !excluded.has(word.id),

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "commandId": "replace_unknown_definition_1",
+  "sessionId": "session_1",
+  "roomCode": "ABCD12",
+  "clientSeq": 8,
+  "lastRoomSeq": 20,
+  "command": {
+    "type": "draft.replace",
+    "optionId": "word_2",
+    "reason": "unknown-definition"
+  }
+}

@@ -137,6 +137,14 @@ describe('projectPublicRoomView draft audiences', () => {
 
       expect(observedDraft?.options === null).toBe(!optionsVisible)
       expect(observedDraft?.seenActionCount).toBe(actionCount)
+      expect(observedDraft?.replacementActions).toEqual(
+        setting === 'hidden'
+          ? null
+          : [
+              { reason: 'seen-before', serverTimeMs: 1_000 },
+              { reason: 'unknown-definition', serverTimeMs: 2_000 },
+            ],
+      )
       expect(observedDraft?.chosenWord).toEqual({ visibility: 'hidden' })
     },
   )
@@ -149,6 +157,23 @@ describe('projectPublicRoomView draft audiences', () => {
 
     expect(view.round?.drafts.A.options).toBeNull()
     expect(view.round?.drafts.A.seenActionCount).toBeNull()
+    expect(view.round?.drafts.A.replacementActions).toBeNull()
+  })
+
+  it('exposes replacement reasons without leaking audit actor or option ids', () => {
+    const view = projectPublicRoomView(
+      roomState('word-draft', 'options-and-actions'),
+      { kind: 'player', playerId: 'b2' },
+    )
+    const actions = view.round?.drafts.A.replacementActions
+
+    expect(actions).toEqual([
+      { reason: 'seen-before', serverTimeMs: 1_000 },
+      { reason: 'unknown-definition', serverTimeMs: 2_000 },
+    ])
+    expect(JSON.stringify(actions)).not.toContain('a1')
+    expect(JSON.stringify(actions)).not.toContain('a-old')
+    expect(JSON.stringify(actions)).not.toContain('a-cat')
   })
 
   it('returns fresh objects instead of server-state references', () => {
@@ -190,6 +215,22 @@ function roomState(
             { id: 'a-cat', word: 'cat', difficulty: 'easy' },
           ],
           seenOptionIds: ['a-old'],
+          replacementActions: [
+            {
+              reason: 'seen-before',
+              actorId: 'a1',
+              replacedOptionId: 'a-old',
+              replacementOptionId: 'a-cat',
+              serverTimeMs: 1_000,
+            },
+            {
+              reason: 'unknown-definition',
+              actorId: 'a1',
+              replacedOptionId: 'a-opaque',
+              replacementOptionId: 'a-volcano',
+              serverTimeMs: 2_000,
+            },
+          ],
           chosenOptionId: 'a-volcano',
         },
         B: {

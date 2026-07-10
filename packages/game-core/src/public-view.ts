@@ -6,6 +6,7 @@ import type {
   TeamId,
   TeamScores,
   WordDifficulty,
+  WordReplacementReason,
 } from './types'
 
 export interface RoomPlayer {
@@ -20,9 +21,21 @@ export interface AuthoritativeWordOption {
   readonly difficulty: WordDifficulty
 }
 
+export interface AuthoritativeWordReplacementAction {
+  readonly reason: WordReplacementReason
+  readonly actorId: PlayerId
+  readonly replacedOptionId: string
+  readonly replacementOptionId: string
+  /** Authoritative receipt time; clients cannot supply or revise it. */
+  readonly serverTimeMs: number
+}
+
 export interface AuthoritativeTeamDraft {
   readonly options: readonly AuthoritativeWordOption[]
+  /** @deprecated Use replacementActions for reasoned audit history. */
   readonly seenOptionIds: readonly string[]
+  /** Optional only so pre-audit snapshots remain projectable. */
+  readonly replacementActions?: readonly AuthoritativeWordReplacementAction[]
   readonly chosenOptionId: string | null
 }
 
@@ -88,11 +101,22 @@ export type PublicChosenWord =
       readonly difficulty: WordDifficulty
     }
 
+export interface PublicWordReplacementAction {
+  readonly reason: WordReplacementReason
+  /** null identifies a legacy Seen record created before audit timestamps. */
+  readonly serverTimeMs: number | null
+}
+
 export interface PublicTeamDraft {
   /** null means this audience is not allowed to receive candidate text. */
   readonly options: readonly PublicWordOption[] | null
   /** null hides even the existence/count of Seen actions from this audience. */
   readonly seenActionCount: number | null
+  /**
+   * Reason-only audit trail. Option ids and actor ids stay authoritative so
+   * this cannot become a side channel for hidden word candidates.
+   */
+  readonly replacementActions: readonly PublicWordReplacementAction[] | null
   readonly chosenWord: PublicChosenWord
 }
 
@@ -238,6 +262,7 @@ function projectTeamDraft(
   const actionsVisible =
     isOwningDrawer ||
     (mayObserveOpponentDraft && opponentDraftVisibility !== 'hidden')
+  const replacementActions = getReplacementActions(draft)
 
   return {
     options: optionsVisible
@@ -247,9 +272,29 @@ function projectTeamDraft(
           difficulty: option.difficulty,
         }))
       : null,
-    seenActionCount: actionsVisible ? draft.seenOptionIds.length : null,
+    seenActionCount: actionsVisible
+      ? replacementActions.filter((action) => action.reason === 'seen-before')
+          .length
+      : null,
+    replacementActions: actionsVisible ? replacementActions : null,
     chosenWord: projectChosenWord(draft, isOwningDrawer),
   }
+}
+
+function getReplacementActions(
+  draft: AuthoritativeTeamDraft,
+): readonly PublicWordReplacementAction[] {
+  if (draft.replacementActions !== undefined) {
+    return draft.replacementActions.map((action) => ({
+      reason: action.reason,
+      serverTimeMs: action.serverTimeMs,
+    }))
+  }
+
+  return draft.seenOptionIds.map(() => ({
+    reason: 'seen-before',
+    serverTimeMs: null,
+  }))
 }
 
 function projectChosenWord(

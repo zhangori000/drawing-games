@@ -28,6 +28,11 @@ export interface GameSettings {
   readonly drawingSeconds: number
   readonly roundResultsSeconds: number
   readonly showdownSeconds: number
+  /**
+   * Shared anti-abuse cap for all word replacements by one drawer. The field
+   * keeps its original name for wire/config compatibility, but both
+   * "seen-before" and "unknown-definition" consume the same allowance.
+   */
   readonly seenRerollsPerDrawer: number
   /** What the opposing team may observe while a drawer chooses its word. */
   readonly opponentDraftVisibility: OpponentDraftVisibility

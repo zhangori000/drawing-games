@@ -14,6 +14,13 @@ export const WORD_DIFFICULTIES = ['easy', 'medium', 'hard'] as const
 
 export type WordDifficulty = (typeof WORD_DIFFICULTIES)[number]
 
+export const WORD_REPLACEMENT_REASONS = [
+  'seen-before',
+  'unknown-definition',
+] as const
+
+export type WordReplacementReason = (typeof WORD_REPLACEMENT_REASONS)[number]
+
 export interface WinStreak {
   readonly team: TeamId
   readonly wins: number

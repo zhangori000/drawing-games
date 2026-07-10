@@ -1,6 +1,7 @@
 import * as fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
 
+import { DIFFICULTY_BONUSES } from './scoring'
 import { DEFAULT_GAME_SETTINGS, type GameSettings } from './settings'
 import {
   applySimulationCommand,
@@ -149,7 +150,7 @@ describe('headless word draft boundaries', () => {
     )
   })
 
-  it('replaces a Seen word once and enforces the configured cap', () => {
+  it('keeps legacy Seen replacement bounded by the shared cap', () => {
     const started = startRoom(12, 0)
     const originalIds = started.round?.drafts.A.options.map((word) => word.id)
     const seen = applySimulationCommand(started, {
@@ -175,7 +176,72 @@ describe('headless word draft boundaries', () => {
         actorId: 'a1',
         optionIndex: 0,
       }),
-    ).toThrow('Seen reroll limit reached')
+    ).toThrow('Word replacement limit reached')
+  })
+
+  it('audits unknown-definition separately and shares the anti-abuse cap', () => {
+    const settings = settingsWith({ seenRerollsPerDrawer: 2 })
+    let state = applySimulationCommand(createFakeRoom({ seed: 13, settings }), {
+      type: 'round.start',
+      seq: 1,
+      serverTimeMs: 10_000,
+    })
+
+    state = applySimulationCommand(state, {
+      type: 'word.replace',
+      seq: 2,
+      serverTimeMs: 10_001,
+      team: 'A',
+      actorId: 'a1',
+      optionIndex: 0,
+      reason: 'unknown-definition',
+    })
+    state = applySimulationCommand(state, {
+      type: 'word.replace',
+      seq: 3,
+      serverTimeMs: 10_002,
+      team: 'A',
+      actorId: 'a1',
+      optionIndex: 1,
+      reason: 'seen-before',
+    })
+
+    expect(state.round?.drafts.A.replacementActions).toMatchObject([
+      {
+        reason: 'unknown-definition',
+        actorId: 'a1',
+        serverTimeMs: 10_001,
+      },
+      { reason: 'seen-before', actorId: 'a1', serverTimeMs: 10_002 },
+    ])
+    expect(state.round?.drafts.A.seenOptionIds).toHaveLength(1)
+    expect(() =>
+      applySimulationCommand(state, {
+        type: 'word.replace',
+        seq: 4,
+        serverTimeMs: 10_003,
+        team: 'A',
+        actorId: 'a1',
+        optionIndex: 2,
+        reason: 'unknown-definition',
+      }),
+    ).toThrow('Word replacement limit reached')
+  })
+
+  it('rejects an unknown-definition replacement at the draft deadline', () => {
+    const started = startRoom(14, 0)
+
+    expect(() =>
+      applySimulationCommand(started, {
+        type: 'word.replace',
+        seq: 2,
+        serverTimeMs: started.round?.draftDeadlineAtMs as number,
+        team: 'A',
+        actorId: 'a1',
+        optionIndex: 0,
+        reason: 'unknown-definition',
+      }),
+    ).toThrow('at or after draft deadline')
   })
 })
 
@@ -223,9 +289,10 @@ describe('headless drawing, scoring, and round completion', () => {
     ).toThrow('active drawer cannot submit')
   })
 
-  it('finishes early only after both teams solve', () => {
+  it('keeps the round open so the second team can redeem later points', () => {
     let state = startDrawingWithAutomaticWords(101)
     const drawingStart = state.round?.drawingStartedAtMs as number
+    const deadline = state.round?.drawingDeadlineAtMs as number
 
     state = applySimulationCommand(state, {
       type: 'guess.correct',
@@ -234,6 +301,10 @@ describe('headless drawing, scoring, and round completion', () => {
       team: 'A',
       actorId: 'a2',
     })
+    const scoreAfterA = state.scores.A
+    expect(state.phase).toBe('drawing')
+    expect(state.round?.solutions.B).toBeNull()
+    expect(state.scores.B).toBe(0)
     expect(() =>
       applySimulationCommand(state, {
         type: 'round.finish',
@@ -245,14 +316,24 @@ describe('headless drawing, scoring, and round completion', () => {
     state = applySimulationCommand(state, {
       type: 'guess.correct',
       seq: state.roomSeq + 1,
-      serverTimeMs: drawingStart + 2_000,
+      serverTimeMs: deadline,
       team: 'B',
       actorId: 'b2',
     })
+    const aDifficulty = chosenDifficulty(state, 'A')
+    const bDifficulty = chosenDifficulty(state, 'B')
+    const aSpeedPoints = scoreAfterA - DIFFICULTY_BONUSES[aDifficulty]
+    const bSpeedPoints =
+      (state.round?.solutions.B?.points as number) -
+      DIFFICULTY_BONUSES[bDifficulty]
+
+    expect(state.scores.A).toBe(scoreAfterA)
+    expect(state.scores.B).toBeGreaterThan(0)
+    expect(aSpeedPoints).toBeGreaterThan(bSpeedPoints)
     state = applySimulationCommand(state, {
       type: 'round.finish',
       seq: state.roomSeq + 1,
-      serverTimeMs: drawingStart + 2_000,
+      serverTimeMs: deadline,
     })
 
     expect(state.phase).toBe('round-results')
@@ -260,6 +341,32 @@ describe('headless drawing, scoring, and round completion', () => {
     expect(state.round?.solutions.A).not.toBeNull()
     expect(state.round?.solutions.B).not.toBeNull()
     expect(() => assertSimulationInvariants(state)).not.toThrow()
+  })
+
+  it('cannot double-score a retried or repeated correct guess', () => {
+    const drawing = startDrawingWithAutomaticWords(102)
+    const atMs = (drawing.round?.drawingStartedAtMs as number) + 1_000
+    const command = {
+      type: 'guess.correct' as const,
+      seq: drawing.roomSeq + 1,
+      serverTimeMs: atMs,
+      team: 'A' as const,
+      actorId: 'a2',
+    }
+    const solved = applySimulationCommand(drawing, command)
+    const scoreAfterFirstApplication = solved.scores.A
+
+    expect(() => applySimulationCommand(solved, command)).toThrow(
+      'command seq must be exactly roomSeq + 1',
+    )
+    expect(() =>
+      applySimulationCommand(solved, {
+        ...command,
+        seq: solved.roomSeq + 1,
+        serverTimeMs: atMs + 1,
+      }),
+    ).toThrow('team already solved this round')
+    expect(solved.scores.A).toBe(scoreAfterFirstApplication)
   })
 })
 
@@ -297,6 +404,50 @@ describe('seeded simulation properties', () => {
           expect(state.completedRounds).toBe(rounds)
           expect(state.roomSeq).toBe(state.history.length)
           expect(state.players).toHaveLength(teamSizes.A + teamSizes.B)
+        },
+      ),
+      { numRuns: 100 },
+    )
+  })
+
+  it('allows both teams to score once in either server-received order', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 90_000 }),
+        fc.integer({ min: 0, max: 90_000 }),
+        (aOffsetMs, bOffsetMs) => {
+          let state = startDrawingWithAutomaticWords(103)
+          const startedAtMs = state.round?.drawingStartedAtMs as number
+          const solves = [
+            { team: 'A' as const, actorId: 'a2', offsetMs: aOffsetMs },
+            { team: 'B' as const, actorId: 'b2', offsetMs: bOffsetMs },
+          ].sort(
+            (left, right) =>
+              left.offsetMs - right.offsetMs ||
+              left.team.localeCompare(right.team),
+          )
+
+          for (const solve of solves) {
+            state = applySimulationCommand(state, {
+              type: 'guess.correct',
+              seq: state.roomSeq + 1,
+              serverTimeMs: startedAtMs + solve.offsetMs,
+              team: solve.team,
+              actorId: solve.actorId,
+            })
+          }
+
+          expect(state.phase).toBe('drawing')
+          expect(state.round?.solutions.A?.points).toBeGreaterThan(0)
+          expect(state.round?.solutions.B?.points).toBeGreaterThan(0)
+
+          state = applySimulationCommand(state, {
+            type: 'round.finish',
+            seq: state.roomSeq + 1,
+            serverTimeMs: startedAtMs + Math.max(aOffsetMs, bOffsetMs),
+          })
+          expect(state.phase).toBe('round-results')
+          expect(() => assertSimulationInvariants(state)).not.toThrow()
         },
       ),
       { numRuns: 100 },
@@ -346,4 +497,13 @@ function startDrawingWithAutomaticWords(seed: number): SimulationRoomState {
 
 function settingsWith(overrides: Partial<GameSettings>): GameSettings {
   return { ...DEFAULT_GAME_SETTINGS, ...overrides }
+}
+
+function chosenDifficulty(state: SimulationRoomState, team: 'A' | 'B') {
+  const draft = state.round?.drafts[team]
+  const chosen = draft?.options.find(
+    (option) => option.id === draft.chosenOptionId,
+  )
+  if (chosen === undefined) throw new Error(`Team ${team} has no chosen word`)
+  return chosen.difficulty
 }
