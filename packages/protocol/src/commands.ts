@@ -10,6 +10,7 @@ import {
   roomCodeSchema,
   sequenceSchema,
   sessionIdSchema,
+  teamIdSchema,
 } from './shared'
 
 const optionIdSchema = z
@@ -25,6 +26,7 @@ export const resumeCommandSchema = z.strictObject({
 export const joinCommandSchema = z.strictObject({
   type: z.literal('room.join'),
   displayName: z.string().trim().min(1).max(32),
+  preferredTeam: teamIdSchema.optional(),
 })
 
 export const draftSelectCommandSchema = z.strictObject({

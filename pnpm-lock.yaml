@@ -26,6 +26,12 @@ importers:
 
   apps/realtime:
     dependencies:
+      '@drawing-games/drawing-model':
+        specifier: workspace:*
+        version: link:../../packages/drawing-model
+      '@drawing-games/game-core':
+        specifier: workspace:*
+        version: link:../../packages/game-core
       '@drawing-games/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

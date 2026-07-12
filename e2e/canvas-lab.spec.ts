@@ -41,6 +41,16 @@ test('a jittery mouse tap makes one round stroke-sized dot and a drag stays one 
   await page.mouse.move(start.x - 30, start.y)
   await page.mouse.down()
   await page.mouse.move(start.x + 30, start.y, { steps: 6 })
+
+  // Ink is painted imperatively during the gesture; it does not wait for the
+  // pointer-up operation batch or a React render.
+  await expect
+    .poll(async () => {
+      const line = await getInkBounds(canvas)
+      return line.width > line.height * 4
+    })
+    .toBe(true)
+
   await page.mouse.up()
 
   await expect
@@ -97,6 +107,49 @@ test('a pen tap uses the same Pointer Events drawing path', async ({
   await expect
     .poll(async () => (await getInkBounds(canvas)).count)
     .toBeGreaterThan(0)
+})
+
+test('a cancelled pointer discards its uncommitted ink', async ({
+  context,
+  page,
+}) => {
+  await page.goto('/games/dual-draw/lab')
+
+  const canvas = page.getByLabel('Local drawing canvas')
+  const box = await canvas.boundingBox()
+  expect(box).not.toBeNull()
+  if (!box) return
+
+  const session = await context.newCDPSession(page)
+  await session.send('Emulation.setTouchEmulationEnabled', {
+    enabled: true,
+    maxTouchPoints: 1,
+  })
+  const start = {
+    x: box.x + box.width * 0.35,
+    y: box.y + box.height * 0.45,
+  }
+  const end = { x: start.x + 80, y: start.y + 20 }
+
+  await session.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ ...start, id: 0 }],
+  })
+  await session.send('Input.dispatchTouchEvent', {
+    type: 'touchMove',
+    touchPoints: [{ ...end, id: 0 }],
+  })
+  await expect
+    .poll(async () => (await getInkBounds(canvas)).count)
+    .toBeGreaterThan(0)
+
+  await session.send('Input.dispatchTouchEvent', {
+    type: 'touchCancel',
+    touchPoints: [],
+  })
+
+  await expect.poll(async () => (await getInkBounds(canvas)).count).toBe(0)
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled()
 })
 
 test('object erase, undo, redo, and clear work through the real toolbar', async ({

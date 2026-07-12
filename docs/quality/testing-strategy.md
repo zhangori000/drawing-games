@@ -107,9 +107,11 @@ fast owned test driver instead of clicking through every setup screen. Wait on
 observable readiness, never arbitrary sleeps. Capture a trace and screenshot
 only on failure or first retry.
 
-The current browser suite is a walking skeleton over the implemented room
-surface. It must not be described as full realtime-game E2E until the web client
-is actually wired through WebSockets to the authoritative room reducer.
+The current browser suite crosses the real WebSocket/Durable Object boundary for
+team drawing, including role authorization, team isolation, undo/redo, and
+reconnect snapshots. Words, guesses, scoring, and round transitions still use
+the in-memory playtest adapter, so it must not yet be described as full-game
+realtime E2E.
 
 ## Feedback pipeline
 

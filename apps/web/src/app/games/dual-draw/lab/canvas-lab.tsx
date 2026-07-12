@@ -1,56 +1,34 @@
 'use client'
 
-import {
-  createDrawingState,
-  drawingReducer,
-  findTopStrokeAtPoint,
-  type DrawingState,
-  type NormalizedPoint,
-  type Stroke,
-  type StrokeStyle,
-} from '@drawing-games/drawing-model'
+import type { StrokeStyle } from '@drawing-games/drawing-model'
 import { getGuessScoreBreakdown } from '@drawing-games/game-core'
-import Link from 'next/link'
 import {
-  useEffect,
-  useReducer,
-  useRef,
-  useState,
-  type FormEvent,
-  type PointerEvent as ReactPointerEvent,
-} from 'react'
+  DrawingPad,
+  type DrawingPadHandle,
+  type DrawingPadStatus,
+  type DrawingTool,
+} from '@/components/drawing'
+import Link from 'next/link'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 
 const COLORS = ['#181713', '#5c4cf2', '#ff6b4a', '#1f9d72', '#f0b429']
 const WIDTHS = [0.006, 0.012, 0.022] as const
-const TAP_MOVEMENT_THRESHOLD_PX = 3
 const SCORE_PREVIEW = getGuessScoreBreakdown({
   secondsRemaining: 54,
   roundSeconds: 90,
   difficulty: 'hard',
 })
 
-type Tool = 'pen' | 'object-eraser'
-
-interface ActivePointer {
-  readonly pointerId: number
-  readonly strokeId: string
-  readonly startPoint: NormalizedPoint
-  pendingPoints: NormalizedPoint[]
-  lastAppendedPoint: NormalizedPoint
-  dragStarted: boolean
-  nextPointIndex: number
-}
-
 export function CanvasLab() {
   const rootRef = useRef<HTMLDivElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const drawingRef = useRef<DrawingState>(createDrawingState())
-  const activePointerRef = useRef<ActivePointer | null>(null)
+  const drawingPadRef = useRef<DrawingPadHandle>(null)
   const guessInputRef = useRef<HTMLInputElement>(null)
-  const [drawing, dispatch] = useReducer(drawingReducer, undefined, () =>
-    createDrawingState(),
-  )
-  const [tool, setTool] = useState<Tool>('pen')
+  const [drawingStatus, setDrawingStatus] = useState<DrawingPadStatus>({
+    canRedo: false,
+    canUndo: false,
+    hasDrawing: false,
+  })
+  const [tool, setTool] = useState<DrawingTool>('pen')
   const [color, setColor] = useState(COLORS[1] ?? '#5c4cf2')
   const [width, setWidth] = useState<(typeof WIDTHS)[number]>(WIDTHS[1])
   const [guess, setGuess] = useState('')
@@ -82,132 +60,10 @@ export function CanvasLab() {
     }
   }, [])
 
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    const render = () => renderDrawing(canvas, drawingRef.current)
-    const observer = new ResizeObserver(() => {
-      sizeCanvas(canvas)
-      render()
-    })
-
-    observer.observe(canvas)
-    sizeCanvas(canvas)
-    render()
-
-    return () => observer.disconnect()
-  }, [])
-
-  useEffect(() => {
-    drawingRef.current = drawing
-    const canvas = canvasRef.current
-    if (canvas) renderDrawing(canvas, drawing)
-  }, [drawing])
-
   const strokeStyle: StrokeStyle = {
     color,
     width,
     opacity: 1,
-  }
-
-  function handlePointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
-    if (event.button !== 0 || activePointerRef.current) return
-
-    const point = eventPoint(event, event.currentTarget)
-
-    if (tool === 'object-eraser') {
-      const stroke = findTopStrokeAtPoint(drawingRef.current, point, 0.03)
-      if (stroke) dispatch({ type: 'stroke.delete', strokeId: stroke.id })
-      return
-    }
-
-    event.currentTarget.setPointerCapture(event.pointerId)
-    const strokeId = crypto.randomUUID()
-    activePointerRef.current = {
-      pointerId: event.pointerId,
-      strokeId,
-      startPoint: point,
-      pendingPoints: [],
-      lastAppendedPoint: point,
-      dragStarted: false,
-      nextPointIndex: 1,
-    }
-    dispatch({
-      type: 'stroke.begin',
-      strokeId,
-      point,
-      style: strokeStyle,
-    })
-  }
-
-  function handlePointerMove(event: ReactPointerEvent<HTMLCanvasElement>) {
-    const active = activePointerRef.current
-    if (!active || active.pointerId !== event.pointerId) return
-
-    appendPointerSamples(event, active)
-  }
-
-  function handlePointerEnd(event: ReactPointerEvent<HTMLCanvasElement>) {
-    const active = activePointerRef.current
-    if (!active || active.pointerId !== event.pointerId) return
-
-    appendPointerSamples(event, active)
-    dispatch({
-      type: 'stroke.end',
-      strokeId: active.strokeId,
-      pointCount: active.nextPointIndex,
-    })
-    activePointerRef.current = null
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-  }
-
-  function appendPointerSamples(
-    event: ReactPointerEvent<HTMLCanvasElement>,
-    active: ActivePointer,
-  ) {
-    const canvas = event.currentTarget
-    const previousPoint = active.dragStarted
-      ? active.lastAppendedPoint
-      : (active.pendingPoints.at(-1) ?? active.startPoint)
-    const samples = distinctPoints(
-      previousPoint,
-      coalescedPoints(event, canvas),
-    )
-    if (samples.length === 0) return
-
-    if (!active.dragStarted) {
-      active.pendingPoints.push(...samples)
-      const movedBeyondTap = active.pendingPoints.some(
-        (point) =>
-          distanceInCanvasPixels(active.startPoint, point, canvas) >
-          TAP_MOVEMENT_THRESHOLD_PX,
-      )
-      if (!movedBeyondTap) return
-
-      active.dragStarted = true
-    }
-
-    const points =
-      active.pendingPoints.length > 0 ? active.pendingPoints.splice(0) : samples
-    dispatch({
-      type: 'stroke.append',
-      strokeId: active.strokeId,
-      startPointIndex: active.nextPointIndex,
-      points,
-    })
-    active.nextPointIndex += points.length
-    active.lastAppendedPoint = points.at(-1) ?? active.lastAppendedPoint
-  }
-
-  function handlePointerCancel(event: ReactPointerEvent<HTMLCanvasElement>) {
-    const active = activePointerRef.current
-    if (!active || active.pointerId !== event.pointerId) return
-
-    dispatch({ type: 'stroke.delete', strokeId: active.strokeId })
-    activePointerRef.current = null
   }
 
   function submitGuess(event: FormEvent<HTMLFormElement>) {
@@ -221,14 +77,6 @@ export function CanvasLab() {
       guessInputRef.current?.focus({ preventScroll: true }),
     )
   }
-
-  const canUndo =
-    drawing.inProgressOrder.length === 0 && drawing.history.past.length > 0
-  const canRedo =
-    drawing.inProgressOrder.length === 0 && drawing.history.future.length > 0
-  const hasDrawing =
-    drawing.document.strokeOrder.length > 0 ||
-    drawing.inProgressOrder.length > 0
 
   return (
     <div
@@ -250,7 +98,7 @@ export function CanvasLab() {
             </p>
             {!keyboardOpen && (
               <p className="truncate text-xs text-black/55">
-                Vector ink now; authoritative rooms next
+                The same vector pad used by authoritative rooms
               </p>
             )}
           </div>
@@ -316,21 +164,21 @@ export function CanvasLab() {
 
           <div className="mx-1 h-8 w-px shrink-0 bg-black/15" />
           <ToolButton
-            disabled={!canUndo}
+            disabled={!drawingStatus.canUndo}
             label="Undo"
-            onClick={() => dispatch({ type: 'drawing.undo' })}
+            onClick={() => drawingPadRef.current?.undo()}
           />
           <ToolButton
-            disabled={!canRedo}
+            disabled={!drawingStatus.canRedo}
             label="Redo"
-            onClick={() => dispatch({ type: 'drawing.redo' })}
+            onClick={() => drawingPadRef.current?.redo()}
           />
           <ToolButton
-            disabled={!hasDrawing}
+            disabled={!drawingStatus.hasDrawing}
             label="Clear"
             onClick={() => {
               if (window.confirm('Clear the canvas? You can still undo it.')) {
-                dispatch({ type: 'drawing.clear' })
+                drawingPadRef.current?.clear()
               }
             }}
           />
@@ -341,15 +189,12 @@ export function CanvasLab() {
           aria-label="Drawing area"
         >
           <div className="relative h-full min-h-32 overflow-hidden rounded-2xl border-2 border-[#181713] bg-white shadow-[4px_4px_0_#181713]">
-            <canvas
-              ref={canvasRef}
+            <DrawingPad
+              ref={drawingPadRef}
+              tool={tool}
+              strokeStyle={strokeStyle}
+              onStatusChange={setDrawingStatus}
               className={`block size-full select-none ${tool === 'object-eraser' ? 'cursor-cell' : 'cursor-crosshair'}`}
-              style={{ touchAction: 'none' }}
-              aria-label="Local drawing canvas. Use the toolbar to choose a pen or erase complete strokes."
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerEnd}
-              onPointerCancel={handlePointerCancel}
             />
             <div className="pointer-events-none absolute left-3 top-3 rounded-full bg-[#181713]/80 px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-white">
               {tool === 'pen'
@@ -478,129 +323,4 @@ function ToolButton({ active, disabled, label, onClick }: ToolButtonProps) {
       {label}
     </button>
   )
-}
-
-function sizeCanvas(canvas: HTMLCanvasElement) {
-  const rect = canvas.getBoundingClientRect()
-  const ratio = Math.min(window.devicePixelRatio || 1, 2)
-  const width = Math.max(1, Math.round(rect.width * ratio))
-  const height = Math.max(1, Math.round(rect.height * ratio))
-
-  if (canvas.width !== width) canvas.width = width
-  if (canvas.height !== height) canvas.height = height
-}
-
-function renderDrawing(canvas: HTMLCanvasElement, state: DrawingState) {
-  const context = canvas.getContext('2d')
-  if (!context) return
-
-  const width = canvas.width
-  const height = canvas.height
-  context.clearRect(0, 0, width, height)
-  context.fillStyle = '#ffffff'
-  context.fillRect(0, 0, width, height)
-
-  for (const strokeId of state.document.strokeOrder) {
-    const stroke = state.document.strokesById[strokeId]
-    if (stroke) renderStroke(context, stroke, width, height)
-  }
-
-  for (const strokeId of state.inProgressOrder) {
-    const stroke = state.inProgressById[strokeId]
-    if (stroke) renderStroke(context, stroke, width, height)
-  }
-}
-
-function renderStroke(
-  context: CanvasRenderingContext2D,
-  stroke: Stroke,
-  width: number,
-  height: number,
-) {
-  const firstPoint = stroke.points[0]
-  if (!firstPoint) return
-
-  context.save()
-  context.globalAlpha = stroke.style.opacity
-  context.strokeStyle = stroke.style.color
-  context.fillStyle = stroke.style.color
-  context.lineCap = 'round'
-  context.lineJoin = 'round'
-  context.lineWidth = Math.max(1, stroke.style.width * Math.min(width, height))
-
-  if (stroke.points.length === 1) {
-    context.beginPath()
-    context.arc(
-      firstPoint.x * width,
-      firstPoint.y * height,
-      context.lineWidth / 2,
-      0,
-      Math.PI * 2,
-    )
-    context.fill()
-    context.restore()
-    return
-  }
-
-  context.beginPath()
-  context.moveTo(firstPoint.x * width, firstPoint.y * height)
-  for (const point of stroke.points.slice(1)) {
-    context.lineTo(point.x * width, point.y * height)
-  }
-  context.stroke()
-  context.restore()
-}
-
-function eventPoint(
-  event: Pick<PointerEvent, 'clientX' | 'clientY' | 'pressure'>,
-  canvas: HTMLCanvasElement,
-): NormalizedPoint {
-  const rect = canvas.getBoundingClientRect()
-  const x = clampUnit((event.clientX - rect.left) / Math.max(1, rect.width))
-  const y = clampUnit((event.clientY - rect.top) / Math.max(1, rect.height))
-  const pressure = event.pressure > 0 ? clampUnit(event.pressure) : undefined
-
-  return pressure === undefined ? { x, y } : { x, y, pressure }
-}
-
-function coalescedPoints(
-  event: ReactPointerEvent<HTMLCanvasElement>,
-  canvas: HTMLCanvasElement,
-): NormalizedPoint[] {
-  const nativeEvent = event.nativeEvent
-  const coalesced = nativeEvent.getCoalescedEvents?.() ?? []
-  const samples = coalesced.length > 0 ? coalesced : [nativeEvent]
-  return samples.map((sample) => eventPoint(sample, canvas))
-}
-
-function distinctPoints(
-  previousPoint: NormalizedPoint,
-  points: readonly NormalizedPoint[],
-) {
-  const distinct: NormalizedPoint[] = []
-  let previous = previousPoint
-
-  for (const point of points) {
-    if (point.x === previous.x && point.y === previous.y) continue
-    distinct.push(point)
-    previous = point
-  }
-
-  return distinct
-}
-
-function distanceInCanvasPixels(
-  start: NormalizedPoint,
-  end: NormalizedPoint,
-  canvas: HTMLCanvasElement,
-) {
-  const rect = canvas.getBoundingClientRect()
-  return Math.hypot(
-    (end.x - start.x) * rect.width,
-    (end.y - start.y) * rect.height,
-  )
-}
-
-function clampUnit(value: number) {
-  return Math.min(1, Math.max(0, value))
 }

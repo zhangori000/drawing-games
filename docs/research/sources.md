@@ -39,8 +39,10 @@ Michael T. Nygard, 2018.
 - [Chapter 5: Stability Patterns](https://learning.oreilly.com/library/view/release-it-2nd/9781680504552/f_0047.xhtml) — timeouts, bulkheads, backpressure, load shedding, bounded queues, and malicious dependency tests.
 - [Chapter 9: Interconnect](https://learning.oreilly.com/library/view/release-it-2nd/9781680504552/f_0083.xhtml) — admission control must happen before queues and sockets collapse.
 
-Applied here: one slow receiver is isolated, drawing traffic is bounded and
-batched, retries use backoff/jitter, and actor recovery is tested under eviction.
+Applied here: the browser outbox is bounded, drawing traffic is batched, retries
+use backoff/jitter, and actor recovery is tested under eviction. Server-side
+projection coalescing for slow receivers remains a required load-test gate
+before a public-scale release.
 
 ### Domain boundaries, evolution, and AI
 
