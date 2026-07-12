@@ -2,16 +2,19 @@ import { defineConfig, devices } from '@playwright/test'
 
 const includeMobileProjects = process.env.PLAYWRIGHT_MOBILE === '1'
 const requestedPort = Number(process.env.PLAYWRIGHT_PORT ?? 3100)
+const realtimePort = Number(process.env.PLAYWRIGHT_REALTIME_PORT ?? 8787)
 
-if (
-  !Number.isInteger(requestedPort) ||
-  requestedPort < 1 ||
-  requestedPort > 65535
-) {
-  throw new Error('PLAYWRIGHT_PORT must be an integer between 1 and 65535')
+for (const [name, port] of [
+  ['PLAYWRIGHT_PORT', requestedPort],
+  ['PLAYWRIGHT_REALTIME_PORT', realtimePort],
+] as const) {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`${name} must be an integer between 1 and 65535`)
+  }
 }
 
 const baseURL = `http://127.0.0.1:${requestedPort}`
+const realtimeURL = `http://127.0.0.1:${realtimePort}`
 
 const mobileProjects = [
   {
@@ -51,10 +54,18 @@ export default defineConfig({
     },
     ...(includeMobileProjects ? mobileProjects : []),
   ],
-  webServer: {
-    command: `pnpm --filter @drawing-games/web dev --hostname 127.0.0.1 --port ${requestedPort}`,
-    url: baseURL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  webServer: [
+    {
+      command: `pnpm --filter @drawing-games/realtime dev --port ${realtimePort}`,
+      url: `${realtimeURL}/health`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+    {
+      command: `NEXT_PUBLIC_REALTIME_URL=${realtimeURL} pnpm --filter @drawing-games/web dev --hostname 127.0.0.1 --port ${requestedPort}`,
+      url: baseURL,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+  ],
 })

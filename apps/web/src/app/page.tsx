@@ -52,7 +52,7 @@ export default function Home() {
             First game
           </a>
           <Link
-            href="/games/dual-draw/room/PLAY1?participant=team-a-guesser"
+            href="/games/dual-draw/room/PLAY1?participant=team-a-drawer"
             className="rounded-full bg-[#181713] px-4 py-2 text-sm font-bold text-white transition hover:-translate-y-0.5 hover:bg-black"
           >
             Room playtest
@@ -93,7 +93,7 @@ export default function Home() {
 
           <div className="mt-9 flex flex-col gap-3 sm:flex-row">
             <Link
-              href="/games/dual-draw/room/PLAY1?participant=team-a-guesser"
+              href="/games/dual-draw/room/PLAY1?participant=team-a-drawer"
               className="inline-flex min-h-13 items-center justify-center rounded-2xl bg-[#5c4cf2] px-6 py-3.5 text-base font-bold text-white shadow-[4px_4px_0_#181713] transition hover:-translate-y-0.5 hover:shadow-[6px_6px_0_#181713]"
             >
               Open a playtest room
