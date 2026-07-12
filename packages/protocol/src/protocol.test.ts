@@ -24,6 +24,7 @@ describe('commandEnvelopeV1Schema', () => {
   it.each<ClientCommand>([
     { type: 'room.resume' },
     { type: 'room.join', displayName: 'Orien' },
+    { type: 'room.join', displayName: 'Team B fan', preferredTeam: 'B' },
     { type: 'draft.select', optionId: 'word_1' },
     { type: 'draft.seen', optionId: 'word_1' },
     {
@@ -81,6 +82,19 @@ describe('commandEnvelopeV1Schema', () => {
       commandEnvelopeV1Schema.safeParse({
         ...envelopeFor({ type: 'room.resume' }),
         unexpected: true,
+      }).success,
+    ).toBe(false)
+  })
+
+  it('accepts only an optional canonical preferred team on room.join', () => {
+    expect(
+      commandEnvelopeV1Schema.safeParse({
+        ...envelopeFor({ type: 'room.join', displayName: 'Orien' }),
+        command: {
+          type: 'room.join',
+          displayName: 'Orien',
+          preferredTeam: 'C',
+        },
       }).success,
     ).toBe(false)
   })

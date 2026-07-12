@@ -1,3 +1,4 @@
+export * from './drawing-authorization'
 export * from './public-view'
 export * from './scoring'
 export * from './settings'

@@ -16,6 +16,14 @@ export const sessionIdSchema = z
   .max(128)
   .regex(OPAQUE_ID_PATTERN)
 
+export const playerIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(OPAQUE_ID_PATTERN)
+
+export const teamIdSchema = z.enum(['A', 'B'])
+
 export const strokeIdSchema = z
   .string()
   .min(1)
@@ -30,3 +38,6 @@ export const sequenceSchema = z
   .int()
   .nonnegative()
   .max(Number.MAX_SAFE_INTEGER)
+
+export type PlayerId = z.infer<typeof playerIdSchema>
+export type TeamId = z.infer<typeof teamIdSchema>
