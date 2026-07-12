@@ -5,12 +5,21 @@ Drawing Games is a home for fast, social drawing games. The first game is
 several guessers per team.
 
 The vector canvas is locally playable at `/games/dual-draw/lab`. A four-seat
-browser playtest lives at `/games/dual-draw/room/PLAY1`; it exercises the real
-role-safe projection and keyboard-stable layout through an in-memory test
-adapter. It is not yet the production Durable Object game loop. The first
-network milestone is one complete vertical slice: create a room, join by code,
-draft words, draw and guess in real time, refresh the browser, and resume the
-same match.
+browser playtest lives at `/games/dual-draw/room/PLAY1`. Its drawing channel now
+uses the real Durable Object WebSocket path: the server assigns drawer roles,
+authorizes vector changes, isolates each team's raw strokes, and restores the
+canvas after reconnect. Words, guesses, and scores still use the in-memory
+playtest adapter, so this is one production-shaped vertical slice rather than
+the complete game loop. Local ink is immediate; teammates currently receive a
+stroke when that gesture finishes. Timed in-progress streaming remains a
+separate reliability slice because cancellation and reconnect must not leave a
+half-stroke behind.
+
+The playtest REST adapter deliberately trusts four fake participant IDs and a
+reset command so browser tests can create rooms cheaply. It is an owned test
+driver, not authentication or production word secrecy. Likewise, the opponent
+thumbnail currently shows coarse activity only; a server-derived pixel grid is
+still a separate feature.
 
 A local word-library console lives at `/admin/words`. It can create custom
 collections, add or edit canonical words, derive the Master list, validate
@@ -61,6 +70,10 @@ pnpm install
 pnpm dev
 ```
 
+`pnpm dev` starts both the Next.js product shell and the local Durable Object
+runtime. Hosted builds set the public, non-secret `NEXT_PUBLIC_REALTIME_URL` to
+the deployed room Worker; local browsers default to `ws://127.0.0.1:8787`.
+
 Run the full repository checks with:
 
 ```bash
@@ -103,6 +116,7 @@ local development or tests.
 - [ADR 0003: vector drawing model](docs/decisions/0003-vector-drawing-model.md)
 - [ADR 0004: provider-neutral word-bank generation](docs/decisions/0004-provider-neutral-word-bank-generation.md)
 - [ADR 0005: governed word catalog](docs/decisions/0005-governed-word-catalog.md)
+- [ADR 0006: Canvas 2D before GPU or Wasm](docs/decisions/0006-canvas2d-before-gpu-or-wasm.md)
 - [Testing strategy](docs/quality/testing-strategy.md)
 - [Cost and scaling plan](docs/quality/cost-and-scaling.md)
 - [AI word-generation quality contract](docs/quality/ai-word-generation.md)
