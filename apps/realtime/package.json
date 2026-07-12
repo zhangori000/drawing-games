@@ -13,6 +13,8 @@
 		"typecheck": "tsc --noEmit && tsc -p test/tsconfig.json --noEmit"
 	},
 	"dependencies": {
+		"@drawing-games/drawing-model": "workspace:*",
+		"@drawing-games/game-core": "workspace:*",
 		"@drawing-games/protocol": "workspace:*"
 	},
 	"devDependencies": {
