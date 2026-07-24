@@ -27,8 +27,8 @@
   "devDependencies": {
     "@playwright/test": "^1.61.1",
     "@types/node": "^26.1.1",
-    "prettier": "^3.6.2",
-    "turbo": "^2.10.4",
+    "prettier": "^3.9.6",
+    "turbo": "^2.10.6",
     "typescript": "^5.9.3"
   }
 }
