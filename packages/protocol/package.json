@@ -23,7 +23,7 @@
   },
   "dependencies": {
     "@drawing-games/drawing-model": "workspace:*",
-    "zod": "^4.3.6"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "typescript": "^5.9.3",
