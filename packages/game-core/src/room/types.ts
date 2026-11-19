@@ -42,6 +42,12 @@ export interface RoomMember {
   /** Linked quick-account id (normalized username), or null for guests. */
   readonly accountId: string | null
   readonly memory: PlayerWordMemory
+  /**
+   * Internal. Set when a member leaves mid-match: they stay in `members` so
+   * history and final views keep their name, but are excluded from rosters,
+   * views, and commands, and are removed when a new match or the lobby starts.
+   */
+  readonly left?: boolean
 }
 
 /** A concrete draft card. Copied from the word pool when offered. */
@@ -186,6 +192,15 @@ export interface MatchState {
   readonly winner: TeamId | null
   readonly stats: Readonly<Record<string, MemberMatchStats>>
   readonly withBots: boolean
+  /** Internal. Per-member guess rate limiting for the current canvas. */
+  readonly guessLimits?: Readonly<Record<string, GuessLimit>>
+}
+
+/** Internal rate-limit counter; resets whenever `scope` (a canvas id) changes. */
+export interface GuessLimit {
+  readonly scope: string
+  readonly count: number
+  readonly lastAtMs: number
 }
 
 /** Room-wide anti-repeat memory. Survives rematches; reset never. */

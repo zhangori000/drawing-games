@@ -37,7 +37,7 @@ export const WORD_PACKS: readonly WordPackInfo[] = Object.freeze([
   {
     id: 'places',
     name: 'Places & Buildings',
-    description: 'Rooms, buildings, landmarks types, and destinations.',
+    description: 'Rooms, buildings, landmark types, and destinations.',
     defaultEnabled: true,
     kidFriendly: true,
   },

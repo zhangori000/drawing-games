@@ -1,5 +1,8 @@
 import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
+
+import { AppProviders } from '@/components/app-providers'
+
 import './globals.css'
 
 const geistSans = Geist({
@@ -18,7 +21,7 @@ export const metadata: Metadata = {
     template: '%s · drawing.games',
   },
   description:
-    'Fast, resilient drawing games with competitive rules and room recovery built in.',
+    'Dual Draw: two teams draw at the same time. Fresh words, a keyboard that stays put, and optional stats.',
 }
 
 export const viewport: Viewport = {
@@ -39,7 +42,9 @@ export default function RootLayout({
       data-scroll-behavior="smooth"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col">{children}</body>
+      <body className="flex min-h-full flex-col">
+        <AppProviders>{children}</AppProviders>
+      </body>
     </html>
   )
 }

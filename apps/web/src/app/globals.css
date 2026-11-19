@@ -12,34 +12,41 @@
   --font-mono: 'Geist Mono', 'Geist Mono Fallback', ui-monospace, monospace;
 }
 
-html,
-body {
-  min-height: 100%;
-}
+/*
+ * Base rules live in the base layer: unlayered CSS would beat every Tailwind
+ * utility (e.g. `button { font: inherit }` silently cancelled `font-black`).
+ */
+@layer base {
+  html,
+  body {
+    min-height: 100%;
+  }
 
-html {
-  background: var(--background);
-  scroll-behavior: smooth;
-}
+  html {
+    background: var(--background);
+    scroll-behavior: smooth;
+  }
 
-body {
-  margin: 0;
-  background: var(--background);
-  color: var(--foreground);
-  font-family: 'Geist', 'Geist Fallback', ui-sans-serif, system-ui, sans-serif;
-  text-rendering: optimizeLegibility;
-}
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family:
+      'Geist', 'Geist Fallback', ui-sans-serif, system-ui, sans-serif;
+    text-rendering: optimizeLegibility;
+  }
 
-button,
-input,
-select,
-textarea {
-  font: inherit;
-}
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
 
-::selection {
-  background: #f8ff80;
-  color: #181713;
+  ::selection {
+    background: #f8ff80;
+    color: #181713;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

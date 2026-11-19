@@ -1,3 +1,10 @@
+import { canvasAccessFor } from './access'
+import { nextWakeAtMs, runDueWork } from './advance'
+import { dispatchCommand } from './commands'
+import { createContext, finishContext, RoomRejection } from './context'
+import { projectView } from './projection'
+import { normalizeSeed } from './rng'
+import { DEFAULT_ROOM_SETTINGS } from './settings'
 import type {
   CanvasAccess,
   RoomAdvanceResult,
@@ -6,10 +13,13 @@ import type {
   RoomState,
   RoomView,
 } from './types'
+import { ROOM_STATE_VERSION } from './types'
+
+export { assertRoomInvariants, RoomInvariantError } from './invariants'
 
 /**
- * CONTRACT STUBS — replaced by the real reducer. Signatures are fixed:
- * the realtime room and the web client compile against them.
+ * Reducer entry points. Signatures are fixed: the realtime room and the web
+ * client compile against them. Rules live in the sibling modules.
  */
 
 export interface CreateRoomInput {
@@ -20,8 +30,30 @@ export interface CreateRoomInput {
 }
 
 /** A brand-new empty room in the lobby with default settings and no host. */
-export function createRoomState(_input: CreateRoomInput): RoomState {
-  throw new Error('createRoomState is not implemented yet')
+export function createRoomState(input: CreateRoomInput): RoomState {
+  return {
+    version: ROOM_STATE_VERSION,
+    roomCode: input.roomCode,
+    createdAtMs: input.nowMs,
+    seq: 0,
+    rngState: normalizeSeed(input.seed),
+    phase: 'lobby',
+    phaseStartedAtMs: input.nowMs,
+    phaseDeadlineAtMs: null,
+    hostId: null,
+    settings: DEFAULT_ROOM_SETTINGS,
+    members: [],
+    nextBotNumber: 1,
+    match: null,
+    wordMemory: {
+      usedWordIds: [],
+      offeredAt: {},
+      recentPackIds: [],
+      draftCounter: 0,
+    },
+    bots: { schedule: [], strokesDrawn: {} },
+    lastActivityAtMs: input.nowMs,
+  }
 }
 
 /**
@@ -30,39 +62,68 @@ export function createRoomState(_input: CreateRoomInput): RoomState {
  * deterministic: same state + command + nowMs => same result.
  */
 export function applyRoomCommand(
-  _state: RoomState,
-  _command: RoomCommand,
-  _nowMs: number,
+  state: RoomState,
+  command: RoomCommand,
+  nowMs: number,
 ): RoomCommandResult {
-  throw new Error('applyRoomCommand is not implemented yet')
+  const advanced = advanceRoom(state, nowMs)
+  const ctx = createContext(advanced.state, nowMs)
+  try {
+    dispatchCommand(ctx, command)
+  } catch (error) {
+    if (!(error instanceof RoomRejection)) throw error
+    return {
+      ok: false,
+      state: advanced.state,
+      effects: advanced.effects,
+      error: { code: error.code, message: error.message },
+    }
+  }
+
+  let next = finishContext(ctx)
+  if (next === advanced.state) {
+    return { ok: true, state: next, effects: advanced.effects }
+  }
+  next = { ...next, seq: next.seq + 1, lastActivityAtMs: nowMs }
+  // A command can make work due immediately (e.g. a human reconnecting lets
+  // a long-gone host hand over); settle it at the same instant.
+  const settle = createContext(next, nowMs)
+  runDueWork(settle, nowMs, nowMs)
+  return {
+    ok: true,
+    state: finishContext(settle),
+    effects: [...advanced.effects, ...ctx.effects, ...settle.effects],
+  }
 }
 
 /** Applies every deadline transition and bot action due at or before nowMs. */
 export function advanceRoom(
-  _state: RoomState,
-  _nowMs: number,
+  state: RoomState,
+  nowMs: number,
 ): RoomAdvanceResult {
-  throw new Error('advanceRoom is not implemented yet')
+  const ctx = createContext(state, nowMs)
+  runDueWork(ctx, nowMs)
+  return { state: finishContext(ctx), effects: ctx.effects }
 }
 
 /** Earliest absolute time advanceRoom has work to do, or null if none. */
-export function getNextWakeAtMs(_state: RoomState): number | null {
-  throw new Error('getNextWakeAtMs is not implemented yet')
+export function getNextWakeAtMs(state: RoomState): number | null {
+  return nextWakeAtMs(state)
 }
 
 /** Audience-safe projection for one viewer (null => non-member). */
 export function projectRoomView(
-  _state: RoomState,
-  _viewerId: string | null,
-  _nowMs: number,
+  state: RoomState,
+  viewerId: string | null,
+  nowMs: number,
 ): RoomView {
-  throw new Error('projectRoomView is not implemented yet')
+  return projectView(state, viewerId, nowMs)
 }
 
 /** Which canvases this viewer may receive raw strokes for vs. a preview. */
 export function getCanvasAccess(
-  _state: RoomState,
-  _viewerId: string | null,
+  state: RoomState,
+  viewerId: string | null,
 ): CanvasAccess {
-  throw new Error('getCanvasAccess is not implemented yet')
+  return canvasAccessFor(state, viewerId)
 }

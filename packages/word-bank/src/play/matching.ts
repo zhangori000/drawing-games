@@ -1,84 +1,95 @@
+import { pluralForms, singularForms } from './inflection'
+import { STOP_WORDS, answerTokens, normalizeAnswer } from './text'
 import type { GuessMatchTarget, GuessMatchVerdict } from './types'
 
-const LEADING_ARTICLES = new Set(['a', 'an', 'the'])
+/** Longest guess (trimmed, in UTF-16 units) that is evaluated at all. */
+export const MAX_GUESS_LENGTH = 60
 
-/** Lowercase, accent-free tokens; punctuation and hyphens split words. */
-export function answerTokens(text: string): string[] {
-  const tokens = text
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/['’`]/g, '')
-    .split(/[^a-z0-9]+/)
-    .filter((token) => token.length > 0)
-  while (tokens.length > 1 && LEADING_ARTICLES.has(tokens[0] as string)) {
-    tokens.shift()
-  }
-  return tokens
-}
+/** Shortest answer word that earns `partial` feedback on its own. */
+const MIN_PARTIAL_WORD_LENGTH = 3
 
-/** Canonical comparison key: tokens joined without separators. */
-export function normalizeAnswer(text: string): string {
-  return answerTokens(text).join('')
-}
-
-function pluralVariants(key: string): string[] {
-  const variants = [key]
-  if (key.endsWith('ies') && key.length > 4)
-    variants.push(`${key.slice(0, -3)}y`)
-  if (key.endsWith('es') && key.length > 3) variants.push(key.slice(0, -2))
-  if (key.endsWith('s') && key.length > 2) variants.push(key.slice(0, -1))
-  variants.push(`${key}s`, `${key}es`)
-  if (key.endsWith('y')) variants.push(`${key.slice(0, -1)}ies`)
-  return variants
-}
-
-/** Damerau–Levenshtein (optimal string alignment) distance, early exit. */
+/**
+ * Damerau–Levenshtein (optimal string alignment) distance. Returns `max + 1`
+ * as soon as the distance is known to exceed `max`, so callers only pay for
+ * the band they care about.
+ */
 export function editDistance(a: string, b: string, max = 3): number {
   if (Math.abs(a.length - b.length) > max) return max + 1
-  const rows = a.length + 1
-  const cols = b.length + 1
-  const d: number[][] = Array.from({ length: rows }, () =>
-    new Array<number>(cols).fill(0),
-  )
-  for (let i = 0; i < rows; i += 1) d[i]![0] = i
-  for (let j = 0; j < cols; j += 1) d[0]![j] = j
-  for (let i = 1; i < rows; i += 1) {
-    let rowMin = Number.POSITIVE_INFINITY
-    for (let j = 1; j < cols; j += 1) {
+  let before: number[] = []
+  let previous: number[] = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i += 1) {
+    const current: number[] = [i]
+    let rowMin = i
+    for (let j = 1; j <= b.length; j += 1) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1
       let value = Math.min(
-        d[i - 1]![j]! + 1,
-        d[i]![j - 1]! + 1,
-        d[i - 1]![j - 1]! + cost,
+        (previous[j] as number) + 1,
+        (current[j - 1] as number) + 1,
+        (previous[j - 1] as number) + cost,
       )
       if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
-        value = Math.min(value, d[i - 2]![j - 2]! + 1)
+        value = Math.min(value, (before[j - 2] as number) + 1)
       }
-      d[i]![j] = value
+      current.push(value)
       rowMin = Math.min(rowMin, value)
     }
+    // Row minima never decrease, so the band is already exceeded for good.
     if (rowMin > max) return max + 1
+    before = previous
+    previous = current
   }
-  return d[a.length]![b.length]!
+  return Math.min(previous[b.length] as number, max + 1)
 }
 
-function closeThreshold(answerKey: string): number {
+/** Allowed typos: none for 1–3 letters, 1 up to 7 letters, 2 for 8+. */
+export function closeThreshold(answerKey: string): number {
   if (answerKey.length <= 3) return 0
   if (answerKey.length <= 7) return 1
   return 2
 }
 
+function isExactMatch(guessKey: string, answerKey: string): boolean {
+  return (
+    guessKey === answerKey ||
+    pluralForms(answerKey).includes(guessKey) ||
+    singularForms(answerKey).includes(guessKey)
+  )
+}
+
+function isCloseMatch(guessKey: string, answerKey: string): boolean {
+  const threshold = closeThreshold(answerKey)
+  if (threshold === 0) return false
+  return [answerKey, ...pluralForms(answerKey)].some(
+    (form) => editDistance(guessKey, form, threshold) <= threshold,
+  )
+}
+
+/** Meaningful words of multi-word answers, e.g. `hermit`, `crab`. */
+function partialWords(answers: readonly string[]): string[] {
+  return answers.flatMap((answer) => {
+    const tokens = answerTokens(answer)
+    if (tokens.length < 2) return []
+    return tokens.filter(
+      (token) =>
+        token.length >= MIN_PARTIAL_WORD_LENGTH && !STOP_WORDS.has(token),
+    )
+  })
+}
+
 /**
- * Server-side guess matching. Case, accents, spacing, hyphens, punctuation,
- * leading articles, and simple plurals never cost a player a correct answer.
+ * Server-side guess verdict. Case, accents, spacing (including none),
+ * hyphens, punctuation, leading articles, simple plurals, and aliases never
+ * cost a player a correct answer. A guess that merely contains the answer
+ * among other words is not correct; it earns `partial` for a multi-word
+ * answer and `wrong` otherwise.
  */
 export function matchGuess(
   guess: string,
   target: GuessMatchTarget,
 ): GuessMatchVerdict {
-  const guessKey = normalizeAnswer(guess)
+  const trimmed = guess.trim()
+  if (trimmed.length === 0 || trimmed.length > MAX_GUESS_LENGTH) return 'wrong'
+  const guessKey = normalizeAnswer(trimmed)
   if (guessKey.length === 0) return 'wrong'
 
   const answers = [target.term, ...(target.aliases ?? [])]
@@ -86,27 +97,17 @@ export function matchGuess(
     .map(normalizeAnswer)
     .filter((key) => key.length > 0)
 
-  for (const key of answerKeys) {
-    if (pluralVariants(key).includes(guessKey)) return 'correct'
-    if (pluralVariants(guessKey).includes(key)) return 'correct'
-  }
+  if (answerKeys.some((key) => isExactMatch(guessKey, key))) return 'correct'
+  if (answerKeys.some((key) => isCloseMatch(guessKey, key))) return 'close'
 
-  for (const key of answerKeys) {
-    const threshold = closeThreshold(key)
-    if (threshold > 0 && editDistance(guessKey, key, threshold) <= threshold) {
-      return 'close'
-    }
-  }
-
-  const answerWordSet = new Set(
-    answers.flatMap((answer) => {
-      const tokens = answerTokens(answer)
-      return tokens.length > 1 ? tokens.filter((token) => token.length > 2) : []
-    }),
-  )
-  if (answerWordSet.size > 0) {
-    const guessTokens = answerTokens(guess)
-    if (guessTokens.some((token) => answerWordSet.has(token))) return 'partial'
+  const words = partialWords(answers)
+  if (words.length > 0) {
+    const hit = answerTokens(trimmed).some(
+      (token) =>
+        token.length >= MIN_PARTIAL_WORD_LENGTH &&
+        words.some((word) => isExactMatch(token, word)),
+    )
+    if (hit) return 'partial'
   }
 
   return 'wrong'
@@ -118,6 +119,7 @@ export function matchGuess(
  */
 export function wordPattern(term: string): string {
   return term
+    .normalize('NFC')
     .trim()
     .split(/\s+/)
     .map((word) =>
@@ -130,5 +132,7 @@ export function wordPattern(term: string): string {
 
 /** Count of letters and digits (what the length hint reveals). */
 export function letterCount(term: string): number {
-  return Array.from(term).filter((char) => /[\p{L}\p{N}]/u.test(char)).length
+  return Array.from(term.normalize('NFC')).filter((char) =>
+    /[\p{L}\p{N}]/u.test(char),
+  ).length
 }
