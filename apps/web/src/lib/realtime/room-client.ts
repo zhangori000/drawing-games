@@ -123,15 +123,24 @@ export class RoomClient {
     this.canvasStore = new CanvasStore({
       timers: connectionOptions.timers,
       canSend: () => this.connection?.canSendDrawing() ?? false,
-      sendBatch: (_canvasId, ops) => {
+      requestResync: () => this.connection?.resync(),
+      sendBatch: (canvasId, ops) => {
         const connection = this.connection
         if (!connection) {
           return Promise.reject(new RoomCommandError('CLOSED', 'Offline'))
         }
         // Drawing never times out: held batches are resent after a resume.
+        // `drawing.batch` carries no canvas id (the room draws on the
+        // sender's current canvas), so a batch is only ever written while
+        // its canvas is still this member's to draw on; otherwise ink from
+        // an old round or showdown card could land on a new one.
         return connection.send(
           { type: 'drawing.batch', operations: [...ops] },
-          { timeoutMs: null },
+          {
+            timeoutMs: null,
+            isCurrent: () =>
+              drawableCanvasId(connection.getState().view) === canvasId,
+          },
         )
       },
     })
@@ -343,4 +352,16 @@ export class RoomClient {
       dismissToast: (id) => this.dismissToast(id),
     }
   }
+}
+
+/** The canvas this member may draw on right now, per the room's view. */
+export function drawableCanvasId(view: RoomView | null): string | null {
+  if (!view) return null
+  if (view.phase === 'drawing' && view.round?.mine?.canDraw) {
+    return view.round.mine.canvasId
+  }
+  if (view.phase === 'showdown' && view.showdown?.mine?.canDraw) {
+    return view.showdown.mine.canvasId
+  }
+  return null
 }

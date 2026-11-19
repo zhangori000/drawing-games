@@ -1,4 +1,4 @@
-import { singularStem } from './inflection'
+import { baseVerbForms, singularStem } from './inflection'
 import { STOP_WORDS, answerTokens } from './text'
 
 type CompoundPosition = 'start' | 'end' | 'either'
@@ -70,7 +70,9 @@ const MIN_STEM_TOKEN_LENGTH = 3
 /**
  * Coarse word-family keys used to avoid offering `snowman` next to
  * `snowball`, or one team drawing `fire truck` while the other draws `fire`.
- * Tokens are singularized; compounds also contribute their known parts.
+ * Tokens are singularized; `-ing` verbs also contribute their base verb
+ * (`running` sits with `home run`, `waving` with `wave`); compounds also
+ * contribute their known parts.
  */
 export function wordStems(term: string): string[] {
   const stems = new Set<string>()
@@ -78,6 +80,7 @@ export function wordStems(term: string): string[] {
     if (token.length < MIN_STEM_TOKEN_LENGTH || STOP_WORDS.has(token)) continue
     const singular = singularStem(token)
     stems.add(singular)
+    for (const base of baseVerbForms(singular)) stems.add(base)
     for (const [part, position] of COMPOUND_PARTS) {
       if (singular.length - part.length < MIN_COMPOUND_REST) continue
       const atStart = position !== 'end' && singular.startsWith(part)

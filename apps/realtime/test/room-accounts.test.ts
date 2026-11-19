@@ -108,4 +108,55 @@ describe('quick accounts in rooms', () => {
 			host.close();
 		}
 	});
+
+	it('credits a finished match once to an account linked on the final screen', async () => {
+		vi.useFakeTimers({ toFake: ['Date'], now: Date.now() });
+		const roomCode = await createRoom();
+		const stub = env.GAME_ROOM.getByName(roomCode);
+		const host = await joinRoom(roomCode, 'Gia');
+		try {
+			for (const team of ['A', 'B', 'B'] as const) await run(host, { type: 'lobby.bot.add', team });
+			await run(host, { type: 'lobby.settings', patch: { rounds: 2, showdown: false } });
+			await run(host, { type: 'match.start' });
+			// Time is frozen: jump to each deadline until the final screen.
+			let view = await host.view((entry) => entry.phase === 'word-draft', 'draft');
+			for (let step = 0; step < 12 && view.phase !== 'stats'; step += 1) {
+				const phase = view.phase;
+				vi.setSystemTime((view.phaseDeadlineAtMs ?? Date.now()) + 1);
+				expect(await runDurableObjectAlarm(stub)).toBe(true);
+				view = await host.view((entry) => entry.phase !== phase, `after ${phase}`);
+			}
+			expect(view.phase).toBe('stats');
+			const playedWordIds = view.final?.rounds.map((round) => round.teams.A.wordId) ?? [];
+			expect(playedWordIds).toHaveLength(2);
+
+			// The guest signs up on the final screen and links the new account.
+			const account = await signup('late');
+			await run(host, { type: 'account.link', accountToken: account.token });
+			await host.view((entry) => entry.me?.accountId === account.username, 'linked');
+
+			let credited = await profile(account.token);
+			for (let attempt = 0; attempt < 50 && credited.recentMatches.length === 0; attempt += 1) {
+				await new Promise((resolve) => setTimeout(resolve, 20));
+				credited = await profile(account.token);
+			}
+			expect(credited.recentMatches).toEqual([expect.objectContaining({ roomCode, matchNumber: 1, team: 'A', roundsPlayed: 2 })]);
+			expect(credited.stats.matchesPlayed).toBe(1);
+			const roles = credited.recentWords.map((event) => `${event.role}:${event.wordId}`);
+			// Gia drew round 1 and guessed (missed) the bot's word in round 2.
+			expect(roles).toEqual(expect.arrayContaining([`drew:${playedWordIds[0]}`, `missed:${playedWordIds[1]}`]));
+
+			// Linking again (or re-sending the link) never counts the match twice.
+			await run(host, { type: 'account.link', accountToken: account.token });
+			await run(host, { type: 'account.link', accountToken: null });
+			await run(host, { type: 'account.link', accountToken: account.token });
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			const again = await profile(account.token);
+			expect(again.recentMatches).toHaveLength(1);
+			expect(again.stats.matchesPlayed).toBe(1);
+			expect(again.recentWords).toHaveLength(credited.recentWords.length);
+		} finally {
+			host.close();
+		}
+	});
 });

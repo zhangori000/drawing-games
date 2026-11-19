@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { pluralForms, singularForms } from '../play/inflection'
+import { pluralForms, singularForms, verbFormKeys } from '../play/inflection'
+import { acceptedGuessKeys } from '../play/matching'
 import { getAllPlayableWords, playableWordsForPack } from '../play/pool'
 import { answerTokens, normalizeAnswer } from '../play/text'
 import type { PlayableWord, WordPackData } from '../play/types'
@@ -161,7 +162,10 @@ function definitionProblem(word: PlayableWord): string | null {
   if (!/^\p{Lu}/u.test(definition)) return 'must start with a capital letter'
   if (!/[^.]\.$/.test(definition)) return 'must end with a single period'
   if (/[!?]|\.\s/.test(definition)) return 'must be exactly one sentence'
-  const termKeys = new Set(equivalentKeys(normalizeAnswer(word.term)))
+  const termKeys = new Set([
+    ...equivalentKeys(normalizeAnswer(word.term)),
+    ...verbFormKeys(answerTokens(word.term)),
+  ])
   if (tokenWindows(definition).some((window) => termKeys.has(window))) {
     return 'gives away the term'
   }
@@ -251,6 +255,25 @@ describe('answers across all packs', () => {
         const other = owners.get(form)
         if (other !== undefined && other !== entry) {
           problems.push(`${label(entry)} ~ ${label(other)}`)
+        }
+      }
+    }
+    expect(problems).toEqual([])
+  })
+
+  it('are never accepted as a guess for another word', () => {
+    const owners = new Map<string, PackWord>()
+    for (const entry of PACK_WORDS) {
+      for (const answer of [entry.word.term, ...entry.word.aliases]) {
+        owners.set(normalizeAnswer(answer), entry)
+      }
+    }
+    const problems: string[] = []
+    for (const entry of PACK_WORDS) {
+      for (const key of acceptedGuessKeys(entry.word)) {
+        const other = owners.get(key)
+        if (other !== undefined && other !== entry) {
+          problems.push(`${label(entry)} accepts ${key} of ${label(other)}`)
         }
       }
     }

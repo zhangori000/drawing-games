@@ -39,20 +39,31 @@ import type {
   WebSocketLike,
 } from './connection-types'
 import { decodeDomainEvent } from './domain-events'
+import { MAX_CLIENT_MESSAGE_BYTES, utf8ByteLength } from './message-size'
 import { isRoomView } from './room-view'
 import { ServerClock } from './server-clock'
 
 export type * from './connection-types'
 
 const SOCKET_OPEN = 1
-const CLOSE_REPLACED = 4001
-const CLOSE_NOT_FOUND = 4404
 const CLOSE_NORMAL = 1000
+/** The server refused a message above its size cap. */
+const CLOSE_TOO_LARGE = 1009
+const CLOSE_REPLACED = 4001
+/** The host removed this member (or the room dropped their seat). */
+const CLOSE_REMOVED = 4003
+const CLOSE_NOT_FOUND = 4404
 export const DEFAULT_COMMAND_TIMEOUT_MS = 8_000
 /** Hidden at least this long: assume the socket may be dead on return. */
 export const STALE_AFTER_HIDDEN_MS = 30_000
 /** Above this many queued bytes, drawing batches wait and coalesce. */
 export const SOCKET_CONGESTION_BYTES = 256 * 1024
+/**
+ * After a bind, commands with an `isCurrent` check wait for the room's first
+ * view (sent right after the ack) so the check sees fresh state. This is the
+ * fallback if that view never comes.
+ */
+export const FRESH_VIEW_WAIT_MS = 2_000
 
 const OPAQUE_TOKEN_PATTERN = /^[A-Za-z0-9_.-]{16,256}$/
 
@@ -63,6 +74,10 @@ interface PendingCommand {
   readonly resolve: (status: AckStatus) => void
   readonly reject: (error: RoomCommandError) => void
   timer: unknown
+  /** The socket this command was last written to, and its encoded size. */
+  sentOn: WebSocketLike | null
+  sentBytes: number
+  readonly isCurrent: (() => boolean) | null
 }
 
 interface PendingJoin {
@@ -115,6 +130,9 @@ export class RoomConnection {
   private readonly pending = new Map<string, PendingCommand>()
   private clientSeq: number
   private lastRoomSeq = 0
+  /** Bound, but the room's first view since the bind has not arrived yet. */
+  private awaitingView = false
+  private viewWaitTimer: unknown = null
   private stopLifecycle: () => void = () => {}
 
   constructor(options: RoomConnectionOptions) {
@@ -221,6 +239,23 @@ export class RoomConnection {
   /** Take the seat back after another tab replaced this one. */
   reclaim(): void {
     if (this.state.status !== 'replaced') return
+    this.attempt = 0
+    this.openSocket()
+  }
+
+  /**
+   * Asks the room for authoritative canvases again (after local ink was
+   * dropped unsent). A fresh bind makes the room send full snapshots of every
+   * canvas this member may see, so the seat is resumed on a new socket.
+   */
+  resync(): void {
+    if (this.isTerminal() || this.state.status === 'replaced') return
+    if (this.reconnectTimer !== null) {
+      this.wake()
+      return
+    }
+    // Not bound yet: the pending handshake ends with fresh snapshots anyway.
+    if (!this.bound) return
     this.attempt = 0
     this.openSocket()
   }
@@ -366,6 +401,9 @@ export class RoomConnection {
         resolve,
         reject,
         timer: null,
+        sentOn: null,
+        sentBytes: 0,
+        isCurrent: options.isCurrent ?? null,
       }
       const timeoutMs =
         options.timeoutMs === undefined
@@ -384,15 +422,18 @@ export class RoomConnection {
         }, timeoutMs)
       }
       this.pending.set(commandId, entry)
-      if (this.isBoundAndOpen()) this.writeCommand(entry)
+      if (this.isBoundAndOpen() && !this.waitsForView(entry)) {
+        this.writeCommand(entry)
+      }
     })
   }
 
   /* ------------------------------- internals ------------------------------ */
 
+  /** No automatic reconnects. `leave()` can still start over after `removed`. */
   private isTerminal(): boolean {
     const { status } = this.state
-    return status === 'closed' || status === 'not-found'
+    return status === 'closed' || status === 'not-found' || status === 'removed'
   }
 
   private isBoundAndOpen(): boolean {
@@ -442,7 +483,7 @@ export class RoomConnection {
     }
     socket.onclose = (event) => {
       if (this.socket !== socket) return
-      this.handleClose(event.code)
+      this.handleClose(socket, event.code)
     }
     socket.onerror = () => {
       // A close event always follows; reconnect logic lives there.
@@ -454,8 +495,7 @@ export class RoomConnection {
     const socket = this.socket
     if (!socket) return
     this.socket = null
-    this.bound = false
-    this.clearHandshake()
+    this.unbind()
     socket.onopen = null
     socket.onmessage = null
     socket.onclose = null
@@ -465,6 +505,13 @@ export class RoomConnection {
     } catch {
       // Already closing.
     }
+  }
+
+  private unbind(): void {
+    this.bound = false
+    this.awaitingView = false
+    this.clearViewWait()
+    this.clearHandshake()
   }
 
   private beginHandshake(): void {
@@ -498,6 +545,7 @@ export class RoomConnection {
     }
 
     const commandId = randomId()
+    const data = this.encodeEnvelope(commandId, this.nextClientSeq(), command)
     const handshake: Handshake = { kind, commandId, timer: null }
     handshake.timer = this.timers.setTimeout(() => {
       if (this.handshake !== handshake) return
@@ -509,7 +557,7 @@ export class RoomConnection {
     this.handshake = handshake
     if (kind === 'join') this.setState({ status: 'joining' })
 
-    this.writeEnvelope(socket, commandId, this.nextClientSeq(), command)
+    writeTo(socket, data)
   }
 
   private buildJoinCommand(params: JoinParams): JoinCommand {
@@ -551,11 +599,46 @@ export class RoomConnection {
       }
     }
 
+    // The room sends this socket a fresh view right after the ack.
+    this.awaitingView = true
+    this.clearViewWait()
+    this.viewWaitTimer = this.timers.setTimeout(() => {
+      this.viewWaitTimer = null
+      this.releaseAfterView()
+    }, FRESH_VIEW_WAIT_MS)
+
+    const socket = this.socket
     this.setState({ status: 'open', savedSeat: null })
-    for (const entry of this.pending.values()) {
-      if (!this.isBoundAndOpen()) break
+    // State listeners may already have sent (and written) new commands.
+    for (const entry of [...this.pending.values()]) {
+      if (!this.isBoundAndOpen() || this.socket !== socket) break
+      if (entry.sentOn === socket || this.waitsForView(entry)) continue
       this.writeCommand(entry)
     }
+  }
+
+  /** Commands that check freshness wait for the first view after a bind. */
+  private waitsForView(entry: PendingCommand): boolean {
+    return this.awaitingView && entry.isCurrent !== null
+  }
+
+  /** Writes the commands held for a fresh view (or drops stale ones). */
+  private releaseAfterView(): void {
+    if (!this.awaitingView) return
+    this.awaitingView = false
+    this.clearViewWait()
+    const socket = this.socket
+    for (const entry of [...this.pending.values()]) {
+      if (!this.isBoundAndOpen() || this.socket !== socket) break
+      if (entry.isCurrent === null || entry.sentOn === socket) continue
+      this.writeCommand(entry)
+    }
+  }
+
+  private clearViewWait(): void {
+    if (this.viewWaitTimer === null) return
+    this.timers.clearTimeout(this.viewWaitTimer)
+    this.viewWaitTimer = null
   }
 
   private clearHandshake(): void {
@@ -563,18 +646,43 @@ export class RoomConnection {
     this.handshake = null
   }
 
+  /**
+   * Writes a pending command, unless it is over the room's message cap: the
+   * room would close the socket (1009) and every resume would resend it, so
+   * it is refused here with `TOO_LARGE` instead.
+   */
   private writeCommand(entry: PendingCommand): void {
     const socket = this.socket
     if (!socket) return
-    this.writeEnvelope(socket, entry.commandId, entry.clientSeq, entry.command)
+    if (entry.isCurrent && !entry.isCurrent()) {
+      this.rejectPending(
+        entry,
+        new RoomCommandError('STALE', 'That no longer applies.', {
+          commandId: entry.commandId,
+        }),
+      )
+      return
+    }
+    const data = this.encodeEnvelope(
+      entry.commandId,
+      entry.clientSeq,
+      entry.command,
+    )
+    const bytes = utf8ByteLength(data)
+    if (bytes > MAX_CLIENT_MESSAGE_BYTES) {
+      this.rejectTooLarge(entry)
+      return
+    }
+    entry.sentOn = socket
+    entry.sentBytes = bytes
+    writeTo(socket, data)
   }
 
-  private writeEnvelope(
-    socket: WebSocketLike,
+  private encodeEnvelope(
     commandId: string,
     clientSeq: number,
     command: ClientCommand,
-  ): void {
+  ): string {
     const envelope: CommandEnvelopeV1 = {
       version: PROTOCOL_VERSION,
       commandId,
@@ -584,11 +692,24 @@ export class RoomConnection {
       lastRoomSeq: this.lastRoomSeq,
       command,
     }
-    try {
-      socket.send(JSON.stringify(envelope))
-    } catch {
-      // The socket is closing; pending commands are resent after reconnect.
-    }
+    return JSON.stringify(envelope)
+  }
+
+  private rejectTooLarge(entry: PendingCommand): void {
+    this.rejectPending(
+      entry,
+      new RoomCommandError(
+        'TOO_LARGE',
+        'That was too large to send to the room.',
+        { commandId: entry.commandId },
+      ),
+    )
+  }
+
+  private rejectPending(entry: PendingCommand, error: RoomCommandError): void {
+    this.pending.delete(entry.commandId)
+    this.timers.clearTimeout(entry.timer)
+    entry.reject(error)
   }
 
   private nextClientSeq(): number {
@@ -716,6 +837,8 @@ export class RoomConnection {
       view: state,
       memberId: me?.memberId ?? this.state.memberId,
     })
+    // Listeners have seen the fresh view; held commands can check it now.
+    if (this.awaitingView) this.releaseAfterView()
   }
 
   private handleDomainEvent(name: string, payload: unknown): void {
@@ -740,11 +863,15 @@ export class RoomConnection {
     if (!this.bound && this.handshake) this.completeHandshake()
   }
 
-  private handleClose(code: number): void {
+  private handleClose(socket: WebSocketLike, code: number): void {
     this.socket = null
-    this.bound = false
-    this.clearHandshake()
+    this.unbind()
 
+    if (code === CLOSE_REMOVED) {
+      this.enterRemoved()
+      return
+    }
+    if (code === CLOSE_TOO_LARGE) this.dropOversizedCommand(socket)
     if (code === CLOSE_REPLACED) {
       this.setState({ status: 'replaced' })
       this.emit({ type: 'notice', notice: 'replaced' })
@@ -757,6 +884,37 @@ export class RoomConnection {
       return
     }
     this.scheduleReconnect()
+  }
+
+  /**
+   * The room refused something this socket sent as too large, despite the
+   * local size check (e.g. a smaller server cap). Resending it after the
+   * resume would fail the same way forever, so the largest command written
+   * to that socket is given up. Each 1009 drops one command, so repeated
+   * closes always make progress.
+   */
+  private dropOversizedCommand(socket: WebSocketLike): void {
+    let largest: PendingCommand | null = null
+    for (const entry of this.pending.values()) {
+      if (entry.sentOn !== socket) continue
+      if (!largest || entry.sentBytes > largest.sentBytes) largest = entry
+    }
+    if (largest) this.rejectTooLarge(largest)
+  }
+
+  /**
+   * Close 4003: the host removed this member. The room has already deleted
+   * the seat, so it is forgotten here and nothing reconnects; `leave()`
+   * offers a fresh join.
+   */
+  private enterRemoved(): void {
+    this.clearReconnectTimer()
+    if (this.seat) this.seats.forgetSeat(this.roomCode, this.seat.memberId)
+    this.seat = null
+    this.offeredJoin = false
+    this.failEverything('CLOSED', 'You are no longer in this room.')
+    this.setState({ status: 'removed', memberId: null, savedSeat: null })
+    this.emit({ type: 'notice', notice: 'removed' })
   }
 
   private scheduleReconnect(): void {
@@ -822,6 +980,14 @@ export class RoomConnection {
 
   private emit(event: RoomConnectionEvent): void {
     for (const listener of [...this.eventListeners]) listener(event)
+  }
+}
+
+function writeTo(socket: WebSocketLike, data: string): void {
+  try {
+    socket.send(data)
+  } catch {
+    // The socket is closing; pending commands are resent after reconnect.
   }
 }
 

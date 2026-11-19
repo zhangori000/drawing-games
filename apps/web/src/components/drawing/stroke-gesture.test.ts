@@ -3,7 +3,7 @@ import {
   drawingReducer,
   type DrawingAction,
 } from '@drawing-games/drawing-model'
-import { expect, test } from '@playwright/test'
+import { expect, test } from 'vitest'
 
 import {
   StrokeGesture,

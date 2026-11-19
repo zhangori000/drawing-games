@@ -12,6 +12,20 @@ describe('wordStems', () => {
     ['fire truck', ['fire', 'truck']],
     ['break the ice', ['break', 'ice']],
     ['ox', []],
+    ['juggling', ['juggling', 'juggle']],
+    ['running', ['running', 'run']],
+    ['tightrope walking', ['tightrope', 'walking', 'walk']],
+    ['lying', ['lying', 'lie']],
+    // Words that merely end in -ing, and -ing nouns, keep one stem.
+    ['king', ['king']],
+    ['spring', ['spring']],
+    ['thing', ['thing']],
+    ['wedding ring', ['wedding', 'ring']],
+    ['ceiling', ['ceiling']],
+    ['pudding', ['pudding']],
+    ['stocking', ['stocking']],
+    // `light` is a known compound head (lighthouse), not a verb stem.
+    ['lightning', ['lightning', 'light']],
   ])('%j → %j', (term, expected) => {
     expect(wordStems(term).sort()).toEqual([...expected].sort())
   })
@@ -41,6 +55,12 @@ describe('sharesWordStem', () => {
     ['raining cats and dogs', 'hot dog'],
     ['lighthouse', 'flashlight'],
     ['Ice Cream', 'ice-cream cone'],
+    ['running', 'home run'],
+    ['jumping', 'jump rope'],
+    ['waving', 'wave'],
+    ['whistling', 'whistle'],
+    ['tap dancing', 'dance'],
+    ['skiing', 'water skiing'],
   ])('%j and %j are one family', (left, right) => {
     expect(sharesWordStem(left, right)).toBe(true)
     expect(sharesWordStem(right, left)).toBe(true)
@@ -56,6 +76,15 @@ describe('sharesWordStem', () => {
     ['seal', 'seahorse'],
     ['brain', 'rainbow'],
     ['break the ice', 'the moon'],
+    ['king', 'kite'],
+    ['wedding', 'bed'],
+    ['wedding ring', 'rink'],
+    ['wedding', 'wed'],
+    ['pudding', 'pug'],
+    ['ceiling', 'seal'],
+    ['stocking', 'stock pot'],
+    ['spring', 'sprinkles'],
+    ['icing', 'ice'],
   ])('%j and %j are unrelated', (left, right) => {
     expect(sharesWordStem(left, right)).toBe(false)
   })

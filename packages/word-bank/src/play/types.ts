@@ -65,7 +65,19 @@ export interface DraftSelectionInput {
 
 export type GuessMatchVerdict = 'correct' | 'close' | 'partial' | 'wrong'
 
-export interface GuessMatchTarget {
+/** A word as the guess matcher sees it; `PlayableWord` satisfies it. */
+export interface GuessMatchWord {
   readonly term: string
   readonly aliases?: readonly string[]
+}
+
+export interface GuessMatchTarget extends GuessMatchWord {
+  /**
+   * The words in play, normally the room's whole pool (the target may be in
+   * it). A verb-form spelling is never accepted when it names a different
+   * one of them (`wave` is not `waving` while both are playable). Defaults
+   * to the whole curated catalog. Keys are memoized per array instance, so
+   * pass the same (immutable) pool each time.
+   */
+  readonly otherWords?: readonly GuessMatchWord[]
 }

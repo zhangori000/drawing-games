@@ -93,6 +93,43 @@ test('two players on one team: the guesser solves the drawer’s word', async ({
   }
 })
 
+test('a player the host removes sees the removed screen and can join again', async ({
+  browser,
+}) => {
+  const ari = await newPlayer(browser)
+  const theo = await newPlayer(browser)
+  try {
+    const code = await createRoomFromHome(ari, 'Create a room')
+    await joinRoom(ari, 'Ari', 'Sun')
+    await theo.goto(`/play/${code}`)
+    await joinRoom(theo, 'Theo', 'Moon')
+    await expect(
+      ari.getByRole('list', { name: 'Moon players' }).getByText('Theo'),
+    ).toBeVisible()
+
+    await ari.getByRole('button', { name: 'Remove Theo' }).click()
+    await expect(
+      ari.getByRole('list', { name: 'Moon players' }).getByText('Theo'),
+    ).toHaveCount(0)
+
+    // Close 4003: a terminal screen, not a reconnect loop.
+    await expect(
+      theo.getByRole('heading', { name: 'You’re not in this room anymore' }),
+    ).toBeVisible()
+    await expect(theo.getByText('The host removed you')).toBeVisible()
+    await expect(theo.getByText('Reconnecting')).toHaveCount(0)
+
+    await theo.getByRole('button', { name: 'Join again' }).click()
+    await joinRoom(theo, 'Theo')
+    await expect(
+      ari.getByRole('list', { name: /players$/ }).getByText('Theo'),
+    ).toBeVisible()
+  } finally {
+    await ari.context().close()
+    await theo.context().close()
+  }
+})
+
 /* --------------------------------- steps ---------------------------------- */
 
 async function newPlayer(browser: Browser): Promise<Page> {

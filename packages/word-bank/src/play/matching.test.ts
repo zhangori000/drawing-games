@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest'
 
 import {
   MAX_GUESS_LENGTH,
+  acceptedGuessKeys,
   closeThreshold,
   editDistance,
   letterCount,
   matchGuess,
   wordPattern,
 } from './matching'
+import { customPlayableWords } from './pool'
 import { pluralForms, singularForms } from './inflection'
 import { answerTokens, normalizeAnswer } from './text'
 import type { GuessMatchTarget, GuessMatchVerdict } from './types'
@@ -253,6 +255,142 @@ describe('matchGuess', () => {
       matchGuess(`prayng mantsi ${index % 10}`.slice(0, 60), target)
     }
     expect(performance.now() - started).toBeLessThan(1000)
+  })
+})
+
+describe('matchGuess with verb forms', () => {
+  const cases: readonly Case[] = [
+    // Base verb for an -ing answer, including spelling changes.
+    ['juggle', { term: 'juggling' }, 'correct'],
+    ['surf', { term: 'surfing' }, 'correct'],
+    ['run', { term: 'running' }, 'correct'],
+    ['dance', { term: 'dancing' }, 'correct'],
+    ['Dance!', { term: 'dancing' }, 'correct'],
+    ['lie', { term: 'lying' }, 'correct'],
+    ['ski', { term: 'skiing' }, 'correct'],
+    ['swim', { term: 'swimming' }, 'correct'],
+    ['sleepwalk', { term: 'sleepwalking' }, 'correct'],
+    ['sleep walk', { term: 'sleepwalking' }, 'correct'],
+    ['eavesdrop', { term: 'eavesdropping' }, 'correct'],
+    ['tiptoe', { term: 'tiptoeing' }, 'correct'],
+    ['recycle', { term: 'recycling' }, 'correct'],
+    ['sunbathe', { term: 'sunbathing' }, 'correct'],
+    // The last word of a multi-word answer.
+    ['tightrope walk', { term: 'tightrope walking' }, 'correct'],
+    ['tightrope-walk', { term: 'tightrope walking' }, 'correct'],
+    ['tap dance', { term: 'tap dancing' }, 'correct'],
+    ['bungee jump', { term: 'bungee jumping' }, 'correct'],
+    ['rock climb', { term: 'rock climbing' }, 'correct'],
+    ['scuba dive', { term: 'scuba diving' }, 'correct'],
+    ['water ski', { term: 'water skiing' }, 'correct'],
+    ['arm wrestle', { term: 'arm wrestling' }, 'correct'],
+    // A leading verb before an article, preposition, or plural object.
+    ['fly a kite', { term: 'flying a kite' }, 'correct'],
+    ['make the bed', { term: 'making the bed' }, 'correct'],
+    ['build a sandcastle', { term: 'building a sandcastle' }, 'correct'],
+    ['walk on eggshells', { term: 'walking on eggshells' }, 'correct'],
+    ['brush teeth', { term: 'brushing teeth' }, 'correct'],
+    ['breaking the ice', { term: 'break the ice' }, 'correct'],
+    // -ing guesses for base-verb answers (custom words, nothing else in play).
+    ['juggling', { term: 'juggle', otherWords: [] }, 'correct'],
+    ['running', { term: 'run', otherWords: [] }, 'correct'],
+    ['dancing', { term: 'dance' }, 'correct'],
+    ['lying', { term: 'lie' }, 'correct'],
+    ['ice skating', { term: 'ice skate' }, 'correct'],
+    ['skateboarding', { term: 'skateboard' }, 'correct'],
+    ['swinging', { term: 'swing set', aliases: ['swing'] }, 'correct'],
+    // Words that only end in -ing letters are never shortened.
+    ['k', { term: 'king' }, 'wrong'],
+    ['rin', { term: 'ring' }, 'close'],
+    ['th', { term: 'thing' }, 'wrong'],
+    ['spr', { term: 'spring' }, 'wrong'],
+    ['wedding r', { term: 'wedding ring' }, 'partial'],
+    // -ing nouns are not verbs.
+    ['wed', { term: 'wedding' }, 'wrong'],
+    ['bed', { term: 'bedding' }, 'wrong'],
+    ['ceil', { term: 'ceiling' }, 'wrong'],
+    ['pud', { term: 'pudding' }, 'wrong'],
+    ['stock', { term: 'stocking' }, 'wrong'],
+    ['ice', { term: 'icing' }, 'wrong'],
+    ['even', { term: 'evening' }, 'wrong'],
+    ['silver line', { term: 'silver lining' }, 'partial'],
+    ['moon land', { term: 'moon landing' }, 'partial'],
+    ['bedding', { term: 'bed' }, 'wrong'],
+    ['dressing', { term: 'dress' }, 'wrong'],
+    // A leading -ing modifier of a noun compound is not a verb.
+    ['swim pool', { term: 'swimming pool' }, 'partial'],
+    ['shoot star', { term: 'shooting star' }, 'partial'],
+    // A verb form that is another curated word is that word, not this one.
+    ['wave', { term: 'waving' }, 'wrong'],
+    ['waving', { term: 'wave' }, 'wrong'],
+    ['whistle', { term: 'whistling' }, 'wrong'],
+    ['whistling', { term: 'whistle' }, 'wrong'],
+    ['cook', { term: 'cooking' }, 'wrong'],
+    ['cooking', { term: 'chef', aliases: ['cook'] }, 'wrong'],
+    // Close and partial feedback keep their rules.
+    ['jugglin', { term: 'juggling' }, 'close'],
+    ['dancng', { term: 'dancing' }, 'close'],
+    ['walk', { term: 'tightrope walking' }, 'partial'],
+    ['tightrope', { term: 'tightrope walking' }, 'partial'],
+    ['brush', { term: 'brushing teeth' }, 'partial'],
+    ['jumping', { term: 'jump rope' }, 'partial'],
+    ['big juggle', { term: 'juggling' }, 'wrong'],
+  ]
+
+  it.each(cases)('%j vs %j → %s', (guess, target, verdict) => {
+    expect(matchGuess(guess, target)).toBe(verdict)
+  })
+
+  it('never accepts a verb form that names another word in play', () => {
+    const pool = customPlayableWords(['dig', 'digging', 'juggling'])
+    const otherWords = pool
+    expect(matchGuess('dig', { term: 'digging', otherWords })).toBe('wrong')
+    expect(matchGuess('digging', { term: 'dig', otherWords })).toBe('wrong')
+    expect(matchGuess('juggle', { term: 'juggling', otherWords })).toBe(
+      'correct',
+    )
+    // Without the room's custom words only the curated catalog guards it.
+    expect(matchGuess('dig', { term: 'digging' })).toBe('correct')
+  })
+
+  it('defaults to the curated catalog as the words in play', () => {
+    // `juggling` and `running` are curated actions, so they stay distinct.
+    expect(matchGuess('juggling', { term: 'juggle' })).toBe('wrong')
+    expect(matchGuess('running', { term: 'run' })).toBe('wrong')
+    // A curated word's own aliases are never "another word".
+    expect(matchGuess('tap dance', { term: 'tap dancing' })).toBe('correct')
+  })
+
+  it('treats the target itself inside otherWords as its own answer', () => {
+    const otherWords = customPlayableWords(['juggling', 'surfing'])
+    expect(matchGuess('juggle', { term: 'juggling', otherWords })).toBe(
+      'correct',
+    )
+    expect(matchGuess('surf', { term: 'surfing', otherWords })).toBe('correct')
+  })
+
+  it('reuses keys per otherWords array and picks up a new array', () => {
+    const first = customPlayableWords(['surf'])
+    expect(matchGuess('surf', { term: 'surfing', otherWords: first })).toBe(
+      'wrong',
+    )
+    expect(matchGuess('surf', { term: 'surfing', otherWords: first })).toBe(
+      'wrong',
+    )
+    const second = customPlayableWords(['kite'])
+    expect(matchGuess('surf', { term: 'surfing', otherWords: second })).toBe(
+      'correct',
+    )
+  })
+
+  it('lists the accepted keys', () => {
+    expect([...acceptedGuessKeys({ term: 'juggling' })].sort()).toEqual(
+      ['juggle', 'juggling', 'jugglings'].sort(),
+    )
+    expect([...acceptedGuessKeys({ term: 'waving' })].sort()).toEqual(
+      ['waving', 'wavings'].sort(),
+    )
+    expect(acceptedGuessKeys({ term: '!!!' }).size).toBe(0)
   })
 })
 

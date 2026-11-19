@@ -3,11 +3,16 @@ import type {
   DrawingDocument,
   NormalizedPoint,
 } from '@drawing-games/drawing-model'
-import { expect, test } from '@playwright/test'
+import { expect, test } from 'vitest'
 
 import { ManualTimers } from '../testing/manual-timers'
 import { CanvasStore } from './canvas-store'
-import { planDrawingBatches } from './drawing-batches'
+import { RoomCommandError } from './command-error'
+import {
+  MAX_DRAWING_BATCH_BYTES,
+  encodedBatchBytes,
+  planDrawingBatches,
+} from './drawing-batches'
 
 const STYLE = { color: '#181713', width: 0.012, opacity: 1 }
 
@@ -41,21 +46,38 @@ function stroke(id: string, pointCount: number): DrawingAction[] {
   ]
 }
 
+/** A point with full float precision, like a real pointer event. */
+function precisePoint(index: number): NormalizedPoint {
+  return {
+    x: (index + 0.123456789) / 1_000.987654321,
+    y: 1 / (index + 3),
+    pressure: 0.333333333333333,
+  }
+}
+
 function setup(options: { canSend?: () => boolean } = {}) {
   const timers = new ManualTimers()
   const sent: { canvasId: string; ops: readonly DrawingAction[] }[] = []
-  const settlers: { resolve: () => void; reject: () => void }[] = []
+  const settlers: {
+    resolve: () => void
+    reject: (error?: unknown) => void
+  }[] = []
+  let resyncs = 0
   const store = new CanvasStore({
     timers,
     canSend: options.canSend,
+    requestResync: () => (resyncs += 1),
     sendBatch: (canvasId, ops) => {
       sent.push({ canvasId, ops })
       return new Promise<void>((resolve, reject) => {
-        settlers.push({ resolve, reject: () => reject(new Error('refused')) })
+        settlers.push({
+          resolve,
+          reject: (error = new Error('refused')) => reject(error),
+        })
       })
     },
   })
-  return { store, timers, sent, settlers }
+  return { store, timers, sent, settlers, resyncs: () => resyncs }
 }
 
 test('batch planning merges appends, splits at 128 points, packs 32 ops', () => {
@@ -105,6 +127,56 @@ test('batch planning merges appends, splits at 128 points, packs 32 ops', () => 
   expect(planDrawingBatches(many).map((entry) => entry.length)).toEqual([
     32, 32, 6,
   ])
+})
+
+test('batch planning caps each batch at ~48 KiB of JSON, in order', () => {
+  // 32 strokes of 128 full-precision points: ~300 KB as one 32-op batch,
+  // far over the room's 64 KiB message cap.
+  const ops: DrawingAction[] = []
+  for (let stroke = 0; stroke < 32; stroke += 1) {
+    ops.push({
+      type: 'stroke.append',
+      strokeId: `s${stroke}`,
+      startPointIndex: 1,
+      points: Array.from({ length: 128 }, (_, index) => precisePoint(index)),
+    })
+  }
+  expect(encodedBatchBytes(ops)).toBeGreaterThan(64 * 1024)
+
+  const batches = planDrawingBatches(ops)
+  expect(batches.length).toBeGreaterThan(1)
+  for (const batch of batches) {
+    expect(batch.length).toBeLessThanOrEqual(32)
+    expect(encodedBatchBytes(batch)).toBeLessThanOrEqual(
+      MAX_DRAWING_BATCH_BYTES,
+    )
+  }
+  // Nothing lost, duplicated, or reordered.
+  expect(batches.flat()).toEqual(ops)
+})
+
+test('an append too large for one batch is split into contiguous appends', () => {
+  const points = Array.from({ length: 128 }, (_, index) => precisePoint(index))
+  const ops: DrawingAction[] = [
+    { type: 'stroke.append', strokeId: 'big', startPointIndex: 5, points },
+  ]
+  const maxBytes = 2_000
+  const batches = planDrawingBatches(ops, { maxBytes })
+  expect(batches.length).toBeGreaterThan(1)
+  for (const batch of batches) {
+    expect(encodedBatchBytes(batch)).toBeLessThanOrEqual(maxBytes)
+  }
+  const appends = batches.flat()
+  let next = 5
+  for (const op of appends) {
+    if (op.type !== 'stroke.append') throw new Error(`unexpected ${op.type}`)
+    expect(op.strokeId).toBe('big')
+    expect(op.startPointIndex).toBe(next)
+    next += op.points.length
+  }
+  expect(
+    appends.flatMap((op) => (op.type === 'stroke.append' ? op.points : [])),
+  ).toEqual(points)
 })
 
 test('local ops apply immediately and flush as one batch after ~50 ms', () => {
@@ -227,4 +299,33 @@ test('remote ops and previews notify only their canvas', () => {
   expect(store.getSnapshot('A').document.strokeOrder).toEqual(['r'])
   expect(store.getPreview('B')?.cells).toEqual(['#ff6b4a'])
   expect([a, b]).toEqual([1, 1])
+})
+
+test('a batch refused as TOO_LARGE is dropped and asks for fresh snapshots', async () => {
+  const { store, timers, sent, settlers, resyncs } = setup()
+  store.queueLocalOps('c', stroke('lost', 3))
+  timers.advance(50)
+  expect(sent).toHaveLength(1)
+
+  settlers[0]?.reject(new RoomCommandError('TOO_LARGE', 'too big'))
+  await Promise.resolve()
+  expect(store.hasUnsentOps('c')).toBe(false)
+  expect(resyncs()).toBe(1)
+  // Never resent.
+  timers.advance(1_000)
+  expect(sent).toHaveLength(1)
+
+  // The room's snapshot (without the lost stroke) wins.
+  store.applySnapshot('c', { strokesById: {}, strokeOrder: [] })
+  expect(store.getSnapshot('c').document.strokeOrder).toEqual([])
+})
+
+test('other refusals drop the batch without a resync', async () => {
+  const { store, timers, settlers, resyncs } = setup()
+  store.queueLocalOps('c', stroke('late', 2))
+  timers.advance(50)
+  settlers[0]?.reject(new RoomCommandError('NOT_ALLOWED', 'round over'))
+  await Promise.resolve()
+  expect(store.hasUnsentOps('c')).toBe(false)
+  expect(resyncs()).toBe(0)
 })

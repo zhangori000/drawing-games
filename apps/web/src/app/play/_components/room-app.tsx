@@ -2,7 +2,7 @@
 
 import type { MeView, RoomView } from '@drawing-games/game-core'
 import Link from 'next/link'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, type ReactNode } from 'react'
 
 import { Button, buttonClassName } from '@/components/ui/button'
 import { Toasts } from '@/components/ui/toasts'
@@ -99,6 +99,13 @@ function RoomContent({
           aside. You can only play from one place at a time.
         </StatusScreen>
       )
+    case 'removed':
+      return (
+        <RemovedScreen roomCode={roomCode} onRejoin={() => actions.leave()}>
+          The host removed you from this room. You can join again as a new
+          player.
+        </RemovedScreen>
+      )
     case 'closed':
       return (
         <StatusScreen
@@ -140,15 +147,9 @@ function RoomContent({
       }
       if (status === 'open' && view) {
         return (
-          <StatusScreen
-            roomCode={roomCode}
-            title="You’re not in this room anymore"
-            actions={
-              <Button onClick={() => void actions.leave()}>Join again</Button>
-            }
-          >
+          <RemovedScreen roomCode={roomCode} onRejoin={() => actions.leave()}>
             The host may have removed you, or the room started over.
-          </StatusScreen>
+          </RemovedScreen>
         )
       }
       return (
@@ -163,6 +164,27 @@ function RoomContent({
         </StatusScreen>
       )
   }
+}
+
+/** This tab has no seat in the room any more; offers a fresh join. */
+function RemovedScreen({
+  roomCode,
+  onRejoin,
+  children,
+}: {
+  readonly roomCode: string
+  readonly onRejoin: () => Promise<void>
+  readonly children: ReactNode
+}) {
+  return (
+    <StatusScreen
+      roomCode={roomCode}
+      title="You’re not in this room anymore"
+      actions={<Button onClick={() => void onRejoin()}>Join again</Button>}
+    >
+      {children}
+    </StatusScreen>
+  )
 }
 
 function Seated({

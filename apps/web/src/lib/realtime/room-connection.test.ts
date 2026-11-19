@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from 'vitest'
 
 import type { Seat } from '../identity'
 import { ManualTimers } from '../testing/manual-timers'
@@ -447,4 +447,205 @@ test('returning after a long background replaces a possibly dead socket', () => 
   expect(ctx.socket().lastEnvelope().commandId).toBe(original.commandId)
   ctx.socket().receive(ack(original.commandId, original.clientSeq, 'duplicate'))
   return expect(ready).resolves.toBe('duplicate')
+})
+
+test('close 4003 means removed by the host: the seat is forgotten and nothing reconnects', async () => {
+  const ctx = setup({ seats: savedSeat() })
+  ctx.connection.connect()
+  bindByResume(ctx)
+  const queued = ctx.connection.send({ type: 'lobby.ready', ready: true })
+
+  ctx.socket().serverClose(4003)
+  expect(ctx.connection.status).toBe('removed')
+  expect(ctx.connection.getState().memberId).toBeNull()
+  expect(ctx.seats.forgotten).toEqual(['m1'])
+  expect(ctx.events).toContainEqual({ type: 'notice', notice: 'removed' })
+  await expect(queued).rejects.toMatchObject({ code: 'CLOSED' })
+  await expect(
+    ctx.connection.send({ type: 'lobby.shuffle' }),
+  ).rejects.toMatchObject({ code: 'CLOSED' })
+
+  ctx.timers.advance(60_000)
+  ctx.connection.wake({ hiddenForMs: 60_000 })
+  ctx.connection.resync()
+  expect(ctx.sockets).toHaveLength(1)
+
+  // "Join again" starts over on a fresh, unbound socket.
+  await ctx.connection.leave()
+  expect(ctx.connection.status).toBe('needs-join')
+  expect(ctx.sockets).toHaveLength(2)
+  ctx.socket().open()
+  expect(ctx.socket().sent).toHaveLength(0)
+  expect(ctx.connection.status).toBe('needs-join')
+})
+
+test('a command over the 64 KiB message cap is refused locally, never sent', async () => {
+  const ctx = setup({ seats: savedSeat() })
+  ctx.connection.connect()
+  bindByResume(ctx)
+  const sentBefore = ctx.socket().sent.length
+
+  const huge = ctx.connection.send(
+    { type: 'drawing.batch', operations: bigAppends(32, 128) },
+    { timeoutMs: null },
+  )
+  await expect(huge).rejects.toMatchObject({ code: 'TOO_LARGE' })
+  expect(ctx.socket().sent).toHaveLength(sentBefore)
+  expect(ctx.socket().closedWith).toBeNull()
+
+  // Queued while offline, refused at resume instead of looping.
+  ctx.socket().serverClose(1006)
+  const later = ctx.connection.send(
+    { type: 'drawing.batch', operations: bigAppends(32, 128) },
+    { timeoutMs: null },
+  )
+  const small = ctx.connection.send({ type: 'lobby.ready', ready: true })
+  ctx.timers.advance(250)
+  const resume = bindByResume(ctx)
+  expect(resume.command.type).toBe('room.resume')
+  await expect(later).rejects.toMatchObject({ code: 'TOO_LARGE' })
+  const resent = ctx.socket().envelopes().slice(1)
+  expect(resent.map((envelope) => envelope.command.type)).toEqual([
+    'lobby.ready',
+  ])
+  const ready = resent[0]
+  if (!ready) throw new Error('missing resend')
+  ctx.socket().receive(ack(ready.commandId, ready.clientSeq))
+  await expect(small).resolves.toBe('applied')
+})
+
+test('close 1009 gives up the largest command sent on that socket instead of resending it forever', async () => {
+  const ctx = setup({ seats: savedSeat() })
+  ctx.connection.connect()
+  bindByResume(ctx)
+
+  // Under the local cap, but this server refuses it anyway.
+  const batch = ctx.connection.send(
+    { type: 'drawing.batch', operations: bigAppends(4, 128) },
+    { timeoutMs: null },
+  )
+  const ready = ctx.connection.send({ type: 'lobby.ready', ready: true })
+  const readyEnvelope = ctx.socket().lastEnvelope()
+  ctx.socket().serverClose(1009)
+  await expect(batch).rejects.toMatchObject({ code: 'TOO_LARGE' })
+  expect(ctx.connection.status).toBe('reconnecting')
+
+  ctx.timers.advance(250)
+  bindByResume(ctx)
+  const resent = ctx.socket().envelopes().slice(1)
+  expect(resent.map((envelope) => envelope.command.type)).toEqual([
+    'lobby.ready',
+  ])
+  ctx.socket().receive(ack(readyEnvelope.commandId, readyEnvelope.clientSeq))
+  await expect(ready).resolves.toBe('applied')
+})
+
+test('resync re-binds on a fresh socket so the room resends canvases', () => {
+  const ctx = setup({ seats: savedSeat() })
+  ctx.connection.connect()
+  ctx.connection.resync() // not bound yet: the coming handshake covers it
+  expect(ctx.sockets).toHaveLength(1)
+  bindByResume(ctx)
+
+  ctx.connection.resync()
+  expect(ctx.sockets).toHaveLength(2)
+  expect(ctx.sockets[0]?.closedWith).toBe(1000)
+  ctx.socket().open()
+  expect(ctx.socket().lastEnvelope().command.type).toBe('room.resume')
+})
+
+/** `count` appends of `points` full-precision points each. */
+function bigAppends(count: number, points: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    type: 'stroke.append' as const,
+    strokeId: `stroke-${index}`,
+    startPointIndex: 1,
+    points: Array.from({ length: points }, (_, point) => ({
+      x: (point + 0.123456789) / (points + 1),
+      y: 1 / (point + 3),
+      pressure: 0.333333333333333,
+    })),
+  }))
+}
+
+test('after a resume, freshness-checked commands wait for the first view, then send or drop as STALE', async () => {
+  const ctx = setup({ seats: savedSeat() })
+  ctx.connection.connect()
+  bindByResume(ctx)
+  let current = true
+  const batch = { type: 'drawing.batch' as const, operations: bigAppends(1, 2) }
+  const kept = ctx.connection.send(batch, {
+    timeoutMs: null,
+    isCurrent: () => current,
+  })
+  // First view after this bind has not arrived yet: held.
+  expect(ctx.socket().sent).toHaveLength(1)
+  ctx.socket().receive({
+    type: 'room.snapshot',
+    state: JSON.parse(JSON.stringify(makeView())),
+  })
+  const keptEnvelope = ctx.socket().lastEnvelope()
+  expect(keptEnvelope.command.type).toBe('drawing.batch')
+
+  // Disconnect with the batch unacknowledged; meanwhile the canvas moves on.
+  ctx.socket().serverClose(1006)
+  const dropped = ctx.connection.send(batch, {
+    timeoutMs: null,
+    isCurrent: () => current,
+  })
+  const ready = ctx.connection.send({ type: 'lobby.ready', ready: true })
+  ctx.timers.advance(250)
+  bindByResume(ctx)
+  // Plain commands are resent right away; drawing waits for the view.
+  expect(
+    ctx
+      .socket()
+      .envelopes()
+      .map((envelope) => envelope.command.type),
+  ).toEqual(['room.resume', 'lobby.ready'])
+
+  current = false
+  ctx.socket().receive({
+    type: 'room.snapshot',
+    state: JSON.parse(JSON.stringify(makeView({ seq: 2 }))),
+  })
+  await expect(kept).rejects.toMatchObject({ code: 'STALE' })
+  await expect(dropped).rejects.toMatchObject({ code: 'STALE' })
+  expect(ctx.socket().sent).toHaveLength(2)
+
+  const readyEnvelope = ctx.socket().lastEnvelope()
+  ctx.socket().receive(ack(readyEnvelope.commandId, readyEnvelope.clientSeq))
+  await expect(ready).resolves.toBe('applied')
+})
+
+test('held commands go out after a short wait if the first view never comes', () => {
+  const ctx = setup({ seats: savedSeat() })
+  ctx.connection.connect()
+  bindByResume(ctx)
+  void ctx.connection.send(
+    { type: 'drawing.batch', operations: bigAppends(1, 2) },
+    { timeoutMs: null, isCurrent: () => true },
+  )
+  expect(ctx.socket().sent).toHaveLength(1)
+  ctx.timers.advance(2_000)
+  expect(ctx.socket().lastEnvelope().command.type).toBe('drawing.batch')
+})
+
+test('a command sent while the connection opens is written once, not twice', () => {
+  const ctx = setup({ seats: savedSeat() })
+  let sentOnOpen = false
+  ctx.connection.subscribe(() => {
+    if (ctx.connection.status === 'open' && !sentOnOpen) {
+      sentOnOpen = true
+      void ctx.connection.send({ type: 'lobby.shuffle' })
+    }
+  })
+  ctx.connection.connect()
+  bindByResume(ctx)
+  expect(
+    ctx
+      .socket()
+      .envelopes()
+      .map((envelope) => envelope.command.type),
+  ).toEqual(['room.resume', 'lobby.shuffle'])
 })

@@ -70,6 +70,7 @@ describe('Dual Draw phase machine', () => {
 
     expect(getPhaseMillisecondsRemaining(lobby, 20_000)).toBeNull()
     expect(hasPhaseDeadlineElapsed(lobby, 20_000)).toBe(false)
+    // @ts-expect-error -- untimed phases take no duration; checks the runtime guard.
     expect(() => createPhaseState('lobby', 10_000, 5)).toThrow(
       'Untimed phase "lobby" cannot have a duration',
     )

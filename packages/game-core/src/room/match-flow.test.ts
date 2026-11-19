@@ -758,6 +758,10 @@ describe('rematch and membership mid-match', () => {
     driver.solve('B', 'eve')
     expect(driver.teamRound('B').solution?.guesserId).toBe('eve')
 
+    // Ana leaves after drawing round 1 (a drawer leaving mid-turn hands the
+    // turn over instead; see drawer-handoff.test.ts).
+    driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    expect(driver.state.phase).toBe('round-results')
     driver.ok({ type: 'member.leave', memberId: 'ana' })
     expect(driver.state.hostId).toBe('ben')
     finishQuickMatch(driver)

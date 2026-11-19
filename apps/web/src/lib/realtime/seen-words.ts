@@ -1,4 +1,4 @@
-import type { RoomView } from '@drawing-games/game-core'
+import type { RoomView, RoundResultTeamView } from '@drawing-games/game-core'
 
 /**
  * Decides which word ids a guest should remember after each round: their
@@ -35,7 +35,7 @@ export class SeenWordsTracker {
 
     const ids: string[] = []
     const team = view.me?.team
-    const ownWordId = team ? readWordId(results.teams[team]) : null
+    const ownWordId = team ? resultWordId(results.teams[team]) : null
     if (ownWordId) ids.push(ownWordId)
     if (this.roundKey === key) {
       if (this.chosenId) ids.push(this.chosenId)
@@ -53,11 +53,15 @@ export class SeenWordsTracker {
 }
 
 /**
- * `RoundResultTeamView` does not carry a word id in the v1 contract; read it
- * when a server adds one (optional field) so guessers can remember their
- * team's word too.
+ * The results view's (optional) word id, so guessers remember their team's
+ * word too. Typed as an optional extension because servers that predate the
+ * field omit it; this stays assignable once game-core declares it.
  */
-function readWordId(team: object | undefined): string | null {
-  if (!team || !('wordId' in team)) return null
-  return typeof team.wordId === 'string' ? team.wordId : null
+type ResultTeamWithWordId = RoundResultTeamView & {
+  readonly wordId?: string | null
+}
+
+function resultWordId(team: ResultTeamWithWordId | undefined): string | null {
+  const wordId = team?.wordId
+  return typeof wordId === 'string' && wordId.length > 0 ? wordId : null
 }

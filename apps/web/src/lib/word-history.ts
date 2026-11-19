@@ -28,8 +28,9 @@ export function getRecentWordIds(): string[] {
 }
 
 /**
- * Records ids as most recent (in the given order, first = newest). Custom
- * words and malformed ids are skipped because the join schema rejects them.
+ * Records ids as most recent (in the given order, first = newest). Ids the
+ * join schema would reject are skipped; `custom/<slug>` ids are kept because
+ * rooms match them to curated words by answer.
  */
 export function recordWordIds(ids: readonly string[]): void {
   const fresh = ids.filter(isRecordableWordId)

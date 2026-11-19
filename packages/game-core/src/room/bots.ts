@@ -173,7 +173,7 @@ function pickWrongGuess(ctx: RoomContext, plan: CanvasPlan): string | null {
   const pool = roomPool(ctx.state.settings)
   if (pool.length === 0) return null
   const reserved = new Set(plan.reservedTerms.map((term) => term.toLowerCase()))
-  const target = { term: plan.term, aliases: plan.aliases }
+  const target = { term: plan.term, aliases: plan.aliases, otherWords: pool }
   for (let attempt = 0; attempt < WRONG_GUESS_ATTEMPTS; attempt += 1) {
     const candidate = ctx.rng.pick(pool).term
     if (reserved.has(candidate.toLowerCase())) continue

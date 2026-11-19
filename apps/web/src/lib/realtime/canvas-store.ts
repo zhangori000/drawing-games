@@ -8,6 +8,7 @@ import {
 import type { CanvasPreviewPayload } from '@drawing-games/protocol'
 
 import { browserTimers } from './browser-adapters'
+import { isRoomCommandError } from './command-error'
 import type { TimerApi } from './connection-types'
 import { planDrawingBatches } from './drawing-batches'
 
@@ -19,6 +20,12 @@ export interface CanvasStoreOptions {
   ) => Promise<unknown>
   /** False while disconnected or backed up: ops are held and coalesced. */
   readonly canSend?: () => boolean
+  /**
+   * Local ink was dropped without reaching the room (a batch refused as
+   * `TOO_LARGE`): ask for authoritative snapshots so the drawer's canvas
+   * matches what everyone else sees.
+   */
+  readonly requestResync?: () => void
   readonly flushIntervalMs?: number
   readonly retryIntervalMs?: number
   readonly timers?: TimerApi
@@ -154,7 +161,14 @@ export class CanvasStore {
     const settle = () => {
       entry.inFlight.delete(batchId)
     }
-    this.options.sendBatch(canvasId, batch).then(settle, settle)
+    this.options.sendBatch(canvasId, batch).then(settle, (error: unknown) => {
+      settle()
+      // Never resent (it would fail the same way). Later batches may refer
+      // to strokes it began, so the room's copy is the only safe truth.
+      if (isRoomCommandError(error) && error.code === 'TOO_LARGE') {
+        this.options.requestResync?.()
+      }
+    })
   }
 
   private hasQueuedOps(): boolean {

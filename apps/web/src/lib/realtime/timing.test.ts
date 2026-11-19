@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from 'vitest'
 
 import { RECONNECT_MAX_DELAY_MS, reconnectDelayMs } from './backoff'
 import { ServerClock } from './server-clock'

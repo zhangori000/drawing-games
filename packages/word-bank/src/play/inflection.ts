@@ -115,3 +115,247 @@ export function singularStem(token: string): string {
   }
   return token
 }
+
+/*
+ * Verb forms. Many action and sport answers are gerunds (`juggling`,
+ * `tightrope walking`), and a guesser who types the base verb (`juggle`,
+ * `tightrope walk`) clearly has the word. `ingForms`/`baseVerbForms` map one
+ * token between `-ing` and base spellings; `verbFormKeys` decides which
+ * token of an answer is the verb.
+ *
+ * Producing an `-ing` form makes the guess longer than the answer, so it is
+ * always safe in the "no stubs" sense. Removing `-ing` accepts a shorter
+ * guess, so `baseVerbForms` only undoes the ending when the rest still looks
+ * like a verb: at least `MIN_VERB_STEM` letters with a vowel (`king`, `ring`,
+ * `thing`, `spring` stay whole) and not a known `-ing` noun whose stem is a
+ * different word (`wedding` is not `wed`, `icing` is not `ice`). Whether a
+ * derived spelling names *another* playable word (`waving` vs. `wave`) is
+ * checked by the matcher, which knows the pool. No dictionary is involved,
+ * so a rare stem may also yield a harmless non-word (`sunbath` beside
+ * `sunbathe`); never a shorter real word from the noun list.
+ */
+
+/** Shortest base verb accepted on its own (`run`, `ski`, `lie`). */
+export const MIN_VERB_STEM = 3
+
+/**
+ * Common `-ing` nouns (and one adjective) that are not the verb their stem
+ * suggests, so stripping `-ing` would accept a different word or a stub.
+ */
+const NON_VERB_ING_WORDS: ReadonlySet<string> = new Set([
+  'awning',
+  'bedding',
+  'building',
+  'ceiling',
+  'charming',
+  'clothing',
+  'crossing',
+  'darling',
+  'dressing',
+  'duckling',
+  'dumpling',
+  'earring',
+  'evening',
+  'frosting',
+  'gosling',
+  'herring',
+  'icing',
+  'inning',
+  'landing',
+  'lightning',
+  'lining',
+  'morning',
+  'offspring',
+  'pudding',
+  'railing',
+  'sapling',
+  'seasoning',
+  'seedling',
+  'shilling',
+  'sibling',
+  'siding',
+  'starling',
+  'sterling',
+  'stocking',
+  'stuffing',
+  'thanksgiving',
+  'topping',
+  'viking',
+  'wedding',
+])
+
+const LATIN_WORD = /^[a-z]+$/
+const HAS_VOWEL = /[aeiouy]/
+/** One vowel group: `run`, `writ`, `skat`, `styl` (y counts as a vowel). */
+const ONE_SYLLABLE = /^[^aeiouy]*[aeiouy]+[^aeiouy]*$/
+/** Ends in a single short vowel and a single consonant: `run`, `visit`. */
+const SHORT_VOWEL_CONSONANT = /(?:^|[^aeiou])[aeiou][^aeiouwxy]$/
+/** The same on a stripped stem, where y may be the vowel: `styl`, `typ`. */
+const STEM_VOWEL_CONSONANT = /(?:^|[^aeiouy])[aeiouy][^aeiouwxy]$/
+/** Multi-syllable endings that neither double nor drop a silent e. */
+const UNSTRESSED_ENDING = /(?:er|en|on|el)$/
+/** Stem endings that only occur before a silent e (`juggl`, `danc`, `div`). */
+const SILENT_E_ONLY = /(?:v|[^aeiouylrw]l|dg|[rl]g|c|[aeiou]z|u)$/
+/** Stem endings that may or may not have had a silent e (`bath(e)`). */
+const SILENT_E_MAYBE = /(?:th|[aeiou]s|[aeu]ng)$/
+
+export interface VerbFormOptions {
+  /**
+   * The token is certainly a verb (it starts a verb phrase such as
+   * `building a sandcastle`), so the `-ing` noun list does not apply.
+   */
+  readonly knownVerb?: boolean
+}
+
+/** True for tokens shaped like an `-ing` form: `running`, `king` is not. */
+export function isIngForm(token: string): boolean {
+  return token.endsWith('ing') && HAS_VOWEL.test(token.slice(0, -3))
+}
+
+/**
+ * `-ing` spellings of a base verb token: `run` → `running`, `dance` →
+ * `dancing`, `lie` → `lying`, `ski` → `skiing`, `picnic` → `picnicking`.
+ * Both doubled and plain spellings are offered where English varies
+ * (`visit` → `visiting`/`visitting`). Tokens that already look like an
+ * `-ing` form or a plural, non-Latin words, stubs, and spellings that are
+ * known `-ing` nouns (`bed` → `bedding`) get none.
+ */
+export function ingForms(
+  token: string,
+  options: VerbFormOptions = {},
+): string[] {
+  if (!LATIN_WORD.test(token) || token.length < MIN_VERB_STEM) return []
+  if (!HAS_VOWEL.test(token) || isIngForm(token)) return []
+  if (singularForms(token).length > 0) return []
+  const forms = new Set<string>()
+  const last = token.at(-1) as string
+  if (token.endsWith('ie')) {
+    forms.add(`${token.slice(0, -2)}ying`)
+  } else if (/(?:ee|oe|ye)$/.test(token)) {
+    forms.add(`${token}ing`)
+  } else if (token.endsWith('e')) {
+    forms.add(`${token.slice(0, -1)}ing`)
+  } else if (token.endsWith('c')) {
+    forms.add(`${token}king`)
+    forms.add(`${token}ing`)
+  } else if (SHORT_VOWEL_CONSONANT.test(token)) {
+    const doubled = `${token}${last}ing`
+    if (ONE_SYLLABLE.test(token)) {
+      forms.add(doubled)
+    } else {
+      forms.add(`${token}ing`)
+      if (!UNSTRESSED_ENDING.test(token)) forms.add(doubled)
+    }
+  } else {
+    forms.add(`${token}ing`)
+  }
+  const result = [...forms]
+  if (options.knownVerb === true) return result
+  return result.filter((form) => !NON_VERB_ING_WORDS.has(form))
+}
+
+function stemCandidates(stem: string): string[] {
+  // `lying`, `tying`, `dying`: the `ie` became `y`.
+  if (/^[^aeiouy]y$/.test(stem)) return [`${stem[0]}ie`]
+  const last = stem.at(-1) as string
+  if (stem.length >= 2 && stem.at(-2) === last && !/[aeiouy]/.test(last)) {
+    // `spill`, `kiss`, `sniff`, `buzz` keep the pair; `running` → `run`.
+    return 'lsfz'.includes(last) ? [stem] : [stem.slice(0, -1)]
+  }
+  if (/[aeioy]$/.test(stem)) return [stem]
+  if (SILENT_E_ONLY.test(stem)) return [`${stem}e`]
+  if (STEM_VOWEL_CONSONANT.test(stem)) {
+    // One syllable without doubling means a silent e: `writ` → `write`.
+    if (ONE_SYLLABLE.test(stem)) return [`${stem}e`]
+    if (UNSTRESSED_ENDING.test(stem)) return [stem]
+    return [stem, `${stem}e`]
+  }
+  if (SILENT_E_MAYBE.test(stem)) return [stem, `${stem}e`]
+  return [stem]
+}
+
+/**
+ * Base-verb spellings of an `-ing` token: `running` → `run`, `dancing` →
+ * `dance`, `lying` → `lie`, `juggling` → `juggle`, `skiing` → `ski`. Empty
+ * for words that only end in the letters (`king`, `spring`) and for known
+ * `-ing` nouns (`wedding`, `ceiling`, `pudding`).
+ */
+export function baseVerbForms(
+  token: string,
+  options: VerbFormOptions = {},
+): string[] {
+  if (!LATIN_WORD.test(token) || !isIngForm(token)) return []
+  if (options.knownVerb !== true && NON_VERB_ING_WORDS.has(token)) return []
+  return stemCandidates(token.slice(0, -3)).filter(
+    (form) => form.length >= MIN_VERB_STEM && HAS_VOWEL.test(form),
+  )
+}
+
+/**
+ * Function words after which a leading token is certainly a verb, so a
+ * phrase like `flying a kite` or `break the ice` takes the other verb form.
+ */
+const VERB_PHRASE_MARKERS: ReadonlySet<string> = new Set([
+  'a',
+  'an',
+  'at',
+  'down',
+  'for',
+  'her',
+  'his',
+  'in',
+  'into',
+  'my',
+  'off',
+  'on',
+  'onto',
+  'our',
+  'out',
+  'over',
+  'the',
+  'their',
+  'to',
+  'up',
+  'with',
+  'your',
+])
+
+/**
+ * Verb spellings of a whole answer, as answer keys (tokens joined):
+ *
+ * - the last word, either way: `tightrope walking` ↔ `tightrope walk`,
+ *   `ice skate` → `ice skating` (base → `-ing` only when no word of the
+ *   answer is already an `-ing` form, so `swimming pool` stays a noun);
+ * - a leading verb of a verb phrase, either way, when the next word is an
+ *   article, possessive, or preposition (`flying a kite` ↔ `fly a kite`,
+ *   `break the ice` → `breaking the ice`), or for a leading `-ing` verb a
+ *   plural object (`brushing teeth` → `brush teeth`).
+ *
+ * Callers still decide whether a spelling names some other word.
+ */
+export function verbFormKeys(tokens: readonly string[]): string[] {
+  if (tokens.length === 0) return []
+  const swapped = (index: number, form: string) =>
+    tokens.map((token, at) => (at === index ? form : token)).join('')
+  const lastIndex = tokens.length - 1
+  const last = tokens[lastIndex] as string
+  const first = tokens[0] as string
+  const second = tokens[1]
+  const leadingVerb =
+    second !== undefined &&
+    (VERB_PHRASE_MARKERS.has(second) ||
+      (isIngForm(first) && singularForms(second).length > 0))
+  const keys: string[] = []
+  if (isIngForm(last)) {
+    for (const form of baseVerbForms(last)) keys.push(swapped(lastIndex, form))
+  } else if (!leadingVerb && !tokens.some(isIngForm)) {
+    for (const form of ingForms(last)) keys.push(swapped(lastIndex, form))
+  }
+  if (leadingVerb) {
+    const forms = isIngForm(first)
+      ? baseVerbForms(first, { knownVerb: true })
+      : ingForms(first, { knownVerb: true })
+    for (const form of forms) keys.push(swapped(0, form))
+  }
+  return keys
+}

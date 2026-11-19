@@ -379,6 +379,7 @@ function resultTeamView(
     team,
     drawerId: teamRound.drawerId,
     drawerName: memberName(state, teamRound.drawerId),
+    wordId: word.wordId,
     term: word.term,
     difficulty: word.difficulty,
     packName: word.packName,
@@ -494,6 +495,7 @@ function finalRoundView(state: RoomState, round: RoundState): FinalRoundView {
   const team = (id: TeamId) => {
     const result = resultTeamView(state, round, id)
     return {
+      wordId: result.wordId,
       term: result.term,
       difficulty: result.difficulty,
       drawerName: result.drawerName,

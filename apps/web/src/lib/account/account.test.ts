@@ -1,5 +1,5 @@
 import { EMPTY_ACCOUNT_STATS } from '@drawing-games/game-core'
-import { expect, test } from '@playwright/test'
+import { expect, test } from 'vitest'
 
 import { parseProfile } from './profile'
 import {

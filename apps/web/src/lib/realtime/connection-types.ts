@@ -19,6 +19,8 @@ import type { RoomCommandError } from './command-error'
  * - `replaced`: another tab took this seat (close 4001). Never auto-retried;
  *   call `reclaim()`.
  * - `not-found`: the room does not exist (close 4404 / ROOM_NOT_FOUND).
+ * - `removed`: the host removed this member (close 4003). The seat is
+ *   forgotten and nothing reconnects; `leave()` offers a fresh join.
  * - `unauthorized`: transient — the room rejected the saved seat; the token is
  *   forgotten and the status moves straight on to `needs-join`.
  * - `closed`: `dispose()` or `leave()` ended this connection.
@@ -31,6 +33,7 @@ export type RoomConnectionStatus =
   | 'reconnecting'
   | 'replaced'
   | 'not-found'
+  | 'removed'
   | 'unauthorized'
   | 'closed'
 
@@ -77,6 +80,8 @@ export type RoomConnectionNotice =
   | 'seat-expired'
   /** Another tab or device opened this seat. */
   | 'replaced'
+  /** The host removed this member from the room. */
+  | 'removed'
 
 /** The subset of `WebSocket` the connection uses (injectable for tests). */
 export interface WebSocketLike {
@@ -141,4 +146,10 @@ export interface WakeInfo {
 export interface SendOptions {
   /** Milliseconds to wait for the ack; `null` waits for as long as it takes. */
   readonly timeoutMs?: number | null
+  /**
+   * Checked before every write, including resends after a reconnect (which
+   * wait for the room's first view after the bind, so the check sees fresh
+   * state). When it returns false the command is dropped with `STALE`.
+   */
+  readonly isCurrent?: () => boolean
 }

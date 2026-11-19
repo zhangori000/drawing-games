@@ -1,6 +1,6 @@
 import type { TeamId } from '../types'
 import { otherTeam, TEAM_IDS } from '../types'
-import { emitMatchSummaries } from './account-effects'
+import { emitMatchSummaries, initialCreditedMemberIds } from './account-effects'
 import { clearBots } from './bots'
 import type { RoomContext } from './context'
 import { patchState, reject, requireMatch, updateMatch } from './context'
@@ -61,6 +61,7 @@ export function startMatch(ctx: RoomContext): void {
     stats,
     withBots: members.some((member) => member.kind === 'bot'),
     guessLimits: {},
+    creditedMemberIds: initialCreditedMemberIds(members),
   }
   patchState(ctx, { match })
   startRound(ctx)

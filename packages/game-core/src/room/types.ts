@@ -153,6 +153,22 @@ export interface ShowdownTeamState {
   readonly guesses: readonly GuessRecord[]
   /** Set when every card is cleared. */
   readonly finishedAtMs: number | null
+  /**
+   * Internal. Every card that ended (cleared, or still up at the deadline),
+   * oldest first, so word events can be re-derived for an account linked
+   * after the fact.
+   */
+  readonly results?: readonly ShowdownCardResult[]
+}
+
+/** Internal record of one finished showdown card. */
+export interface ShowdownCardResult {
+  readonly cardIndex: number
+  readonly drawerId: string
+  /** The solver, or null when the deadline ended the card. */
+  readonly guesserId: string | null
+  readonly solveMs: number | null
+  readonly atMs: number
 }
 
 export interface ShowdownState {
@@ -194,6 +210,12 @@ export interface MatchState {
   readonly withBots: boolean
   /** Internal. Per-member guess rate limiting for the current canvas. */
   readonly guessLimits?: Readonly<Record<string, GuessLimit>>
+  /**
+   * Internal. Members whose play in this match already reaches an account:
+   * account members at match start or join, and guests once they link (when
+   * their earlier rounds are credited). Linking again never re-credits.
+   */
+  readonly creditedMemberIds?: readonly string[]
 }
 
 /** Internal rate-limit counter; resets whenever `scope` (a canvas id) changes. */
@@ -629,6 +651,11 @@ export interface RoundResultTeamView {
   readonly team: TeamId
   readonly drawerId: string
   readonly drawerName: string
+  /**
+   * The revealed word's id, so guests can remember words they saw. Like the
+   * term, it only reaches a team's guessers once the round is over.
+   */
+  readonly wordId: string
   readonly term: string
   readonly difficulty: WordDifficulty
   readonly packName: string
@@ -699,6 +726,7 @@ export interface FinalRoundView {
     Record<
       TeamId,
       {
+        readonly wordId: string
         readonly term: string
         readonly difficulty: WordDifficulty
         readonly drawerName: string

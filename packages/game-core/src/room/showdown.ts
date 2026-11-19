@@ -4,11 +4,7 @@ import {
 } from '../scoring'
 import type { TeamId } from '../types'
 import { TEAM_IDS } from '../types'
-import {
-  emitWordEvents,
-  optionFacts,
-  showdownCardEvents,
-} from './account-effects'
+import { emitWordEvents, showdownResultEvents } from './account-effects'
 import { clearBots, dropBotCanvas, planBotsForCanvas } from './bots'
 import { SHOWDOWN_BOT_CARD_BUDGET_MS } from './constants'
 import type { RoomContext } from './context'
@@ -19,12 +15,17 @@ import {
   requireShowdown,
   updateMatch,
   updateShowdown,
+  updateShowdownTeam,
   updateStats,
 } from './context'
 import { endMatch } from './match'
 import { pickRotationMember } from './members'
 import { chosenOption } from './selectors'
-import type { DraftOption, ShowdownTeamState } from './types'
+import type {
+  DraftOption,
+  ShowdownCardResult,
+  ShowdownTeamState,
+} from './types'
 
 function showdownCanvasId(
   matchNumber: number,
@@ -91,6 +92,7 @@ export function startShowdown(ctx: RoomContext): void {
       firstStrokeAtMs: null,
       guesses: [],
       finishedAtMs: cards.length === 0 ? ctx.now : null,
+      results: [],
     }
   }
   const teams = { A: relayTeam('A'), B: relayTeam('B') }
@@ -129,6 +131,35 @@ function addShowdownPoints(
 }
 
 /**
+ * Logs the active card's outcome in the team's `results` (so a late account
+ * link can be credited) and reports it to account members. False when the
+ * team has no active card.
+ */
+function finishActiveCard(
+  ctx: RoomContext,
+  team: TeamId,
+  guesserId: string | null,
+): boolean {
+  const active = requireShowdown(ctx.state).teams[team]
+  const card = active.cards[active.cardIndex]
+  if (card === undefined || active.drawerId === null) return false
+  const result: ShowdownCardResult = {
+    cardIndex: active.cardIndex,
+    drawerId: active.drawerId,
+    guesserId,
+    solveMs: guesserId === null ? null : ctx.now - active.cardStartedAtMs,
+    atMs: ctx.now,
+  }
+  updateShowdownTeam(ctx, team, (teamState) => ({
+    ...teamState,
+    results: [...(teamState.results ?? []), result],
+  }))
+  const logged = requireShowdown(ctx.state).teams[team]
+  emitWordEvents(ctx, showdownResultEvents(ctx.state, logged, result))
+  return true
+}
+
+/**
  * A correct showdown guess: +10, then the next card and relay drawer on a
  * fresh canvas. Clearing the last card finishes the team (+20 if first).
  */
@@ -138,25 +169,9 @@ export function clearShowdownCard(
   guesserId: string,
 ): void {
   const match = requireMatch(ctx.state)
+  if (!finishActiveCard(ctx, team, guesserId)) return
   const teamState = requireShowdown(ctx.state).teams[team]
-  const card = teamState.cards[teamState.cardIndex]
-  if (card === undefined || teamState.drawerId === null) return
 
-  emitWordEvents(
-    ctx,
-    showdownCardEvents(
-      ctx.state,
-      optionFacts(card),
-      teamState.drawerId,
-      guesserId,
-      {
-        solved: true,
-        solveMs: ctx.now - teamState.cardStartedAtMs,
-        points: SHOWDOWN_POINTS_PER_CARD,
-      },
-      ctx.now,
-    ),
-  )
   updateStats(ctx, guesserId, (stats) => ({
     ...stats,
     showdownCardsGuessed: stats.showdownCardsGuessed + 1,
@@ -207,23 +222,7 @@ export function clearShowdownCard(
 
 /** Deadline or both teams finished: unfinished active cards count as drawn. */
 export function endShowdown(ctx: RoomContext): void {
-  const showdown = requireShowdown(ctx.state)
-  for (const team of TEAM_IDS) {
-    const teamState = showdown.teams[team]
-    const card = teamState.cards[teamState.cardIndex]
-    if (card === undefined || teamState.drawerId === null) continue
-    emitWordEvents(
-      ctx,
-      showdownCardEvents(
-        ctx.state,
-        optionFacts(card),
-        teamState.drawerId,
-        null,
-        { solved: false, solveMs: null, points: null },
-        ctx.now,
-      ),
-    )
-  }
+  for (const team of TEAM_IDS) finishActiveCard(ctx, team, null)
   updateShowdown(ctx, (current) => ({ ...current, endedAtMs: ctx.now }))
   clearBots(ctx)
   endMatch(ctx, 'completed', null)

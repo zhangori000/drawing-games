@@ -6,6 +6,7 @@ import type { OpponentDraftVisibility } from '../settings'
 import { customWordList, RoomDriver } from './test-driver'
 import type { WordLengthMode } from './settings'
 import type { RoomCommand, RoomState, RoomView } from './types'
+import { roomPool } from './words'
 
 const HUMANS = ['ana', 'ben', 'cy', 'di'] as const
 
@@ -33,6 +34,7 @@ type Step =
     }
   | { readonly kind: 'surrender'; readonly who: number }
   | { readonly kind: 'rematch'; readonly same: boolean }
+  | { readonly kind: 'leave'; readonly who: number }
 
 const who = fc.integer({ min: 0, max: HUMANS.length - 1 })
 const stepArb: fc.Arbitrary<Step> = fc.oneof(
@@ -105,6 +107,11 @@ const stepArb: fc.Arbitrary<Step> = fc.oneof(
       kind: fc.constant('rematch' as const),
       same: fc.boolean(),
     }),
+    weight: 1,
+  },
+  {
+    // Leaving mid-turn hands the drawing to a teammate.
+    arbitrary: fc.record({ kind: fc.constant('leave' as const), who }),
     weight: 1,
   },
 )
@@ -211,6 +218,8 @@ function toCommand(
         actorId: state.hostId ?? 'ana',
         mode: step.same ? 'same-settings' : 'change-settings',
       }
+    case 'leave':
+      return { type: 'member.leave', memberId: HUMANS[step.who]! }
   }
 }
 
@@ -244,7 +253,90 @@ function collect(view: RoomView): Found {
   return { strings, definitionPaths }
 }
 
+/**
+ * Word ids a viewer may see now: the drawer's own cards during their live
+ * round, and the chosen words of finished rounds (results and final).
+ */
+function allowedWordIds(
+  state: RoomState,
+  viewerId: string | null,
+): Set<string> {
+  const allowed = new Set<string>()
+  const match = state.match
+  if (match === null || state.phase === 'lobby') return allowed
+  const member = state.members.find(
+    (entry) => entry.id === viewerId && entry.left !== true,
+  )
+  const round = match.round
+  const live = state.phase === 'word-draft' || state.phase === 'drawing'
+  if (live && round !== null && member !== undefined) {
+    const teamRound = round.teams[member.team]
+    if (teamRound.drawerId === member.id) {
+      for (const option of teamRound.options) allowed.add(option.wordId)
+    }
+  }
+  const revealed =
+    state.phase === 'round-results' && round !== null
+      ? [round]
+      : state.phase === 'stats'
+        ? match.history
+        : []
+  for (const entry of revealed) {
+    for (const team of ['A', 'B'] as const) {
+      const chosen = entry.teams[team].chosenWordId
+      if (chosen !== null) allowed.add(chosen)
+    }
+  }
+  return allowed
+}
+
+/** Every word id the state could mention: the pool plus offered cards. */
+function knownWordIds(state: RoomState): Set<string> {
+  const ids = new Set(roomPool(state.settings).map((word) => word.id))
+  const match = state.match
+  for (const round of [...(match?.history ?? []), match?.round ?? null]) {
+    if (round === null) continue
+    for (const team of ['A', 'B'] as const) {
+      for (const option of round.teams[team].options) ids.add(option.wordId)
+    }
+  }
+  return ids
+}
+
+function checkWordIds(driver: RoomDriver): void {
+  const state = driver.state
+  const known = knownWordIds(state)
+  for (const viewerId of [...HUMANS, null]) {
+    const view = driver.view(viewerId)
+    const allowed = allowedWordIds(state, viewerId)
+    const visible = [...collect(view).strings].filter((text) => known.has(text))
+    expect(visible.filter((id) => !allowed.has(id))).toEqual([])
+    const round = state.match?.round
+    if (state.phase === 'round-results' && round) {
+      for (const team of ['A', 'B'] as const) {
+        expect(view.results?.teams[team].wordId).toBe(
+          round.teams[team].chosenWordId,
+        )
+      }
+    }
+    if (state.phase === 'stats' && state.match) {
+      expect(
+        view.final?.rounds.map((entry) => [
+          entry.teams.A.wordId,
+          entry.teams.B.wordId,
+        ]),
+      ).toEqual(
+        state.match.history.map((entry) => [
+          entry.teams.A.chosenWordId,
+          entry.teams.B.chosenWordId,
+        ]),
+      )
+    }
+  }
+}
+
 function checkSecrecy(driver: RoomDriver): void {
+  checkWordIds(driver)
   const state = driver.state
   const match = state.match
   const visibility = state.settings.opponentDraftVisibility
@@ -370,7 +462,7 @@ function setupRoom(
 }
 
 describe('projection secrecy (property)', () => {
-  it('never leaks own words, definitions, opponent cards, or guesses', () => {
+  it('never leaks own words, word ids, definitions, opponent cards, or guesses', () => {
     fc.assert(
       fc.property(
         fc.integer({ min: 0, max: 2 ** 31 - 1 }),

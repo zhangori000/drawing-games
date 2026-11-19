@@ -25,6 +25,7 @@ import { findActiveMember } from './members'
 import { activeCanvas, requireChosen, type ActiveCanvas } from './selectors'
 import { clearShowdownCard } from './showdown'
 import { cleanText, codePointLength } from './text'
+import { roomPool } from './words'
 import type {
   GuessRecord,
   GuessVerdict,
@@ -203,9 +204,12 @@ export function applyGuess(
   target: GuessTarget,
 ): GuessVerdict {
   const { canvas, text } = target
+  // The room pool lets the matcher refuse a verb form that is another word
+  // in play (`wave` while `waving` is a card), not just another curated word.
   const verdict = matchGuess(text, {
     term: canvas.term,
     aliases: canvas.aliases,
+    otherWords: roomPool(ctx.state.settings),
   })
   recordGuess(ctx, target, memberId, verdict)
 

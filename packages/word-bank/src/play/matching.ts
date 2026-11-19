@@ -1,6 +1,11 @@
-import { pluralForms, singularForms } from './inflection'
+import { pluralForms, singularForms, verbFormKeys } from './inflection'
+import { getAllPlayableWords } from './pool'
 import { STOP_WORDS, answerTokens, normalizeAnswer } from './text'
-import type { GuessMatchTarget, GuessMatchVerdict } from './types'
+import type {
+  GuessMatchTarget,
+  GuessMatchVerdict,
+  GuessMatchWord,
+} from './types'
 
 /** Longest guess (trimmed, in UTF-16 units) that is evaluated at all. */
 export const MAX_GUESS_LENGTH = 60
@@ -48,12 +53,91 @@ export function closeThreshold(answerKey: string): number {
   return 2
 }
 
-function isExactMatch(guessKey: string, answerKey: string): boolean {
-  return (
-    guessKey === answerKey ||
-    pluralForms(answerKey).includes(guessKey) ||
-    singularForms(answerKey).includes(guessKey)
+/**
+ * Every key accepted as exactly `answer`: itself, simple plurals/singulars,
+ * and `-ing` ↔ base verb spellings (`juggling` ↔ `juggle`, `tightrope
+ * walking` ↔ `tightrope walk`, see `verbFormKeys`). A verb spelling is
+ * dropped when `namesOtherWord` says it is a different playable word.
+ */
+function exactKeys(
+  answer: string,
+  namesOtherWord: (key: string) => boolean = () => false,
+): Set<string> {
+  const tokens = answerTokens(answer)
+  const key = tokens.join('')
+  const keys = new Set<string>()
+  if (key.length === 0) return keys
+  keys.add(key)
+  for (const form of pluralForms(key)) keys.add(form)
+  for (const form of singularForms(key)) keys.add(form)
+  for (const form of verbFormKeys(tokens)) {
+    if (!namesOtherWord(form)) keys.add(form)
+  }
+  return keys
+}
+
+/** For every answer key of a word list: all keys of the words that own it. */
+type KeyIndex = ReadonlyMap<string, readonly string[]>
+
+const KEY_INDEXES = new WeakMap<readonly GuessMatchWord[], KeyIndex>()
+
+function keyIndex(words: readonly GuessMatchWord[]): KeyIndex {
+  const cached = KEY_INDEXES.get(words)
+  if (cached !== undefined) return cached
+  const index = new Map<string, string[]>()
+  for (const word of words) {
+    const keys = [word.term, ...(word.aliases ?? [])]
+      .map(normalizeAnswer)
+      .filter((key) => key.length > 0)
+    for (const key of keys) {
+      const siblings = index.get(key) ?? []
+      for (const sibling of keys) {
+        if (!siblings.includes(sibling)) siblings.push(sibling)
+      }
+      index.set(key, siblings)
+    }
+  }
+  KEY_INDEXES.set(words, index)
+  return index
+}
+
+/**
+ * True when `key` (or its plural/singular) is an answer key of a different
+ * word in play: one of `otherWords`, or of the curated catalog when none are
+ * given. A word sharing any key with the target is the target itself (the
+ * curated `tap dancing` with its alias `tap dance`).
+ */
+function otherWordChecker(
+  ownKeys: ReadonlySet<string>,
+  otherWords: readonly GuessMatchWord[] | undefined,
+): (key: string) => boolean {
+  const index = keyIndex(otherWords ?? getAllPlayableWords())
+  const own = new Set(ownKeys)
+  for (const key of ownKeys) {
+    for (const sibling of index.get(key) ?? []) own.add(sibling)
+  }
+  return (key) =>
+    [key, ...pluralForms(key), ...singularForms(key)].some(
+      (form) => !own.has(form) && index.has(form),
+    )
+}
+
+/**
+ * Every guess key (`normalizeAnswer` of a guess) that `matchGuess` accepts as
+ * `correct` for `target`: the term and aliases, their simple plurals and
+ * singulars, and verb forms that do not name another word.
+ */
+export function acceptedGuessKeys(target: GuessMatchTarget): Set<string> {
+  const answers = [target.term, ...(target.aliases ?? [])]
+  const ownKeys = new Set(
+    answers.map(normalizeAnswer).filter((key) => key.length > 0),
   )
+  const namesOtherWord = otherWordChecker(ownKeys, target.otherWords)
+  const accepted = new Set<string>()
+  for (const answer of answers) {
+    for (const key of exactKeys(answer, namesOtherWord)) accepted.add(key)
+  }
+  return accepted
 }
 
 function isCloseMatch(guessKey: string, answerKey: string): boolean {
@@ -78,10 +162,14 @@ function partialWords(answers: readonly string[]): string[] {
 
 /**
  * Server-side guess verdict. Case, accents, spacing (including none),
- * hyphens, punctuation, leading articles, simple plurals, and aliases never
- * cost a player a correct answer. A guess that merely contains the answer
+ * hyphens, punctuation, leading articles, simple plurals, `-ing` ↔ base
+ * verb forms of the last word (or of a leading verb before an article or
+ * preposition), and aliases never cost a player a correct answer. A verb
+ * form that is itself a different word in play (`otherWords`, else the
+ * curated catalog) is not accepted (`wave` for `waving`). A guess that merely contains the answer
  * among other words is not correct; it earns `partial` for a multi-word
- * answer and `wrong` otherwise.
+ * answer and `wrong` otherwise. `close` compares only against the answer and
+ * its plurals.
  */
 export function matchGuess(
   guess: string,
@@ -96,16 +184,18 @@ export function matchGuess(
   const answerKeys = answers
     .map(normalizeAnswer)
     .filter((key) => key.length > 0)
+  if (answerKeys.length === 0) return 'wrong'
 
-  if (answerKeys.some((key) => isExactMatch(guessKey, key))) return 'correct'
+  if (acceptedGuessKeys(target).has(guessKey)) return 'correct'
   if (answerKeys.some((key) => isCloseMatch(guessKey, key))) return 'close'
 
-  const words = partialWords(answers)
+  // One right word is feedback, not an answer, so no other-word check here.
+  const words = partialWords(answers).map((word) => exactKeys(word))
   if (words.length > 0) {
     const hit = answerTokens(trimmed).some(
       (token) =>
         token.length >= MIN_PARTIAL_WORD_LENGTH &&
-        words.some((word) => isExactMatch(token, word)),
+        words.some((forms) => forms.has(token)),
     )
     if (hit) return 'partial'
   }

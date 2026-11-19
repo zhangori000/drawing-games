@@ -1,6 +1,8 @@
 import type { TeamId } from '../types'
 import { TEAM_IDS } from '../types'
+import { creditLinkedMember, markMatchCredited } from './account-effects'
 import { BOT_NAMES } from './constants'
+import { handOffDrawerTurn } from './drawer-handoff'
 import type { RoomContext } from './context'
 import { patchState, reject, updateMatch, updateMember } from './context'
 import { startMatch } from './match'
@@ -108,6 +110,7 @@ export function handleJoin(
       ...match,
       stats: { ...match.stats, [member.id]: EMPTY_MEMBER_MATCH_STATS },
     }))
+    if (member.accountId !== null) markMatchCredited(ctx, member.id)
   }
 }
 
@@ -149,6 +152,7 @@ export function handleLeave(
       left: true,
       lastSeenAtMs: ctx.now,
     }))
+    handOffDrawerTurn(ctx, member.id)
   }
   if (ctx.state.hostId === member.id) {
     patchState(ctx, { hostId: chooseHost(ctx.state, member.id) })
@@ -167,6 +171,8 @@ export function handleLinkAccount(
     accountId,
     memory: mergeMemory(current.memory, capMemory(command.memory)),
   }))
+  // A guest who signs up mid-match or on the final screen keeps this match.
+  if (accountId !== null) creditLinkedMember(ctx, member.id)
 }
 
 export function handleRename(

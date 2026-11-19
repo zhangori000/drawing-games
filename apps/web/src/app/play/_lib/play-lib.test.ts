@@ -5,7 +5,8 @@ import {
   type RoomView,
   type TeamView,
 } from '@drawing-games/game-core'
-import { expect, test } from '@playwright/test'
+import { roomSettingsPatchSchema } from '@drawing-games/protocol'
+import { expect, test } from 'vitest'
 
 import { installMemoryStorage } from '../../../lib/testing/memory-storage'
 import { describePattern, revealState } from './clue'
@@ -117,6 +118,17 @@ test('custom words: split on commas and lines, cleaned and de-duplicated', () =>
   expect(parsed.duplicates).toBe(1)
   expect(parsed.invalid).toBe(2)
   expect(parsed.overLimit).toBe(0)
+})
+
+test('custom words: every kept word also fits the wire schema (UTF-16 units)', () => {
+  // 20 code points (the room allows 32) but 40 UTF-16 units (the protocol
+  // allows 32): keeping it would get the whole settings patch refused.
+  const party = '🎉'.repeat(20)
+  const parsed = parseCustomWords(`${party}\n${'🎉'.repeat(16)}\nkite`)
+  expect(parsed.words).toEqual(['🎉'.repeat(16), 'kite'])
+  expect(parsed.invalid).toBe(1)
+  const patch = { customWords: [...parsed.words] }
+  expect(roomSettingsPatchSchema.safeParse(patch).success).toBe(true)
 })
 
 test('custom words: keep at most the room maximum', () => {

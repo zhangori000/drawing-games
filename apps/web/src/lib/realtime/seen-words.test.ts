@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from 'vitest'
 
 import { makeView } from '../testing/fake-socket'
 import { SeenWordsTracker } from './seen-words'
