@@ -40,11 +40,24 @@ export default defineConfig({
     },
     ...(includeMobileProjects ? mobileProjects : []),
   ],
-  webServer: {
-    command:
-      'pnpm --filter @drawing-games/web dev --hostname 127.0.0.1 --port 3100',
-    url: 'http://127.0.0.1:3100',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  webServer: [
+    {
+      // Local Durable Objects (rooms + accounts). Isolated port and state dir
+      // so browser tests never touch a developer's `pnpm dev` data.
+      command:
+        'pnpm --filter @drawing-games/realtime exec wrangler dev --ip 127.0.0.1 --port 8788 --persist-to ../../test-results/.wrangler-e2e',
+      url: 'http://127.0.0.1:8788/health',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      env: { WRANGLER_SEND_METRICS: 'false' },
+    },
+    {
+      command:
+        'pnpm --filter @drawing-games/web dev --hostname 127.0.0.1 --port 3100',
+      url: 'http://127.0.0.1:3100',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      env: { NEXT_PUBLIC_REALTIME_URL: 'http://127.0.0.1:8788' },
+    },
+  ],
 })

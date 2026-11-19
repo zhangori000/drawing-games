@@ -9,12 +9,20 @@
 				"name": "GAME_ROOM",
 				"class_name": "GameRoom",
 			},
+			{
+				"name": "ACCOUNTS",
+				"class_name": "AccountActor",
+			},
 		],
 	},
 	"migrations": [
 		{
 			"tag": "v1",
 			"new_sqlite_classes": ["GameRoom"],
+		},
+		{
+			"tag": "v2",
+			"new_sqlite_classes": ["AccountActor"],
 		},
 	],
 	"observability": {

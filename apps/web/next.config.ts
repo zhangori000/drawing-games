@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
     '@drawing-games/drawing-model',
     '@drawing-games/game-core',
     '@drawing-games/protocol',
+    '@drawing-games/word-bank',
   ],
 }
 

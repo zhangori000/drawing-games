@@ -24,5 +24,9 @@
     "fast-check": "^4.9.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@drawing-games/drawing-model": "workspace:*",
+    "@drawing-games/word-bank": "workspace:*"
   }
 }
