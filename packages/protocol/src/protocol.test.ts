@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  MAX_CUSTOM_WORD_LENGTH,
   PROTOCOL_VERSION,
   commandEnvelopeV1Schema,
   drawingOperationSchema,
   parseCommandEnvelopeV1,
   parseServerEventEnvelopeV1,
+  roomSettingsPatchSchema,
   serverEventEnvelopeV1Schema,
   type ClientCommand,
 } from './index'
@@ -152,6 +154,17 @@ describe('commandEnvelopeV1Schema', () => {
         },
       }).success,
     ).toBe(false)
+  })
+
+  it('limits custom words by characters (code points), like the room', () => {
+    const accepts = (customWords: string[]) =>
+      roomSettingsPatchSchema.safeParse({ customWords }).success
+    // An emoji is one character for the room but two UTF-16 units.
+    expect(accepts(['🎉'.repeat(MAX_CUSTOM_WORD_LENGTH)])).toBe(true)
+    expect(accepts(['é'.repeat(MAX_CUSTOM_WORD_LENGTH), '  kite  '])).toBe(true)
+    expect(accepts(['🎉'.repeat(MAX_CUSTOM_WORD_LENGTH + 1)])).toBe(false)
+    expect(accepts(['y'.repeat(MAX_CUSTOM_WORD_LENGTH + 1)])).toBe(false)
+    expect(accepts(['   '])).toBe(false)
   })
 })
 

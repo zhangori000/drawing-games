@@ -303,13 +303,25 @@ function knownWordIds(state: RoomState): Set<string> {
   return ids
 }
 
-function checkWordIds(driver: RoomDriver): void {
-  const state = driver.state
-  const known = knownWordIds(state)
-  for (const viewerId of [...HUMANS, null]) {
+interface Snapshot {
+  readonly viewerId: string | null
+  readonly view: RoomView
+  readonly found: Found
+}
+
+/** Each viewer's projection, computed once per check. */
+function snapshots(driver: RoomDriver): Snapshot[] {
+  return [...HUMANS, null].map((viewerId) => {
     const view = driver.view(viewerId)
+    return { viewerId, view, found: collect(view) }
+  })
+}
+
+function checkWordIds(state: RoomState, views: readonly Snapshot[]): void {
+  const known = knownWordIds(state)
+  for (const { viewerId, view, found } of views) {
     const allowed = allowedWordIds(state, viewerId)
-    const visible = [...collect(view).strings].filter((text) => known.has(text))
+    const visible = [...found.strings].filter((text) => known.has(text))
     expect(visible.filter((id) => !allowed.has(id))).toEqual([])
     const round = state.match?.round
     if (state.phase === 'round-results' && round) {
@@ -336,8 +348,9 @@ function checkWordIds(driver: RoomDriver): void {
 }
 
 function checkSecrecy(driver: RoomDriver): void {
-  checkWordIds(driver)
   const state = driver.state
+  const views = snapshots(driver)
+  checkWordIds(state, views)
   const match = state.match
   const visibility = state.settings.opponentDraftVisibility
   const live = state.phase === 'word-draft' || state.phase === 'drawing'
@@ -357,9 +370,8 @@ function checkSecrecy(driver: RoomDriver): void {
     return []
   }
 
-  for (const viewerId of [...HUMANS, null]) {
-    const view = driver.view(viewerId)
-    const { strings, definitionPaths } = collect(view)
+  for (const { viewerId, view, found } of views) {
+    const { strings, definitionPaths } = found
     const member =
       viewerId === null
         ? undefined
@@ -461,35 +473,44 @@ function setupRoom(
   return driver
 }
 
+// 120 random matches, each projected for every viewer after every step: about
+// a second on an idle machine, several times that while `pnpm check` runs
+// builds and other suites on the same cores, so it gets its own budget.
+const PROPERTY_TIMEOUT_MS = 30_000
+
 describe('projection secrecy (property)', () => {
-  it('never leaks own words, word ids, definitions, opponent cards, or guesses', () => {
-    fc.assert(
-      fc.property(
-        fc.integer({ min: 0, max: 2 ** 31 - 1 }),
-        fc.constantFrom<OpponentDraftVisibility>(
-          'options-and-actions',
-          'actions-only',
-          'hidden',
-        ),
-        fc.constantFrom<WordLengthMode>('hidden-vote', 'shown', 'hidden'),
-        fc.array(stepArb, { minLength: 10, maxLength: 70 }),
-        (seed, visibility, lengthMode, steps) => {
-          const driver = setupRoom(seed, visibility, lengthMode)
-          checkSecrecy(driver)
-          steps.forEach((step, serial) => {
-            if (step.kind === 'advance') driver.advanceBy(step.ms)
-            else {
-              driver.now += 450
-              const command = toCommand(driver, step, serial)
-              if (command !== null) driver.run(command)
-            }
+  it(
+    'never leaks own words, word ids, definitions, opponent cards, or guesses',
+    { timeout: PROPERTY_TIMEOUT_MS },
+    () => {
+      fc.assert(
+        fc.property(
+          fc.integer({ min: 0, max: 2 ** 31 - 1 }),
+          fc.constantFrom<OpponentDraftVisibility>(
+            'options-and-actions',
+            'actions-only',
+            'hidden',
+          ),
+          fc.constantFrom<WordLengthMode>('hidden-vote', 'shown', 'hidden'),
+          fc.array(stepArb, { minLength: 10, maxLength: 70 }),
+          (seed, visibility, lengthMode, steps) => {
+            const driver = setupRoom(seed, visibility, lengthMode)
             checkSecrecy(driver)
-          })
-        },
-      ),
-      { numRuns: 120 },
-    )
-  })
+            steps.forEach((step, serial) => {
+              if (step.kind === 'advance') driver.advanceBy(step.ms)
+              else {
+                driver.now += 450
+                const command = toCommand(driver, step, serial)
+                if (command !== null) driver.run(command)
+              }
+              checkSecrecy(driver)
+            })
+          },
+        ),
+        { numRuns: 120 },
+      )
+    },
+  )
 
   it('shows opponents cards only during the draft as visibility allows', () => {
     for (const visibility of [

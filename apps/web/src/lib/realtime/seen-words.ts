@@ -53,15 +53,11 @@ export class SeenWordsTracker {
 }
 
 /**
- * The results view's (optional) word id, so guessers remember their team's
- * word too. Typed as an optional extension because servers that predate the
- * field omit it; this stays assignable once game-core declares it.
+ * The results view's word id, so guessers remember their team's word too.
+ * Still checked at runtime: a realtime deploy older than the web app (they
+ * ship separately) sends results without it.
  */
-type ResultTeamWithWordId = RoundResultTeamView & {
-  readonly wordId?: string | null
-}
-
-function resultWordId(team: ResultTeamWithWordId | undefined): string | null {
-  const wordId = team?.wordId
+function resultWordId(team: RoundResultTeamView | undefined): string | null {
+  const wordId: unknown = team?.wordId
   return typeof wordId === 'string' && wordId.length > 0 ? wordId : null
 }

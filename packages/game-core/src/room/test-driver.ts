@@ -204,12 +204,25 @@ export class RoomDriver {
   }
 }
 
+const CUSTOM_WORD_LISTS = new Map<number, readonly string[]>()
+
 /**
  * Deterministic made-up words that are clearly different from each other
  * (the matcher calls every pair "wrong"), so tests never depend on the
- * curated packs, which other work keeps changing.
+ * curated packs, which other work keeps changing. The pairwise check is
+ * quadratic, and property tests ask for the same list on every run, so each
+ * list is built once and handed out as a fresh copy.
  */
 export function customWordList(count: number): string[] {
+  let words = CUSTOM_WORD_LISTS.get(count)
+  if (words === undefined) {
+    words = buildCustomWordList(count)
+    CUSTOM_WORD_LISTS.set(count, words)
+  }
+  return [...words]
+}
+
+function buildCustomWordList(count: number): readonly string[] {
   const consonants = 'bdfgklmnprstvz'
   const vowels = 'aeiou'
   const words: string[] = []

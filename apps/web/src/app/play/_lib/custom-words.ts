@@ -53,10 +53,7 @@ export function sanitizeWordList(
     const length = codePointLength(word)
     if (
       length < CUSTOM_WORD_LIMITS.minLength ||
-      length > CUSTOM_WORD_LIMITS.maxLength ||
-      // The wire schema caps UTF-16 units, not code points: one emoji-heavy
-      // word over it would make the room refuse the whole settings patch.
-      word.length > CUSTOM_WORD_LIMITS.maxLength
+      length > CUSTOM_WORD_LIMITS.maxLength
     ) {
       invalid += 1
       continue

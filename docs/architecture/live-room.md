@@ -62,6 +62,11 @@ browser ──HTTP──▶ Next.js (apps/web, :3000)
 `pnpm dev` runs both. The browser derives the realtime base URL from
 `NEXT_PUBLIC_REALTIME_URL`, or else `http(s)://<page hostname>:8787`, so a
 phone on the same Wi-Fi can open `http://<laptop-ip>:3000` and play.
+`next dev` refuses its dev resources (HMR socket, dev chunks) to origins other
+than `localhost`, and the page then never hydrates, so `apps/web/next.config.ts`
+sets `allowedDevOrigins` to this machine's own addresses and host names
+(`src/lib/dev-origins.ts`). They are read when `next dev` starts: restart it
+after joining a different network.
 
 ## Room rules (game-core reducer)
 
@@ -83,7 +88,9 @@ names and meanings in `types.ts` must hold.
 - `member.presence` updates `connected`/`lastSeenAtMs`.
 - `member.leave`: in the lobby the member is removed. Mid-match the member is
   marked disconnected and left; they are removed when the room returns to the
-  lobby. Host transfers to the earliest-joined connected human, else any human.
+  lobby. A drawer who leaves mid-turn hands the turn over (see Drawer
+  rotation). Host transfers to the earliest-joined connected human, else any
+  human.
 - Host also transfers automatically when the host has been disconnected for
   15 s and another human is connected (checked in `advanceRoom`).
 - `lobby.set-team` (lobby only): anyone may move themselves; the host may
@@ -114,6 +121,21 @@ Each team keeps `drawerTurns[team]`. The drawer is
 10 s (reconnect grace); if everyone is gone the base pick stands. Both teams
 advance by one turn after every normal round.
 
+**A drawer who leaves mid-turn** (an explicit `member.leave` during
+`word-draft`, `drawing`, or on an active showdown card) hands the turn to the
+next teammate after them in join order: the first one within reconnect grace,
+else any remaining teammate. The new drawer continues the same turn, so the
+team never waits out a deadline with nobody drawing: in the draft they get the
+same cards, the remaining swaps, and the remaining time (a bot schedules its
+pick); while drawing or on a showdown card they get the same word and canvas
+for the remaining time (bots re-plan around them; a showdown takeover counts
+as a card drawn). The opponent's turn and every deadline are untouched. A team
+that already solved, or has nobody left, is unchanged. Results then name the
+new drawer, who gets `drew`/`offered`; swap reports stay with whoever swapped.
+The rotation continues from the remaining roster. Disconnects never trigger
+this (they only fall under the grace rule at the next pick), and
+`lobby.remove-member` is lobby-only, so it cannot interrupt a turn.
+
 ### Word draft (the headline improvement)
 
 At round start, for team A then team B:
@@ -137,7 +159,10 @@ At round start, for team A then team B:
    draft prefer different packs.
 6. **Word families**: options must not share a stem (`wordStems`) with each
    other, with the other team's cards, or with the last two drawn words
-   (falls back gracefully on tiny pools).
+   (falls back gracefully on tiny pools). `-ing` words also stem to their
+   base verb (`running` ~ `home run`, `waving` ~ `wave`); `-ing` nouns
+   (`wedding`, `ceiling`) and words that merely end in the letters (`king`,
+   `spring`) do not.
 
 Every offered card updates `wordMemory.offeredAt`, and `draftCounter`
 increments per team draft. `canvas.reset` is emitted for both team canvases
@@ -165,8 +190,19 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
 - `guess.submit`: a member of a team that has not solved, who is not that
   team's drawer. Text is trimmed and must be 1–60 chars. Rate limit: one
   guess per 400 ms per member, at most 50 per member per round.
-  `matchGuess(text, { term, aliases })` decides the verdict. Every guess
-  emits private `guess.feedback`. The team feed keeps the last 60 guesses.
+  `matchGuess(text, { term, aliases, otherWords: roomPool })` decides the
+  verdict. Besides formatting, plurals, and aliases it accepts `-ing` ↔ base
+  verb forms of the last word (`juggle`/`juggling`, `run`/`running`,
+  `dance`/`dancing`, `lie`/`lying`, `tightrope walk`/`tightrope walking`)
+  and of a leading verb followed by an article, possessive,
+  preposition, or (for an `-ing` verb) a plural object (`fly a kite`,
+  `brush teeth`, `breaking the ice`). A verb form is never accepted when it
+  is another word in the pool (`wave` while `waving` is playable), a known
+  `-ing` noun (`wed` is not `wedding`), or a stub (`king`, `spring` keep their
+  letters; stems need 3+ letters with a vowel). `close` still compares only
+  against the answer and its plurals; `partial` also recognises a verb form
+  of one answer word. Every guess emits private `guess.feedback`. The team
+  feed keeps the last 60 guesses.
 - A correct guess locks that team's points:
   `round(50 + 50·remaining/drawingSeconds) + {0,20,40} − hintCost?`, never
   below 0. The other team keeps playing against the same deadline. Both
@@ -201,6 +237,18 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   `same-settings` starts a fresh match immediately (falls back to the lobby
   with blockers if teams are invalid); `change-settings` returns to the lobby
   and clears ready flags. Room word memory survives rematches.
+- Results and final views carry each revealed word's `wordId` (with the
+  term), so guests' browsers can remember the words they saw.
+- **Late account link.** `member.link-account` with an account during a match
+  or on its final (`stats`) screen credits that match to the account once:
+  one `account.words` with the member's events for every finished round they
+  were in the room for and every finished showdown card (re-derived from
+  state with the original `atMs`), plus `account.match` if the match is over.
+  Later rounds reach the account as usual. `match.creditedMemberIds`
+  (internal) holds members already credited: account members at match start
+  or join, and guests once they link. Linking again, unlinking and relinking,
+  or linking a different account never credits the match twice; in the lobby
+  nothing is credited.
 
 ### Practice bots
 
@@ -226,6 +274,9 @@ by the reducer through `state.bots.schedule` and executed in `advanceRoom`;
   as `text: null`.
 - `pattern`/`letterCount` reach guessers only when shown or revealed.
 - Results and final views reveal everything about finished rounds.
+- Word ids follow the same rule: a viewer's view contains no pool word id
+  except the drawer's own cards during their live turn and the chosen words
+  of finished rounds in results and final.
 
 ### Canvas access
 
@@ -289,6 +340,11 @@ Non-members get previews during play and full access in results/stats.
   `verifySession` derives memory: `avoid` = drew + seen-report ids;
   `soft` = guessed, missed, offered, unknown-report ids (each capped by
   `WORD_MEMORY_LIMITS`).
+- Rooms report word events at round end (and per showdown card), a match
+  summary at match end, and a one-time backfill when a guest links an
+  account mid-match or on the final screen. The actor also ignores repeated
+  `(wordId, role, roomCode, atMs)` events and `(roomCode, matchNumber)`
+  summaries, so a retried report never double counts.
 - Bearer tokens, not cookies, so the Worker can allow any origin.
 
 ## Web

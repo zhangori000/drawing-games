@@ -120,15 +120,18 @@ test('custom words: split on commas and lines, cleaned and de-duplicated', () =>
   expect(parsed.overLimit).toBe(0)
 })
 
-test('custom words: every kept word also fits the wire schema (UTF-16 units)', () => {
-  // 20 code points (the room allows 32) but 40 UTF-16 units (the protocol
-  // allows 32): keeping it would get the whole settings patch refused.
-  const party = '🎉'.repeat(20)
-  const parsed = parseCustomWords(`${party}\n${'🎉'.repeat(16)}\nkite`)
-  expect(parsed.words).toEqual(['🎉'.repeat(16), 'kite'])
+test('custom words: lengths count characters, and kept words fit the wire schema', () => {
+  // 32 emoji are 32 characters for the room and the protocol alike, though
+  // 64 UTF-16 units; one character more is too long for both.
+  const party = '🎉'.repeat(CUSTOM_WORD_LIMITS.maxLength)
+  const parsed = parseCustomWords(`${party}\n${party}🎉\nkite`)
+  expect(parsed.words).toEqual([party, 'kite'])
   expect(parsed.invalid).toBe(1)
   const patch = { customWords: [...parsed.words] }
   expect(roomSettingsPatchSchema.safeParse(patch).success).toBe(true)
+  expect(
+    roomSettingsPatchSchema.safeParse({ customWords: [`${party}🎉`] }).success,
+  ).toBe(false)
 })
 
 test('custom words: keep at most the room maximum', () => {

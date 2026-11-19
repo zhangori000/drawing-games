@@ -224,6 +224,12 @@ teammate is connected, the team may then take over; the returning player rejoins
 as a guesser until their next rotation. A single disconnect does not pause both
 teams. This is a **hypothesis** that needs mobile playtesting.
 
+Leaving is different from disconnecting. In v1, an active drawer who explicitly
+leaves during the word draft, the drawing, or a Showdown card hands the turn to
+the next teammate in rotation, who continues it with the same cards (or word and
+canvas) and the remaining time. The team keeps playing instead of waiting out
+the clock; the other team is unaffected.
+
 ## Surrender and rematch
 
 Surrender is available only during the between-round results phase, after three
@@ -277,7 +283,8 @@ easy-word selection, or other behavior that makes the game worse.
 2. Should Showdown eventually allow a timed pass that moves a stuck card to the
    back of the team's queue?
 3. Should disconnected active drawers be replaced, should the round pause, or
-   should this be a host setting?
+   should this be a host setting? (Drawers who explicitly leave already hand
+   the turn to a teammate.)
 4. Are rooms private-by-code only, or will public matchmaking and moderation be
    required? This materially changes safety and account architecture.
 5. How long should drawings, transcripts, and personal statistics be retained,

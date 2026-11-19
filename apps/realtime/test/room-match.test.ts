@@ -122,6 +122,24 @@ describe('live drawing', () => {
 		}
 	});
 
+	it('hands the drawing to a teammate when the drawer leaves mid-round', async () => {
+		const { ana, ben, cy, anaView } = await startDrawingRoom();
+		try {
+			const mine = requireRound(anaView).mine;
+			const canvasId = mine?.canvasId ?? '';
+			await run(ana, { type: 'drawing.batch', operations: stroke('a1') });
+			await run(ana, { type: 'room.leave' });
+
+			const benView = await ben.view((view) => view.round?.mine?.amDrawer === true, 'ben draws');
+			expect(benView.round?.mine).toMatchObject({ canvasId, canDraw: true, word: { term: mine?.word?.term } });
+			await run(ben, { type: 'drawing.batch', operations: stroke('b1', 0.6) });
+			const preview = await cy.domain('canvas.preview', (payload) => payload.canvasId === canvasId);
+			expect(preview.cells.some((cell) => cell !== null)).toBe(true);
+		} finally {
+			closeAll(ana, ben, cy);
+		}
+	});
+
 	it('replays a reconnecting teammate the canvas, including after eviction', async () => {
 		const { roomCode, ana, ben, cy, anaView } = await startDrawingRoom();
 		const canvasId = requireRound(anaView).mine?.canvasId ?? '';

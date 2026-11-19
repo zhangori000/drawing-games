@@ -61,6 +61,11 @@ pnpm install
 pnpm dev
 ```
 
+`pnpm dev` starts the web app on http://localhost:3000 and the realtime
+Worker on port 8787; no `.env` is needed. To play from phones on the same
+Wi-Fi, open `http://<laptop-ip>:3000` on them (see
+[Local topology](docs/architecture/live-room.md#local-topology)).
+
 Run the full repository checks with:
 
 ```bash

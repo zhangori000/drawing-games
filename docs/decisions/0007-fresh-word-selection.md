@@ -38,7 +38,8 @@ Draft cards are chosen by a pure, seeded selector in
    not authorization, so a client cannot harm anyone else by sending it.
 
 Guess matching is forgiving about formatting (case, accents, spacing,
-hyphens, punctuation, leading articles, simple plurals, aliases) and gives
+hyphens, punctuation, leading articles, simple plurals, `-ing` ↔ base verb
+forms that are not another word in the pool, aliases) and gives
 private "so close" and "one word is right" feedback, but never accepts a
 guess that merely contains the answer among other words.
 

@@ -22,6 +22,21 @@ const optionIdSchema = z
   .max(160)
   .regex(/^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)?$/)
 
+/**
+ * Longest custom word, in code points (an emoji is one), matching the room's
+ * `ROOM_SETTINGS_LIMITS.customWords.maxLength`. The room cleans and drops
+ * words outside its limits itself; this only bounds what may be sent.
+ */
+export const MAX_CUSTOM_WORD_LENGTH = 32
+
+const customWordSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((word) => Array.from(word).length <= MAX_CUSTOM_WORD_LENGTH, {
+    message: `Custom words are at most ${MAX_CUSTOM_WORD_LENGTH} characters.`,
+  })
+
 const opaqueTokenSchema = z
   .string()
   .min(16)
@@ -123,7 +138,7 @@ export const roomSettingsPatchSchema = z.strictObject({
     )
     .max(32)
     .optional(),
-  customWords: z.array(z.string().trim().min(1).max(32)).max(300).optional(),
+  customWords: z.array(customWordSchema).max(300).optional(),
   customWordsMode: z.enum(['mix', 'only']).optional(),
   categoryHint: z.boolean().optional(),
   showdown: z.boolean().optional(),
