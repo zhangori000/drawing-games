@@ -7,6 +7,8 @@ import {
   drawingOperationSchema,
   parseCommandEnvelopeV1,
   parseServerEventEnvelopeV1,
+  MAX_COMMAND_MESSAGE_BYTES,
+  messageTooLargeDetailsSchema,
   rateLimitDetailsSchema,
   roomSettingsPatchSchema,
   serverEventEnvelopeV1Schema,
@@ -59,6 +61,7 @@ describe('commandEnvelopeV1Schema', () => {
         { type: 'stroke.end', strokeId: 'stroke_1', pointCount: 2 },
       ],
     },
+    { type: 'canvas.sync' },
     { type: 'surrender.vote', approve: true },
     { type: 'rematch.vote', mode: 'same-settings' },
   ])('accepts the supported command $type', (command) => {
@@ -282,5 +285,34 @@ describe('serverEventEnvelopeV1Schema', () => {
     expect(rateLimitDetailsSchema.safeParse({ retryAfterMs: 0 }).success).toBe(
       false,
     )
+  })
+
+  it('describes an oversized message, naming its command when known', () => {
+    const envelope = parseServerEventEnvelopeV1({
+      version: PROTOCOL_VERSION,
+      roomCode: 'ABCD12',
+      roomSeq: 3,
+      serverTimeMs: 1,
+      event: {
+        type: 'protocol.error',
+        code: 'BAD_COMMAND',
+        message: 'Commands are limited to 64 KiB.',
+        retryable: false,
+        commandId: 'command_9',
+        details: {
+          reason: 'message-too-large',
+          maxBytes: MAX_COMMAND_MESSAGE_BYTES,
+        },
+      },
+    })
+    if (envelope.event.type !== 'protocol.error')
+      throw new Error('expected an error')
+    expect(messageTooLargeDetailsSchema.parse(envelope.event.details)).toEqual({
+      reason: 'message-too-large',
+      maxBytes: 64 * 1024,
+    })
+    expect(
+      messageTooLargeDetailsSchema.safeParse({ retryAfterMs: 50 }).success,
+    ).toBe(false)
   })
 })

@@ -19,6 +19,7 @@ import {
   memberName,
   teamRoster,
 } from './members'
+import { hasMatchActivity } from './records'
 import {
   effectiveCategoryHint,
   effectiveWordLengthMode,
@@ -608,7 +609,11 @@ function byTeam(value: (team: TeamId) => number): TeamScores {
   return { A: value('A'), B: value('B') }
 }
 
-/** Every participant, in join order; left members keep their names. */
+/**
+ * Every participant, in join order. Left members keep their names and are
+ * marked `left` (a player who rejoined under the same name is a new seat);
+ * those who left without drawing, guessing, or scoring are omitted.
+ */
 function finalMembers(
   state: RoomState,
   match: MatchState,
@@ -619,15 +624,20 @@ function finalMembers(
   const rank = (id: string) => order.get(id) ?? Number.MAX_SAFE_INTEGER
   return Object.entries(match.stats)
     .sort(([left], [right]) => rank(left) - rank(right))
-    .map(([memberId, stats]) => {
+    .flatMap(([memberId, stats]) => {
       const member = findMember(state, memberId)
-      return {
-        memberId,
-        displayName: memberName(state, memberId),
-        team: member?.team ?? 'A',
-        kind: member?.kind ?? 'human',
-        stats,
-      }
+      const left = member === undefined || member.left === true
+      if (left && !hasMatchActivity(stats)) return []
+      return [
+        {
+          memberId,
+          displayName: memberName(state, memberId),
+          team: member?.team ?? 'A',
+          kind: member?.kind ?? 'human',
+          left,
+          stats,
+        },
+      ]
     })
 }
 

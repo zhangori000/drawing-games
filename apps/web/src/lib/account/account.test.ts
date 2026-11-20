@@ -7,6 +7,7 @@ import {
   formatRelativeTime,
   lifetimeStatCards,
   matchesRoleFilter,
+  wordEventContext,
 } from './stats'
 
 test('profiles need identity fields and get safe defaults for the rest', () => {
@@ -57,6 +58,33 @@ test('lifetime cards show rates and averages without dividing by zero', () => {
   expect(value('fastest')).toBe('3.5 s')
 })
 
+test('lifetime cards show every tracked total in plain words', () => {
+  const card = (stats: Partial<typeof EMPTY_ACCOUNT_STATS>, id: string) =>
+    lifetimeStatCards({ ...EMPTY_ACCOUNT_STATS, ...stats }).find(
+      (entry) => entry.id === id,
+    )
+  expect(card({ pointsWon: 190 }, 'points-won')).toMatchObject({
+    label: 'Points won',
+    value: '190',
+  })
+  expect(card({ distinctWordsDrawn: 3 }, 'distinct-words-drawn')).toMatchObject(
+    { label: 'Words drawn', value: '3' },
+  )
+  expect(card({ matchesPlayed: 1, wins: 1 }, 'win-rate')?.detail).toBe('1 win')
+  expect(card({ matchesPlayed: 2, wins: 2 }, 'win-rate')?.detail).toBe('2 wins')
+  expect(card({ matchesPlayed: 1 }, 'win-rate')?.detail).toBe('0 wins')
+  expect(card({ guessesSubmitted: 1 }, 'accuracy')?.detail).toBe('1 guess sent')
+  expect(card({ closeGuesses: 1 }, 'correct-guesses')?.detail).toBe(
+    '1 so-close call',
+  )
+  // Guess timing runs from the start of drawing (guess.ts), not a stroke.
+  expect(card({}, 'time-to-correct')?.detail).toBe(
+    'From the start of drawing to your answer',
+  )
+  const ids = lifetimeStatCards(EMPTY_ACCOUNT_STATS).map((entry) => entry.id)
+  expect(new Set(ids).size).toBe(ids.length)
+})
+
 test('word rows describe their outcome and filter by role', () => {
   const base = {
     wordId: 'animals/cat',
@@ -93,6 +121,28 @@ test('word rows describe their outcome and filter by role', () => {
   expect(matchesRoleFilter(unknown, 'offered')).toBe(true)
   expect(matchesRoleFilter(drew, 'guessed')).toBe(false)
   expect(matchesRoleFilter(drew, 'all')).toBe(true)
+  expect(wordEventContext(drew)).toBeNull()
+  const relay = { ...drew, points: 10, showdown: true } as const
+  expect(wordEventContext(relay)).toBe('Showdown')
+  expect(describeWordResult(relay)).toBe('Solved in 12 s · +10')
+})
+
+test('profiles keep the Showdown tag on relay card words', () => {
+  const profile = parseProfile({
+    accountId: 'mina',
+    username: 'mina',
+    recentWords: [
+      {
+        wordId: 'w-attic',
+        term: 'attic',
+        role: 'drew',
+        atMs: 2,
+        showdown: true,
+      },
+      { wordId: 'w-attic', term: 'attic', role: 'drew', atMs: 1 },
+    ],
+  })
+  expect(profile?.recentWords.map(wordEventContext)).toEqual(['Showdown', null])
 })
 
 test('relative times read naturally', () => {

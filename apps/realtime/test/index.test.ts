@@ -2,6 +2,8 @@ import { exports as workerExports } from 'cloudflare:workers';
 import { env, evictDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
+import { messageTooLargeDetailsSchema } from '@drawing-games/protocol';
+
 import { createRoom, joinRoom, randomCommandId, resumeRoom, RoomSocket } from './room/harness';
 
 describe('realtime Worker router', () => {
@@ -179,7 +181,12 @@ describe('GameRoom WebSocket protocol', () => {
 
 		try {
 			client.sendRaw('{definitely-not-json');
-			expect(await client.error()).toMatchObject({ code: 'BAD_COMMAND', retryable: false });
+			const notJson = await client.error();
+			expect(notJson).toMatchObject({ code: 'BAD_COMMAND', retryable: false });
+			expect(notJson).not.toHaveProperty('commandId');
+			// Unparseable, but its id is readable from the start: the error names it.
+			client.sendRaw('{"version":1,"commandId":"c_cut","sessionId":"s');
+			expect(await client.error('c_cut')).toMatchObject({ code: 'BAD_COMMAND', retryable: false, commandId: 'c_cut' });
 			client.sendRaw(JSON.stringify({ version: 1, commandId: 'c_bad', command: { type: 'nope' } }));
 			expect(await client.error('c_bad')).toMatchObject({ code: 'BAD_COMMAND', retryable: false });
 		} finally {
@@ -192,7 +199,35 @@ describe('GameRoom WebSocket protocol', () => {
 		const client = await RoomSocket.open(roomCode);
 
 		client.sendRaw(JSON.stringify({ padding: 'x'.repeat(64 * 1024) }));
-		expect(await client.error()).toMatchObject({ code: 'BAD_COMMAND' });
+		const error = await client.error();
+		expect(error).toMatchObject({ code: 'BAD_COMMAND', details: { reason: 'message-too-large', maxBytes: 64 * 1024 } });
+		expect(error).not.toHaveProperty('commandId');
+		expect(messageTooLargeDetailsSchema.safeParse(error.details).success).toBe(true);
+		expect((await client.closed).code).toBe(1009);
+	});
+
+	it('names the oversized command when its id leads the message', async () => {
+		const roomCode = await createRoom();
+		const client = await RoomSocket.open(roomCode);
+		const commandId = randomCommandId();
+
+		client.sendRaw(
+			JSON.stringify({
+				version: 1,
+				commandId,
+				sessionId: client.sessionId,
+				roomCode,
+				clientSeq: 1,
+				lastRoomSeq: 0,
+				command: { type: 'guess.submit', text: 'x'.repeat(64 * 1024) },
+			}),
+		);
+		expect(await client.error(commandId)).toMatchObject({
+			code: 'BAD_COMMAND',
+			commandId,
+			retryable: false,
+			details: { reason: 'message-too-large' },
+		});
 		expect((await client.closed).code).toBe(1009);
 	});
 });

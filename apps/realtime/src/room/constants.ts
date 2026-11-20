@@ -1,3 +1,5 @@
+import { MAX_COMMAND_MESSAGE_BYTES } from '@drawing-games/protocol';
+
 /**
  * Limits and timings owned by the room server. Game rules (phases,
  * deadlines, scoring) live in `@drawing-games/game-core`.
@@ -7,8 +9,8 @@ export const ROOM_CODE_LENGTH = 5;
 /** Random codes tried before POST /rooms gives up (collisions are rare). */
 export const ROOM_CREATE_ATTEMPTS = 8;
 
-/** Largest accepted client message, in UTF-8 bytes. */
-export const MAX_MESSAGE_BYTES = 64 * 1024;
+/** Largest accepted client message, in UTF-8 bytes (shared with clients). */
+export const MAX_MESSAGE_BYTES = MAX_COMMAND_MESSAGE_BYTES;
 /** Newest command ids remembered for de-duplication. */
 export const COMMAND_LOG_LIMIT = 1000;
 

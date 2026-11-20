@@ -356,9 +356,11 @@ export class RoomClient {
           },
         })
         return
-      case 'error':
-        this.pushToast(event.error.message, 'error')
+      case 'error': {
+        const message = unattributedErrorToast(event.error)
+        if (message !== null) this.pushToast(message, 'error')
         return
+      }
       case 'notice':
         if (event.notice === 'seat-expired') {
           this.pushToast(
@@ -499,4 +501,17 @@ export function drawableCanvasId(view: RoomView | null): string | null {
     return view.showdown.mine.canvasId
   }
   return null
+}
+
+/**
+ * What to show for a room error that no pending command claimed. A
+ * `BAD_COMMAND` without a command means the room could not read a message
+ * at all (garbled, or over its size cap before it closes the socket): there
+ * is nothing the player can do about it, and any command it belonged to
+ * reports through its own caller (`TOO_LARGE`, or a timeout), so it is not
+ * shown. Other errors carry the room's own plain-language message.
+ */
+export function unattributedErrorToast(error: RoomCommandError): string | null {
+  if (error.code === 'BAD_COMMAND' && error.commandId === null) return null
+  return error.message
 }

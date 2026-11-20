@@ -37,8 +37,10 @@ import {
 	domainEvent,
 	encodeEnvelope,
 	errorEvent,
+	messageTooLargeEvent,
 	rateLimitedEvent,
 	readCommandId,
+	sniffCommandId,
 } from './envelopes';
 import { describeError } from './log';
 import { RoomOutbox } from './outbox';
@@ -181,8 +183,14 @@ export class GameRoom extends DurableObject<Env> {
 		try {
 			raw = decodeClientMessage(message);
 		} catch (error) {
-			this.outbox.send(ws, state, errorEvent('BAD_COMMAND', 'Commands must be JSON of at most 64 KiB.'));
-			if (error instanceof MessageTooLargeError) safeClose(ws, CLOSE_CODES.tooLarge, 'Message too large');
+			// Tied to its command when the id can be read from the message's start.
+			const commandId = sniffCommandId(message);
+			if (error instanceof MessageTooLargeError) {
+				this.outbox.send(ws, state, messageTooLargeEvent(commandId));
+				safeClose(ws, CLOSE_CODES.tooLarge, 'Message too large');
+			} else {
+				this.outbox.send(ws, state, errorEvent('BAD_COMMAND', 'Commands must be JSON.', commandId));
+			}
 			return;
 		}
 		// Before validation, so a flood costs no more than a JSON parse each.
@@ -419,7 +427,13 @@ export class GameRoom extends DurableObject<Env> {
 			effects: result.effects,
 			command: { commandId: envelope.commandId, memberId, signature, clientSeq: envelope.clientSeq, roomSeq: result.state.seq },
 			sender: ws,
-			onCommitted: (state) => this.sendAck(ws, state.roomCode, state.seq, envelope, 'applied'),
+			onCommitted: (state) => {
+				// Canvases before the ack, so the client has them once it resolves.
+				// A duplicate (resent after a reconnect) only gets its ack back: the
+				// new bind already sent fresh canvases.
+				if (mapped.kind === 'canvas-sync') this.outbox.resyncCanvases(state, ws);
+				this.sendAck(ws, state.roomCode, state.seq, envelope, 'applied');
+			},
 		});
 	}
 

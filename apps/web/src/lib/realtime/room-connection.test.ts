@@ -540,18 +540,155 @@ test('close 1009 gives up the largest command sent on that socket instead of res
   await expect(ready).resolves.toBe('applied')
 })
 
-test('resync re-binds on a fresh socket so the room resends canvases', () => {
+test('close 1009 after the room names the oversized command gives up only that one', async () => {
+  const ctx = setup({ seats: savedSeat() })
+  ctx.connection.connect()
+  bindByResume(ctx)
+
+  const big = ctx.connection.send(
+    { type: 'drawing.batch', operations: bigAppends(4, 128) },
+    { timeoutMs: null },
+  )
+  const bigEnvelope = ctx.socket().lastEnvelope()
+  // Larger, but the room named the other one.
+  const bigger = ctx.connection.send(
+    { type: 'drawing.batch', operations: bigAppends(6, 128) },
+    { timeoutMs: null },
+  )
+  const biggerEnvelope = ctx.socket().lastEnvelope()
+  ctx.socket().receive({
+    type: 'protocol.error',
+    code: 'BAD_COMMAND',
+    message: 'Commands are limited to 64 KiB.',
+    retryable: false,
+    commandId: bigEnvelope.commandId,
+    details: { reason: 'message-too-large', maxBytes: 65_536 },
+  })
+  await expect(big).rejects.toMatchObject({
+    code: 'TOO_LARGE',
+    message: 'That was too large to send to the room.',
+  })
+  // The room is closing this socket: the next bind resends canvases, so a
+  // resync now sends nothing on it.
+  const sentBeforeResync = ctx.socket().sent.length
+  ctx.connection.resync()
+  expect(ctx.socket().sent).toHaveLength(sentBeforeResync)
+  ctx.socket().serverClose(1009)
+  expect(ctx.events.filter((event) => event.type === 'error')).toEqual([])
+
+  ctx.timers.advance(250)
+  bindByResume(ctx)
+  const resent = ctx.socket().envelopes().slice(1)
+  expect(resent.map((envelope) => envelope.commandId)).toEqual([
+    biggerEnvelope.commandId,
+  ])
+  ctx.socket().receive(ack(biggerEnvelope.commandId, biggerEnvelope.clientSeq))
+  await expect(bigger).resolves.toBe('applied')
+})
+
+test('an oversized message the room cannot name is not an error of its own', async () => {
+  const ctx = setup({ seats: savedSeat() })
+  ctx.connection.connect()
+  bindByResume(ctx)
+  const batch = ctx.connection.send(
+    { type: 'drawing.batch', operations: bigAppends(4, 128) },
+    { timeoutMs: null },
+  )
+  ctx.socket().receive({
+    type: 'protocol.error',
+    code: 'BAD_COMMAND',
+    message: 'Commands are limited to 64 KiB.',
+    retryable: false,
+    details: { reason: 'message-too-large', maxBytes: 65_536 },
+  })
+  expect(ctx.events.filter((event) => event.type === 'error')).toEqual([])
+  ctx.socket().serverClose(1009)
+  await expect(batch).rejects.toMatchObject({ code: 'TOO_LARGE' })
+})
+
+test('resync asks the room for canvases on the same socket', async () => {
   const ctx = setup({ seats: savedSeat() })
   ctx.connection.connect()
   ctx.connection.resync() // not bound yet: the coming handshake covers it
   expect(ctx.sockets).toHaveLength(1)
   bindByResume(ctx)
+  const sentBefore = ctx.socket().sent.length
 
   ctx.connection.resync()
+  ctx.connection.resync() // one at a time
+  expect(ctx.socket().sent).toHaveLength(sentBefore + 1)
+  const sync = ctx.socket().lastEnvelope()
+  expect(sync.command).toEqual({ type: 'canvas.sync' })
+  ctx.socket().receive(ack(sync.commandId, sync.clientSeq))
+  await Promise.resolve()
+  expect(ctx.sockets).toHaveLength(1)
+  expect(ctx.connection.status).toBe('open')
+
+  // Answered: the next resync asks again.
+  ctx.connection.resync()
+  expect(ctx.socket().lastEnvelope().commandId).not.toBe(sync.commandId)
+  expect(ctx.socket().lastEnvelope().command.type).toBe('canvas.sync')
+})
+
+test('resync falls back to a fresh bind when the room refuses canvas.sync', async () => {
+  const ctx = setup({ seats: savedSeat() })
+  ctx.connection.connect()
+  bindByResume(ctx)
+
+  ctx.connection.resync()
+  const sync = ctx.socket().lastEnvelope()
+  // An older room does not know the command.
+  ctx.socket().receive({
+    type: 'protocol.error',
+    code: 'BAD_COMMAND',
+    message: 'Command is not a valid protocol v1 envelope.',
+    retryable: false,
+    commandId: sync.commandId,
+  })
+  await Promise.resolve()
   expect(ctx.sockets).toHaveLength(2)
   expect(ctx.sockets[0]?.closedWith).toBe(1000)
   ctx.socket().open()
   expect(ctx.socket().lastEnvelope().command.type).toBe('room.resume')
+  expect(ctx.events.filter((event) => event.type === 'error')).toEqual([])
+})
+
+test('resync falls back to a fresh bind when canvas.sync is not answered', async () => {
+  const ctx = setup({ seats: savedSeat() })
+  ctx.connection.connect()
+  bindByResume(ctx)
+
+  ctx.connection.resync()
+  expect(ctx.socket().lastEnvelope().command.type).toBe('canvas.sync')
+  ctx.timers.advance(8_000)
+  await Promise.resolve()
+  expect(ctx.sockets).toHaveLength(2)
+  ctx.socket().open()
+  expect(ctx.socket().lastEnvelope().command.type).toBe('room.resume')
+})
+
+test('resync does not reconnect once a new bind already resent canvases', async () => {
+  const ctx = setup({ seats: savedSeat() })
+  ctx.connection.connect()
+  bindByResume(ctx)
+
+  ctx.connection.resync()
+  ctx.socket().serverClose(1006)
+  ctx.timers.advance(250)
+  bindByResume(ctx)
+  // Resent after the resume; the new bind already sent fresh canvases.
+  const resent = ctx.socket().lastEnvelope()
+  expect(resent.command.type).toBe('canvas.sync')
+  ctx.socket().receive({
+    type: 'protocol.error',
+    code: 'INTERNAL',
+    message: 'The room could not process this command. Try again.',
+    retryable: true,
+    commandId: resent.commandId,
+  })
+  await Promise.resolve()
+  expect(ctx.sockets).toHaveLength(2)
+  expect(ctx.connection.status).toBe('open')
 })
 
 /** `count` appends of `points` full-precision points each. */

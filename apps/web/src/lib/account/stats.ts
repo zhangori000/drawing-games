@@ -28,6 +28,10 @@ function average(total: number, count: number): number | null {
   return count > 0 ? total / count : null
 }
 
+function countOf(count: number, one: string, many = `${one}s`): string {
+  return `${count} ${count === 1 ? one : many}`
+}
+
 /** The lifetime cards on the profile page, in display order. */
 export function lifetimeStatCards(stats: AccountStats): StatCard[] {
   return [
@@ -41,13 +45,25 @@ export function lifetimeStatCards(stats: AccountStats): StatCard[] {
       id: 'win-rate',
       label: 'Win rate',
       value: formatPercent(stats.wins, stats.matchesPlayed),
-      detail: `${stats.wins} wins`,
+      detail: countOf(stats.wins, 'win'),
+    },
+    {
+      id: 'points-won',
+      label: 'Points won',
+      value: String(stats.pointsWon),
+      detail: 'Team points from your correct guesses',
     },
     {
       id: 'drawings-solved',
       label: 'Drawings solved',
       value: formatPercent(stats.drawingsSolved, stats.roundsDrawn),
       detail: `${stats.drawingsSolved} of ${stats.roundsDrawn} drawn`,
+    },
+    {
+      id: 'distinct-words-drawn',
+      label: 'Words drawn',
+      value: String(stats.distinctWordsDrawn),
+      detail: 'Different words you’ve drawn',
     },
     {
       id: 'drawer-solve-time',
@@ -61,13 +77,13 @@ export function lifetimeStatCards(stats: AccountStats): StatCard[] {
       id: 'correct-guesses',
       label: 'Correct guesses',
       value: String(stats.correctGuesses),
-      detail: `${stats.closeGuesses} so-close calls`,
+      detail: countOf(stats.closeGuesses, 'so-close call'),
     },
     {
       id: 'accuracy',
       label: 'Guess accuracy',
       value: formatPercent(stats.correctGuesses, stats.guessesSubmitted),
-      detail: `${stats.guessesSubmitted} guesses sent`,
+      detail: `${countOf(stats.guessesSubmitted, 'guess', 'guesses')} sent`,
     },
     {
       id: 'time-to-correct',
@@ -75,7 +91,7 @@ export function lifetimeStatCards(stats: AccountStats): StatCard[] {
       value: formatSeconds(
         average(stats.timeToCorrectMsTotal, stats.correctGuesses),
       ),
-      detail: 'From first stroke to your answer',
+      detail: 'From the start of drawing to your answer',
     },
     {
       id: 'fastest',
@@ -136,6 +152,14 @@ export const WORD_ROLE_LABELS: Readonly<Record<WordHistoryRole, string>> = {
   offered: 'Offered',
   'seen-report': 'Seen it',
   'unknown-report': 'Didn’t know it',
+}
+
+/**
+ * Where the word came from, when it was not a normal round: Showdown relay
+ * cards repeat a word already drawn in the match, so they get a tag.
+ */
+export function wordEventContext(event: WordHistoryEvent): string | null {
+  return event.showdown === true ? 'Showdown' : null
 }
 
 /** Short outcome text for one history row. */

@@ -44,8 +44,11 @@ export interface ErrorEvent {
 	readonly message: string;
 	readonly retryable: boolean;
 	readonly commandId?: string;
-	/** `RATE_LIMITED` only (`rateLimitDetailsSchema`). */
-	readonly details?: { readonly retryAfterMs: number };
+	/**
+	 * `RATE_LIMITED` (`rateLimitDetailsSchema`), or the oversized-message
+	 * `BAD_COMMAND` (`messageTooLargeDetailsSchema`).
+	 */
+	readonly details?: { readonly retryAfterMs: number } | { readonly reason: 'message-too-large'; readonly maxBytes: number };
 }
 
 export type OutgoingEvent =
@@ -84,11 +87,46 @@ export function rateLimitedEvent(commandId: string | undefined, retryAfterMs: nu
 	};
 }
 
+/**
+ * Sent right before closing a socket with 1009 for an oversized message,
+ * naming its command when `sniffCommandId` could read one, so the client can
+ * give up that exact command instead of guessing.
+ */
+export function messageTooLargeEvent(commandId: string | undefined): ErrorEvent {
+	return {
+		...errorEvent('BAD_COMMAND', `Commands are limited to ${MAX_MESSAGE_BYTES / 1024} KiB.`, commandId),
+		details: { reason: 'message-too-large', maxBytes: MAX_MESSAGE_BYTES },
+	};
+}
+
 export class MessageTooLargeError extends Error {
 	constructor() {
 		super('Message exceeds the maximum size');
 		this.name = 'MessageTooLargeError';
 	}
+}
+
+/** How much of an unparsed message `sniffCommandId` looks at. */
+const SNIFF_PREFIX_CHARS = 512;
+const COMMAND_ID_FIELD = /"commandId"\s*:\s*"([A-Za-z0-9_-]{1,128})"/;
+
+/**
+ * The commandId of a message that cannot be parsed (too large, or not JSON),
+ * read cheaply from its first few hundred characters (clients put it near
+ * the start of the envelope). Undefined when none is there; never parses
+ * the whole message.
+ */
+export function sniffCommandId(message: string | ArrayBuffer): string | undefined {
+	const prefix =
+		typeof message === 'string'
+			? message.slice(0, SNIFF_PREFIX_CHARS)
+			: new TextDecoder('utf-8', { fatal: false, ignoreBOM: false }).decode(
+					new Uint8Array(message, 0, Math.min(message.byteLength, SNIFF_PREFIX_CHARS)),
+				);
+	const match = COMMAND_ID_FIELD.exec(prefix);
+	if (match === null) return undefined;
+	const parsed = commandIdSchema.safeParse(match[1]);
+	return parsed.success ? parsed.data : undefined;
 }
 
 /** UTF-8 JSON with a byte cap. Throws MessageTooLargeError or SyntaxError. */

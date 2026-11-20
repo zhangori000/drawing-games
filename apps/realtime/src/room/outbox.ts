@@ -77,6 +77,20 @@ export class RoomOutbox {
 		for (const socket of this.registry.bound()) this.deliverCanvases(state, changes, socket);
 	}
 
+	/**
+	 * `canvas.sync`: sends one socket a fresh copy of every canvas its member
+	 * may see now, under the same access rules as `canvasesFor` (snapshots
+	 * for full access, previews for preview-only access), whatever it was
+	 * sent before.
+	 */
+	resyncCanvases(state: RoomState, ws: WebSocket): void {
+		const socket = this.registry.bound().find((entry) => entry.ws === ws);
+		if (socket === undefined) return;
+		socket.entry.full = new Set();
+		socket.entry.preview = new Set();
+		this.deliverCanvases(state, NO_CANVAS_CHANGES, socket);
+	}
+
 	/** Sends the latest preview of a canvas to every socket limited to previews of it. */
 	previewToWatchers(state: RoomState, canvasId: string): void {
 		const canvas = this.canvases.get(canvasId);

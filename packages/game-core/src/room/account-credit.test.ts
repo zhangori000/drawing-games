@@ -121,6 +121,22 @@ describe('crediting a match to an account linked late', () => {
     expect(control.summaries).toHaveLength(1)
   })
 
+  it('tags Showdown relay cards, and only those', () => {
+    const relay = control.words.filter((event) => event.showdown === true)
+    expect(relay.map((event) => event.role).sort()).toEqual(['drew', 'guessed'])
+    expect(relay.every((event) => event.points === 10)).toBe(true)
+    const rounds = control.words.filter((event) => event.showdown !== true)
+    expect(rounds.length).toBeGreaterThan(0)
+    expect(rounds.every((event) => !('showdown' in event))).toBe(true)
+    // The same word can appear as a round word and as its relay card.
+    const relayDrew = relay.find((event) => event.role === 'drew')!
+    expect(
+      rounds.some(
+        (event) => event.role === 'drew' && event.wordId === relayDrew.wordId,
+      ),
+    ).toBe(true)
+  })
+
   it.each<LinkPoint>([
     'stats',
     'showdown',
@@ -199,6 +215,44 @@ describe('crediting a match to an account linked late', () => {
     expect(summaries).toEqual([
       expect.objectContaining({ matchNumber: 1, team: 'B', roundsPlayed: 2 }),
     ])
+  })
+
+  it('sends one summary with both seats when a player leaves and rejoins', () => {
+    const driver = setup(ACCOUNT)
+    // Round 1: Cy draws for B, then leaves on the results screen.
+    expect(driver.drawer('B')).toBe('cy')
+    driver.pickWords()
+    driver.solve('B', 'di')
+    driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    expect(driver.state.phase).toBe('round-results')
+    driver.ok({ type: 'member.leave', memberId: 'cy' })
+    // Back by code with the same account: a new seat that guesses in round 2.
+    driver.join('cy2', 'Cy', { team: 'B', accountId: ACCOUNT })
+    driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    driver.pickWords()
+    driver.solve('B', 'cy2')
+    while (driver.state.phase !== 'stats') {
+      if (driver.state.phase === 'word-draft') driver.pickWords()
+      else driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    }
+    const stats = driver.state.match!.stats
+    expect(stats.cy?.roundsDrawn).toBe(1)
+    expect(stats.cy2?.correctGuesses).toBe(1)
+    const { summaries } = accountEffects(driver.history, ACCOUNT)
+    expect(summaries).toHaveLength(1)
+    expect(summaries[0]).toMatchObject({ team: 'B', matchNumber: 1 })
+    expect(summaries[0]?.stats).toMatchObject({
+      roundsDrawn: (stats.cy?.roundsDrawn ?? 0) + (stats.cy2?.roundsDrawn ?? 0),
+      drawingsSolved: 1,
+      correctGuesses: 1,
+      guessesSubmitted:
+        (stats.cy?.guessesSubmitted ?? 0) + (stats.cy2?.guessesSubmitted ?? 0),
+      pointsWon: stats.cy2?.pointsWon,
+      fastestCorrectMs: stats.cy2?.fastestCorrectMs,
+      showdownCardsDrawn:
+        (stats.cy?.showdownCardsDrawn ?? 0) +
+        (stats.cy2?.showdownCardsDrawn ?? 0),
+    })
   })
 
   it('does not credit a finished match once the room is back in the lobby', () => {

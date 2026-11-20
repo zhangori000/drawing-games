@@ -926,6 +926,12 @@ export interface FinalView {
     readonly displayName: string
     readonly team: TeamId
     readonly kind: MemberKind
+    /**
+     * Left mid-match. Shown so a player who rejoined under the same name
+     * can be told apart from their earlier seat; left members with no
+     * activity in the match are omitted.
+     */
+    readonly left: boolean
     readonly stats: MemberMatchStats
   }[]
   /** Host only. */

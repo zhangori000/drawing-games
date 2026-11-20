@@ -11,6 +11,7 @@ import {
   describeWordResult,
   formatRelativeTime,
   matchesRoleFilter,
+  wordEventContext,
   type WordRoleFilter,
 } from '@/lib/account/stats'
 import { useNow } from '@/lib/use-now'
@@ -59,35 +60,44 @@ export function RecentWords({
         </p>
       ) : (
         <ul className="mt-4 divide-y-2 divide-black/5 overflow-hidden rounded-2xl border-2 border-[#181713] bg-white">
-          {visible.slice(0, 100).map((word, index) => (
-            <li
-              key={`${word.wordId}-${word.role}-${word.atMs}-${index}`}
-              className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto_auto]"
-            >
-              <div className="min-w-0">
-                <p className="truncate text-lg font-black">{word.term}</p>
-                <p className="truncate text-xs text-black/50">
-                  {getWordPackName(word.packId)}
-                </p>
-              </div>
-              <p className="order-3 col-span-2 text-sm text-black/65 sm:order-none sm:col-span-1">
-                <span className="font-bold text-[#181713]">
-                  {WORD_ROLE_LABELS[word.role] ?? word.role}
-                </span>
-                {' · '}
-                {describeWordResult(word)}
-              </p>
-              <Badge tone={DIFFICULTY_TONE[word.difficulty] ?? 'neutral'}>
-                {word.difficulty}
-              </Badge>
-              <time
-                dateTime={new Date(word.atMs).toISOString()}
-                className="hidden text-right text-xs text-black/45 sm:block"
+          {visible.slice(0, 100).map((word, index) => {
+            const context = wordEventContext(word)
+            return (
+              <li
+                key={`${word.wordId}-${word.role}-${word.atMs}-${index}`}
+                data-testid="word-row"
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto_auto]"
               >
-                {now > 0 ? formatRelativeTime(word.atMs, now) : ''}
-              </time>
-            </li>
-          ))}
+                <div className="min-w-0">
+                  <p className="truncate text-lg font-black">{word.term}</p>
+                  <p className="truncate text-xs text-black/50">
+                    {getWordPackName(word.packId)}
+                  </p>
+                </div>
+                <p className="order-3 col-span-2 text-sm text-black/65 sm:order-none sm:col-span-1">
+                  {context === null ? null : (
+                    <Badge tone="violet" className="mr-1.5 align-[1px]">
+                      {context}
+                    </Badge>
+                  )}
+                  <span className="font-bold text-[#181713]">
+                    {WORD_ROLE_LABELS[word.role] ?? word.role}
+                  </span>
+                  {' · '}
+                  {describeWordResult(word)}
+                </p>
+                <Badge tone={DIFFICULTY_TONE[word.difficulty] ?? 'neutral'}>
+                  {word.difficulty}
+                </Badge>
+                <time
+                  dateTime={new Date(word.atMs).toISOString()}
+                  className="hidden text-right text-xs text-black/45 sm:block"
+                >
+                  {now > 0 ? formatRelativeTime(word.atMs, now) : ''}
+                </time>
+              </li>
+            )
+          })}
         </ul>
       )}
     </section>

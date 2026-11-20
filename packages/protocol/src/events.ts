@@ -62,6 +62,20 @@ export const rateLimitDetailsSchema = z.object({
   retryAfterMs: z.number().int().positive().max(3_600_000),
 })
 
+/** Largest client message a room accepts, in UTF-8 bytes. */
+export const MAX_COMMAND_MESSAGE_BYTES = 64 * 1024
+
+/**
+ * `details` of the `BAD_COMMAND` a room sends right before closing a socket
+ * with 1009 for a message over `MAX_COMMAND_MESSAGE_BYTES`. The room names
+ * the refused `commandId` when it can read it cheaply from the start of the
+ * message. Lenient so later fields stay compatible.
+ */
+export const messageTooLargeDetailsSchema = z.object({
+  reason: z.literal('message-too-large'),
+  maxBytes: z.number().int().positive(),
+})
+
 export const serverEventSchema = z.discriminatedUnion('type', [
   ackServerEventSchema,
   snapshotServerEventSchema,
@@ -83,6 +97,9 @@ export type DomainServerEvent = z.infer<typeof domainServerEventSchema>
 export type ProtocolErrorCode = z.infer<typeof protocolErrorCodeSchema>
 export type ErrorServerEvent = z.infer<typeof errorServerEventSchema>
 export type RateLimitDetails = z.infer<typeof rateLimitDetailsSchema>
+export type MessageTooLargeDetails = z.infer<
+  typeof messageTooLargeDetailsSchema
+>
 export type ServerEvent = z.infer<typeof serverEventSchema>
 export type ServerEventEnvelopeV1 = z.infer<typeof serverEventEnvelopeV1Schema>
 

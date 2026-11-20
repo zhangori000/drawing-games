@@ -37,6 +37,8 @@ export interface WordHistoryEvent {
   readonly points: number | null
   readonly atMs: number
   readonly roomCode: string
+  /** A Showdown relay card (`drew`/`guessed`); absent for normal rounds. */
+  readonly showdown?: true
 }
 
 /** Per-member contribution inside one match. All counters are integers. */
@@ -74,6 +76,47 @@ export const EMPTY_MEMBER_MATCH_STATS: MemberMatchStats = Object.freeze({
   showdownCardsDrawn: 0,
   showdownCardsGuessed: 0,
 })
+
+/** Two seats' contributions added up (fastest: the quicker of the two). */
+export function addMemberMatchStats(
+  left: MemberMatchStats,
+  right: MemberMatchStats,
+): MemberMatchStats {
+  const fastest =
+    left.fastestCorrectMs === null
+      ? right.fastestCorrectMs
+      : right.fastestCorrectMs === null
+        ? left.fastestCorrectMs
+        : Math.min(left.fastestCorrectMs, right.fastestCorrectMs)
+  return {
+    roundsDrawn: left.roundsDrawn + right.roundsDrawn,
+    drawingsSolved: left.drawingsSolved + right.drawingsSolved,
+    drawerSolveMsTotal: left.drawerSolveMsTotal + right.drawerSolveMsTotal,
+    guessesSubmitted: left.guessesSubmitted + right.guessesSubmitted,
+    correctGuesses: left.correctGuesses + right.correctGuesses,
+    closeGuesses: left.closeGuesses + right.closeGuesses,
+    timeToCorrectMsTotal:
+      left.timeToCorrectMsTotal + right.timeToCorrectMsTotal,
+    fastestCorrectMs: fastest,
+    hardWordsSolved: left.hardWordsSolved + right.hardWordsSolved,
+    pointsWon: left.pointsWon + right.pointsWon,
+    showdownCardsDrawn: left.showdownCardsDrawn + right.showdownCardsDrawn,
+    showdownCardsGuessed:
+      left.showdownCardsGuessed + right.showdownCardsGuessed,
+  }
+}
+
+/** Whether the member drew, guessed, or scored anything in the match. */
+export function hasMatchActivity(stats: MemberMatchStats): boolean {
+  return (
+    stats.roundsDrawn > 0 ||
+    stats.guessesSubmitted > 0 ||
+    stats.closeGuesses > 0 ||
+    stats.pointsWon > 0 ||
+    stats.showdownCardsDrawn > 0 ||
+    stats.showdownCardsGuessed > 0
+  )
+}
 
 export type MatchResult = 'win' | 'loss' | 'tie'
 

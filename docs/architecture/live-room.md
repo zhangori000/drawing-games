@@ -360,6 +360,11 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   and clears ready flags. Room word memory survives rematches.
 - Results and final views carry each revealed word's `wordId` (with the
   term), so guests' browsers can remember the words they saw.
+- `final.members` lists every seat with stats in join order, each with
+  `left` (left mid-match). Left seats with no activity
+  (`hasMatchActivity`: nothing drawn, guessed, or scored) are omitted, so a
+  quick leave-and-rejoin under the same name leaves one tagged row, not an
+  empty duplicate.
 - **Only play someone was there for is credited.** At round end the
   reducer records `round.absentIds` (internal): humans disconnected since
   before the drawing started. An absent drawer (a deadline pick nobody
@@ -371,7 +376,11 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   card). A showdown card whose relay drawer was away for all of it is not
   `drew` (`ShowdownCardResult.drawerAbsent`). `account.match` goes only to
   members who took part: present for a finished round, a guess, or a
-  showdown card.
+  showdown card. It is sent once per account: a player who left and
+  rejoined on the same account has one seat per visit, so their seats'
+  stats are added up (`addMemberMatchStats`) and the latest seat gives the
+  team and result (the account keeps one summary per room match, so a
+  second summary would be dropped).
 - **Abandoned matches.** When no human is connected for 60 s
   (`ABANDON_MATCH_MS`; at once if every human left) during a running match,
   due work abandons it: `match.abandoned` (internal) is set, `endedAtMs` is
@@ -518,6 +527,30 @@ Non-members get previews during play and full access in results/stats.
   sender's own socket. Previews are computed with `computeCanvasPreview` and
   throttled to at most one per canvas per 800 ms. When access widens (a team
   solves, results reveal) the newly allowed canvases are sent as snapshots.
+- `canvas.sync` (no fields) resends one socket every canvas its member may
+  see right now, under the same `getCanvasAccess` rules: a snapshot (plus
+  in-progress strokes as `canvas.ops`) for each canvas with full access, a
+  preview for each preview-only canvas, nothing else. It changes no room
+  state, is logged and de-duplicated like any command (a resend after a
+  reconnect only gets its ack, since the new bind already sent fresh
+  canvases), and its canvases go out before its ack. The web client sends
+  it when it drops local ink unsent (a batch refused as `TOO_LARGE`) instead
+  of reconnecting, unless the room is already closing the socket (below),
+  and falls back to a fresh bind if the room refuses it (an older room
+  answers `BAD_COMMAND`) or does not answer within 8 s.
+- Client messages are UTF-8 JSON of at most 64 KiB
+  (`MAX_COMMAND_MESSAGE_BYTES`, shared by room and client). A message that
+  cannot be decoded gets `BAD_COMMAND`, naming its `commandId` when one can
+  be read cheaply from the first 512 characters (`sniffCommandId`; the
+  message is never parsed). An oversized one gets `BAD_COMMAND` "Commands
+  are limited to 64 KiB." with `messageTooLargeDetailsSchema` details
+  (`reason: 'message-too-large'`, `maxBytes`), then close 1009. The web
+  client refuses oversized commands itself before sending. If the room
+  names one anyway, the client gives up that command (`TOO_LARGE`) and the
+  1009 close drops nothing else; without a name the close gives up the
+  largest command sent on that socket. Either way the resume after the
+  close sends fresh canvases. Neither error, nor any other `BAD_COMMAND`
+  that no pending command claims, is shown to the player as a toast.
 - Alarms wake at `min(getNextWakeAtMs, next handshake deadline, cleanup)`.
   A room with no member socket is deleted after 6 hours of inactivity;
   unbound sockets do not keep it alive, and any still open (someone on the
@@ -560,8 +593,10 @@ Non-members get previews during play and full access in results/stats.
   `verifySession` derives memory: `avoid` = drew + seen-report ids;
   `soft` = guessed, missed, offered, unknown-report ids (each capped by
   `WORD_MEMORY_LIMITS`).
-- Rooms report word events at round end (and per showdown card), a match
-  summary at match end, and a one-time backfill when a guest links an
+- Rooms report word events at round end (and per showdown card, tagged
+  `showdown: true` so /me can tell a relay card from the round word it
+  repeats; the actor keeps that field only when it is exactly `true`), a
+  match summary at match end, and a one-time backfill when a guest links an
   account mid-match or on the final screen. The actor also ignores repeated
   `(wordId, role, roomCode, atMs)` events and `(roomCode, matchNumber)`
   summaries, so a retried report never double counts.
@@ -656,7 +691,8 @@ Non-members get previews during play and full access in results/stats.
 - Reducer: full match walkthrough, each rule above, bots, secrecy
   properties under every visibility setting, determinism.
 - Realtime: join/resume/replace, command dedupe, alarm-driven phase changes,
-  canvas fan-out and access, account signup/login/verify/record.
+  canvas fan-out and access (including `canvas.sync`), oversized and
+  malformed messages, account signup/login/verify/record.
 - Browser: create → practice bots → play a round on desktop; two real
   players in two contexts; mobile keyboard stability on the play screen; on a
   390 x 664 phone the guesser's paper stays at least 250 px wide with the

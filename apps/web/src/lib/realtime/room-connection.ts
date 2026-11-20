@@ -1,6 +1,7 @@
 import {
   PROTOCOL_VERSION,
   clientCommandSchema,
+  messageTooLargeDetailsSchema,
   parseServerEventEnvelopeV1,
   recentWordIdsSchema,
   type ClientCommand,
@@ -22,7 +23,7 @@ import {
   createBrowserSocket,
   defaultSocketUrl,
 } from './browser-adapters'
-import { RoomCommandError } from './command-error'
+import { RoomCommandError, isRoomCommandError } from './command-error'
 import type {
   AckStatus,
   ClientSeqStore,
@@ -132,6 +133,13 @@ export class RoomConnection {
   private lastRoomSeq = 0
   /** Bound, but the room's first view since the bind has not arrived yet. */
   private awaitingView = false
+  /** A `canvas.sync` is waiting for its ack (one at a time is enough). */
+  private canvasSyncPending = false
+  /**
+   * The socket whose oversized command the room already named (its 1009
+   * close must not give up another command too).
+   */
+  private oversizeNamedOn: WebSocketLike | null = null
   private viewWaitTimer: unknown = null
   private stopLifecycle: () => void = () => {}
 
@@ -245,8 +253,11 @@ export class RoomConnection {
 
   /**
    * Asks the room for authoritative canvases again (after local ink was
-   * dropped unsent). A fresh bind makes the room send full snapshots of every
-   * canvas this member may see, so the seat is resumed on a new socket.
+   * dropped unsent) with `canvas.sync`: the room resends every canvas this
+   * member may see, in full or as a preview by the usual access rules, on
+   * the same socket. If the room refuses it (an older room answers
+   * `BAD_COMMAND`) or never answers, the seat is resumed on a fresh socket
+   * instead, since a fresh bind also sends full snapshots.
    */
   resync(): void {
     if (this.isTerminal() || this.state.status === 'replaced') return
@@ -254,10 +265,28 @@ export class RoomConnection {
       this.wake()
       return
     }
-    // Not bound yet: the pending handshake ends with fresh snapshots anyway.
-    if (!this.bound) return
-    this.attempt = 0
-    this.openSocket()
+    // Not bound yet, or the room is closing this socket (1009) after naming
+    // an oversized command: the coming bind sends fresh snapshots anyway.
+    if (!this.bound || this.canvasSyncPending) return
+    if (this.oversizeNamedOn !== null && this.oversizeNamedOn === this.socket) {
+      return
+    }
+    this.canvasSyncPending = true
+    const socket = this.socket
+    this.send({ type: 'canvas.sync' }).then(
+      () => {
+        this.canvasSyncPending = false
+      },
+      (error: unknown) => {
+        this.canvasSyncPending = false
+        // A bind since then already sent fresh snapshots; a closed or
+        // expired seat has nothing to resync.
+        if (this.socket !== socket || !this.bound) return
+        if (isRoomCommandError(error) && !syncFallsBack(error)) return
+        this.attempt = 0
+        this.openSocket()
+      },
+    )
   }
 
   /* ------------------------------ handshake ------------------------------- */
@@ -789,6 +818,11 @@ export class RoomConnection {
       return
     }
 
+    if (isMessageTooLarge(event)) {
+      this.handleMessageTooLarge(event.commandId)
+      return
+    }
+
     const entry = event.commandId ? this.pending.get(event.commandId) : null
     if (entry) {
       this.pending.delete(entry.commandId)
@@ -798,6 +832,21 @@ export class RoomConnection {
     }
 
     this.emit({ type: 'error', error })
+  }
+
+  /**
+   * The room refused a message as too large and is about to close the
+   * socket with 1009. A command it names is given up now, like one the
+   * local size check refuses (`TOO_LARGE`, which its caller handles), and
+   * the close then drops nothing else. Without a name the close gives up
+   * the largest command sent on the socket. Either way the resume after the
+   * close brings fresh canvases, and this is not an error to show.
+   */
+  private handleMessageTooLarge(commandId: string | undefined): void {
+    const entry = commandId === undefined ? null : this.pending.get(commandId)
+    if (!entry || entry.sentOn !== this.socket) return
+    this.oversizeNamedOn = entry.sentOn
+    this.rejectTooLarge(entry)
   }
 
   private handleResumeRejected(event: ErrorServerEvent): void {
@@ -871,7 +920,11 @@ export class RoomConnection {
       this.enterRemoved()
       return
     }
-    if (code === CLOSE_TOO_LARGE) this.dropOversizedCommand(socket)
+    const oversizeNamed = this.oversizeNamedOn === socket
+    this.oversizeNamedOn = null
+    if (code === CLOSE_TOO_LARGE && !oversizeNamed) {
+      this.dropOversizedCommand(socket)
+    }
     if (code === CLOSE_REPLACED) {
       this.setState({ status: 'replaced' })
       this.emit({ type: 'notice', notice: 'replaced' })
@@ -994,4 +1047,25 @@ function writeTo(socket: WebSocketLike, data: string): void {
 /** Mirrors the room's name rules (trim, collapse spaces, 24 chars). */
 function normalizeDisplayName(raw: string): string {
   return raw.trim().replace(/\s+/g, ' ').slice(0, 24)
+}
+
+/** The room's `BAD_COMMAND` for a message over its size cap (1009 follows). */
+function isMessageTooLarge(event: ErrorServerEvent): boolean {
+  return (
+    event.code === 'BAD_COMMAND' &&
+    messageTooLargeDetailsSchema.safeParse(event.details).success
+  )
+}
+
+/**
+ * Whether a failed `canvas.sync` should fall back to a reconnect: yes when
+ * the room did not understand it (an older room), failed, or did not answer;
+ * no when the seat or connection is gone, which a reconnect cannot fix.
+ */
+function syncFallsBack(error: RoomCommandError): boolean {
+  return (
+    error.code !== 'CLOSED' &&
+    error.code !== 'UNAUTHORIZED' &&
+    error.code !== 'ROOM_NOT_FOUND'
+  )
 }

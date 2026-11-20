@@ -150,6 +150,16 @@ screen shows "Stats saved to @name" with a "See your stats" link (opening
 /me in a new tab, so the seat stays for a rematch) in place of the sign-up
 prompt.
 
+/me shows every lifetime total the account keeps: matches and win rate,
+points won (team points from the player's own correct guesses), drawings
+solved and how many different words they have drawn, average solve time as
+drawer, correct guesses, accuracy and average time to correct (both timed
+from the start of drawing), fastest correct, hard words, and Showdown cards.
+In Recent words a Showdown relay card carries a "Showdown" tag, so it is not
+mistaken for the round in which the same word was first drawn. A signed-in
+player who leaves a match and rejoins it by code gets one match in their
+stats, with what they did before and after rejoining added together.
+
 ### Custom words and repeats
 
 A host can tag a custom word with the difficulty it should score as by adding
@@ -482,6 +492,11 @@ The final page should make different kinds of contribution visible:
 - correct guesses, guess accuracy, median time to correct, and close attempts;
 - disconnect/reconnect count as a quality diagnostic, not a public shame stat;
 - per-word and per-round timeline for the room's recap.
+
+Players who left mid-match keep their row in the per-player table, tagged
+"Left", so a player who rejoined by code under the same name (a new seat,
+with its own row) can be told apart from the seat they left. A seat that left
+without drawing, guessing, or scoring anything has no row.
 
 Avoid a single “best player” number until evidence shows it cannot reward spam,
 easy-word selection, or other behavior that makes the game worse.

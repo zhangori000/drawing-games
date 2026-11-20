@@ -39,6 +39,15 @@ test('a quick account signs up, sees /me, signs out, and logs back in', async ({
   await expect(
     page.getByRole('heading', { name: 'Lifetime stats' }),
   ).toBeVisible()
+  // Every tracked total has a card, in plain words.
+  const stats = page.getByRole('region', { name: 'Lifetime stats' })
+  for (const label of ['Points won', 'Words drawn', 'Win rate']) {
+    await expect(stats.getByText(label, { exact: true })).toBeVisible()
+  }
+  await expect(stats.getByText('0 wins', { exact: true })).toBeVisible()
+  await expect(
+    stats.getByText('From the start of drawing to your answer'),
+  ).toBeVisible()
   await expect(
     page.getByText(/Words you will never be offered again: \d+/),
   ).toBeVisible()

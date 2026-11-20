@@ -62,7 +62,9 @@ export function sanitizeWordEvent(value: unknown): WordHistoryEvent | null {
 	) {
 		return null;
 	}
-	return { wordId, term, packId, difficulty, role, solved, solveMs, points, atMs, roomCode };
+	const event: WordHistoryEvent = { wordId, term, packId, difficulty, role, solved, solveMs, points, atMs, roomCode };
+	// Optional marker for Showdown relay cards; anything but `true` is dropped.
+	return value.showdown === true ? { ...event, showdown: true } : event;
 }
 
 function sanitizeMemberStats(value: unknown): MemberMatchStats | null {

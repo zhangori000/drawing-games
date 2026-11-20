@@ -153,6 +153,35 @@ function accountClient(token: string | null) {
   return { client, tokens, socket, bind, links, toasts }
 }
 
+test('unreadable-message errors from the room are not shown as toasts', () => {
+  const ctx = accountClient(null)
+  ctx.bind(null)
+  // Garbled or over the size cap, and no command to tie it to.
+  ctx.socket().receive({
+    type: 'protocol.error',
+    code: 'BAD_COMMAND',
+    message: 'Commands must be JSON.',
+    retryable: false,
+  })
+  ctx.socket().receive({
+    type: 'protocol.error',
+    code: 'BAD_COMMAND',
+    message: 'Commands are limited to 64 KiB.',
+    retryable: false,
+    details: { reason: 'message-too-large', maxBytes: 65_536 },
+  })
+  expect(ctx.toasts()).toEqual([])
+  // The room's plain-language errors still show.
+  ctx.socket().receive({
+    type: 'protocol.error',
+    code: 'NOT_ALLOWED',
+    message: 'Only the host can start the match.',
+    retryable: false,
+    commandId: 'long-gone-command',
+  })
+  expect(ctx.toasts()).toEqual(['Only the host can start the match.'])
+})
+
 test('signing out in another tab unlinks the open seat so later play is not recorded', async () => {
   const ctx = accountClient(MINA)
   ctx.bind('mina_42')

@@ -11,6 +11,8 @@ type FinalMember = FinalView['members'][number]
 /**
  * Different kinds of contribution side by side — drawing, guessing, close
  * calls — rather than one "best player" number. Scrolls sideways on phones.
+ * Players who left mid-match are tagged "Left", so someone who rejoined
+ * under the same name (a new seat) can be told apart from their old row.
  */
 export function StatsTable({
   members,
@@ -72,9 +74,11 @@ export function StatsTable({
             return (
               <tr
                 key={member.memberId}
+                data-left={member.left ? 'true' : undefined}
                 className={cx(
                   'border-b border-black/10 last:border-b-0',
                   member.memberId === myId && 'bg-[#f8ff80]/50',
+                  member.left && 'text-black/70',
                 )}
               >
                 <th scope="row" className="px-3 py-2 font-black">
@@ -90,6 +94,14 @@ export function StatsTable({
                     {member.kind === 'bot' ? (
                       <span className="rounded-full bg-[#181713] px-1.5 text-[10px] font-black uppercase text-white">
                         Bot
+                      </span>
+                    ) : null}
+                    {member.left ? (
+                      <span
+                        data-testid="left-tag"
+                        className="shrink-0 rounded-full border border-black/40 px-1.5 text-[10px] font-black uppercase text-black/70"
+                      >
+                        Left
                       </span>
                     ) : null}
                   </span>

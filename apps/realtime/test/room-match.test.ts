@@ -112,6 +112,57 @@ describe('live drawing', () => {
 		}
 	});
 
+	it('resends the canvases a member may see on canvas.sync, under the same access rules', async () => {
+		const { ana, ben, cy, anaView, cyView } = await startDrawingRoom();
+		try {
+			const sun = requireRound(anaView).mine?.canvasId ?? '';
+			const moon = requireRound(cyView).mine?.canvasId ?? '';
+			await run(ana, { type: 'drawing.batch', operations: stroke('s1') });
+			await run(cy, { type: 'drawing.batch', operations: stroke('m1', 0.5) });
+			await ben.domain('canvas.ops', (payload) => payload.canvasId === sun);
+			await ben.domain('canvas.preview', (payload) => payload.canvasId === moon);
+			await ana.domain('canvas.preview', (payload) => payload.canvasId === moon);
+			await cy.domain('canvas.preview', (payload) => payload.canvasId === sun);
+			// A half-drawn stroke is replayed as ops after the snapshot.
+			const begun = stroke('s2', 0.6).slice(0, 2);
+			await run(ana, { type: 'drawing.batch', operations: begun });
+			await ben.domain('canvas.ops', (payload) => payload.canvasId === sun);
+			await Promise.all([ana.barrier(), ben.barrier(), cy.barrier()]);
+			for (const client of [ana, ben, cy]) client.clearInbox();
+
+			// A guesser: their team's canvas in full, the opponent's as a preview only.
+			const sync = { commandId: 'sync_ben_1', clientSeq: 900 };
+			const syncId = ben.send({ type: 'canvas.sync' }, sync);
+			expect((await ben.ack(syncId)).event.status).toBe('applied');
+			const snapshot = await ben.domain('canvas.snapshot', (payload) => payload.canvasId === sun);
+			expect(snapshot).toMatchObject({ team: 'A', document: { strokeOrder: ['s1'] } });
+			expect(await ben.domain('canvas.ops', (payload) => payload.canvasId === sun)).toMatchObject({ ops: begun });
+			const preview = await ben.domain('canvas.preview', (payload) => payload.canvasId === moon);
+			expect(preview.cells.some((cell) => cell === '#112233')).toBe(true);
+			expect(ben.hasDomain('canvas.snapshot', (payload) => payload.canvasId === moon)).toBe(false);
+			expect(ben.hasDomain('canvas.ops', (payload) => payload.canvasId === moon)).toBe(false);
+
+			// The drawer gets their own canvas back; nobody else is sent anything.
+			await ana.ack(ana.send({ type: 'canvas.sync' }));
+			expect((await ana.domain('canvas.snapshot', (payload) => payload.canvasId === sun)).document.strokeOrder).toEqual(['s1']);
+			await ana.domain('canvas.preview', (payload) => payload.canvasId === moon);
+			await cy.barrier();
+			expect(cy.hasDomain('canvas.snapshot')).toBe(false);
+			expect(cy.hasDomain('canvas.preview')).toBe(false);
+
+			// A resend of the same command (after a reconnect, whose bind already
+			// sent fresh canvases) is only acknowledged.
+			await ben.barrier();
+			ben.clearInbox();
+			expect((await ben.ack(ben.send({ type: 'canvas.sync' }, sync))).event.status).toBe('duplicate');
+			await ben.barrier();
+			expect(ben.hasDomain('canvas.snapshot')).toBe(false);
+			expect(ben.hasDomain('canvas.preview')).toBe(false);
+		} finally {
+			closeAll(ana, ben, cy);
+		}
+	});
+
 	it('refuses ops from anyone but the drawer', async () => {
 		const { ana, ben, cy } = await startDrawingRoom();
 		try {

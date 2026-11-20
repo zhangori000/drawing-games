@@ -802,12 +802,14 @@ describe('rematch and membership mid-match', () => {
     expect(driver.state.hostId).toBe('ben')
     finishQuickMatch(driver)
     const final = driver.view('ben').final!
-    expect(final.members.map((member) => member.displayName)).toEqual([
-      'Ana',
-      'Ben',
-      'Cy',
-      'Di',
-      'Eve',
+    // Di left before doing anything, so has no row; Ana drew round 1.
+    expect(
+      final.members.map((member) => [member.displayName, member.left]),
+    ).toEqual([
+      ['Ana', true],
+      ['Ben', false],
+      ['Cy', false],
+      ['Eve', false],
     ])
     expect(final.rounds[0]?.teams.A.drawerName).toBe('Ana')
 
@@ -821,6 +823,37 @@ describe('rematch and membership mid-match', () => {
     expect(driver.view('ben').lobby?.blockers).toContain(
       'Sun needs at least 2 players',
     )
+  })
+
+  it('tells a rejoined player apart from the seat they left', () => {
+    const driver = startHumanRoom({ settings: { rounds: 4, showdown: false } })
+    expect(driver.drawer('B')).toBe('cy')
+    driver.pickWords()
+    driver.solve('A', 'ben')
+    driver.solve('B', 'di')
+    // Cy drew round 1 for Sun, leaves, and comes back as "Cy" (a new seat),
+    // then leaves and rejoins once more before doing anything.
+    driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    driver.ok({ type: 'member.leave', memberId: 'cy' })
+    driver.join('cy2', 'Cy', { team: 'B' })
+    driver.ok({ type: 'member.leave', memberId: 'cy2' })
+    driver.join('cy3', 'Cy', { team: 'B' })
+    expect(
+      driver.view('cy3').members.find((member) => member.id === 'cy3')
+        ?.displayName,
+    ).toBe('Cy')
+    finishQuickMatch(driver)
+    const final = driver.view('cy3').final!
+    const rows = final.members.filter((member) => member.team === 'B')
+    expect(
+      rows.map((member) => [member.memberId, member.displayName, member.left]),
+    ).toEqual([
+      ['cy', 'Cy', true],
+      ['di', 'Di', false],
+      ['cy3', 'Cy', false],
+    ])
+    expect(rows[0]?.stats.roundsDrawn).toBe(1)
+    expect(rows[2]?.stats.roundsDrawn).toBeGreaterThan(0)
   })
 
   it('skips drawers past their reconnect grace', () => {

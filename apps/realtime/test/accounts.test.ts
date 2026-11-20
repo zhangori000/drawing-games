@@ -358,6 +358,23 @@ describe('account history recorded by rooms', () => {
 		});
 	});
 
+	it('keeps the Showdown tag on relay card events', async () => {
+		const username = uniqueUsername('relay');
+		const { token } = await signup(username);
+		const round = wordEvent({ wordId: 'w-attic', role: 'drew', atMs: 1_000, solved: true, solveMs: 17_000, points: 121 });
+		const relay: WordHistoryEvent = {
+			...wordEvent({ wordId: 'w-attic', role: 'drew', atMs: 2_000, solved: true, solveMs: 11_000, points: 10 }),
+			showdown: true,
+		};
+		await recordAccountWords(env, username, [round, relay]);
+		const profile = await getMe(token);
+		expect(profile.recentWords).toEqual([relay, round]);
+		expect(profile.recentWords[1]).not.toHaveProperty('showdown');
+		expect(profile.stats.distinctWordsDrawn).toBe(1);
+		expect(sanitizeWordEvent({ ...round, showdown: 'yes' })).not.toHaveProperty('showdown');
+		expect(sanitizeWordEvent({ ...round, showdown: false })).not.toHaveProperty('showdown');
+	});
+
 	it('drops malformed word events but keeps valid ones from the same batch', async () => {
 		const username = uniqueUsername('junk');
 		const { token } = await signup(username);

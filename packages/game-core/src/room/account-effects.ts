@@ -6,6 +6,7 @@ import { otherTeam, TEAM_IDS } from '../types'
 import type { RoomContext } from './context'
 import { emit, updateMatch } from './context'
 import { findMember } from './members'
+import { addMemberMatchStats } from './records'
 import type {
   MatchResult,
   MatchSummaryRecord,
@@ -169,7 +170,8 @@ export function roundWordEvents(
 
 /**
  * Showdown: the relay drawer `drew` the card (unless they were away for all
- * of it, `drawerId` null); the solver `guessed` it.
+ * of it, `drawerId` null); the solver `guessed` it. Both are tagged
+ * `showdown` so history can tell a relay card from the round it came from.
  */
 export function showdownCardEvents(
   state: RoomState,
@@ -180,12 +182,12 @@ export function showdownCardEvents(
   atMs: number,
 ): WordEventsByMember {
   const byMember: WordEventsByMember = new Map()
-  if (drawerId !== null) {
-    push(byMember, drawerId, wordEvent(state, card, 'drew', outcome, atMs))
-  }
-  if (guesserId !== null) {
-    push(byMember, guesserId, wordEvent(state, card, 'guessed', outcome, atMs))
-  }
+  const event = (role: WordHistoryRole): WordHistoryEvent => ({
+    ...wordEvent(state, card, role, outcome, atMs),
+    showdown: true,
+  })
+  if (drawerId !== null) push(byMember, drawerId, event('drew'))
+  if (guesserId !== null) push(byMember, guesserId, event('guessed'))
   return byMember
 }
 
@@ -279,13 +281,37 @@ function matchSummaryFor(
   }
 }
 
-/** `account.match` for every account member who took part in the match. */
+/**
+ * One `account.match` per account that took part in the match. A player who
+ * left and rejoined has several seats on one account: their stats are added
+ * up, and the seat they joined last (the one they finished on) gives the
+ * team and result. Accounts record one summary per room match, so separate
+ * summaries would keep only the first seat's play.
+ */
 export function emitMatchSummaries(ctx: RoomContext, match: MatchState): void {
+  const seatsByAccount = new Map<string, RoomMember[]>()
   for (const member of ctx.state.members) {
     if (member.kind !== 'human' || member.accountId === null) continue
-    const summary = matchSummaryFor(ctx, match, member)
-    if (summary === null) continue
-    emit(ctx, { type: 'account.match', accountId: member.accountId, summary })
+    const seats = seatsByAccount.get(member.accountId)
+    if (seats === undefined) seatsByAccount.set(member.accountId, [member])
+    else seats.push(member)
+  }
+  for (const [accountId, seats] of seatsByAccount) {
+    // Members are in join order, so the last summary is the latest seat's.
+    const summaries = seats.flatMap((seat) => {
+      const summary = matchSummaryFor(ctx, match, seat)
+      return summary === null ? [] : [summary]
+    })
+    const latest = summaries.at(-1)
+    if (latest === undefined) continue
+    const stats = summaries
+      .map((summary) => summary.stats)
+      .reduce(addMemberMatchStats)
+    emit(ctx, {
+      type: 'account.match',
+      accountId,
+      summary: { ...latest, stats },
+    })
   }
 }
 

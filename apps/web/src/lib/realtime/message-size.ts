@@ -1,9 +1,11 @@
+import { MAX_COMMAND_MESSAGE_BYTES } from '@drawing-games/protocol'
+
 /**
  * The room server refuses any client message larger than this many UTF-8
- * bytes and closes the socket with 1009 (mirrors `MAX_MESSAGE_BYTES` in
- * apps/realtime/src/room/constants.ts).
+ * bytes and closes the socket with 1009 (the protocol's shared cap, also
+ * the room's `MAX_MESSAGE_BYTES`).
  */
-export const MAX_CLIENT_MESSAGE_BYTES = 64 * 1024
+export const MAX_CLIENT_MESSAGE_BYTES = MAX_COMMAND_MESSAGE_BYTES
 
 /** Exact UTF-8 length of a JavaScript string, without allocating a buffer. */
 export function utf8ByteLength(text: string): number {

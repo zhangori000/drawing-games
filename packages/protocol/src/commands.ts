@@ -233,6 +233,19 @@ export const drawingBatchCommandSchema = z.strictObject({
     .max(MAX_DRAWING_OPERATIONS_PER_BATCH),
 })
 
+/**
+ * Asks the room for fresh copies of every canvas this member may see right
+ * now: full snapshots (plus in-progress strokes) of the canvases they may
+ * see in full, previews of the ones they may only preview, under the same
+ * per-viewer access rules as every other delivery. The room changes nothing
+ * and acks once they are sent. A lightweight resync after local ink was
+ * dropped unsent; older rooms refuse it as `BAD_COMMAND`, so clients fall
+ * back to reconnecting.
+ */
+export const canvasSyncCommandSchema = z.strictObject({
+  type: z.literal('canvas.sync'),
+})
+
 export const surrenderCommandSchema = z.strictObject({
   type: z.literal('surrender.vote'),
   approve: z.boolean(),
@@ -263,6 +276,7 @@ export const clientCommandSchema = z.discriminatedUnion('type', [
   guessCommandSchema,
   hintCommandSchema,
   drawingBatchCommandSchema,
+  canvasSyncCommandSchema,
   surrenderCommandSchema,
   rematchCommandSchema,
 ])
@@ -304,6 +318,7 @@ export type DraftReplaceCommand = z.infer<typeof draftReplaceCommandSchema>
 export type GuessCommand = z.infer<typeof guessCommandSchema>
 export type HintCommand = z.infer<typeof hintCommandSchema>
 export type DrawingBatchCommand = z.infer<typeof drawingBatchCommandSchema>
+export type CanvasSyncCommand = z.infer<typeof canvasSyncCommandSchema>
 export type SurrenderCommand = z.infer<typeof surrenderCommandSchema>
 export type RematchCommand = z.infer<typeof rematchCommandSchema>
 export type ClientCommand = z.infer<typeof clientCommandSchema>

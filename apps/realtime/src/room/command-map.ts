@@ -9,7 +9,9 @@ export type MappedCommand =
 	/** Accepted and acknowledged without touching room state. */
 	| { readonly kind: 'ack-only' }
 	/** Needs the account token verified before it becomes `member.link-account`. */
-	| { readonly kind: 'link-account'; readonly accountToken: string | null };
+	| { readonly kind: 'link-account'; readonly accountToken: string | null }
+	/** Resend this socket fresh copies of the canvases its member may see. */
+	| { readonly kind: 'canvas-sync' };
 
 /** Translates a wire command from an authenticated member into a reducer command. */
 export function mapMemberCommand(command: MemberCommand, memberId: string): MappedCommand {
@@ -54,6 +56,8 @@ export function mapMemberCommand(command: MemberCommand, memberId: string): Mapp
 				ops: command.operations,
 				...(command.canvasId === undefined ? {} : { canvasId: command.canvasId }),
 			});
+		case 'canvas.sync':
+			return { kind: 'canvas-sync' };
 		case 'surrender.vote':
 			return room({ type: 'surrender.vote', actorId, approve: command.approve });
 		case 'rematch.vote':
