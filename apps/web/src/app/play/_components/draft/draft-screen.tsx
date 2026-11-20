@@ -65,7 +65,9 @@ export function DraftScreen({ round }: { readonly round: RoundView }) {
             <p
               className={cx(
                 'rounded-2xl border-2 border-[#181713] px-4 py-2 font-mono text-2xl font-black tabular-nums',
-                urgent ? 'bg-[#ff6b4a] text-white' : 'bg-white',
+                urgent
+                  ? 'animate-urgent-pulse bg-[#ff6b4a] text-[#181713] motion-reduce:animate-none'
+                  : 'bg-white',
               )}
               aria-hidden="true"
             >

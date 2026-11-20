@@ -6,11 +6,13 @@ import {
 	type AccountErrorBody,
 } from '@drawing-games/protocol';
 
+import { takeClientToken, type ClientLimitName } from '../client-limits';
 import type { Env } from '../env';
 import { bearerToken, CORS_HEADERS, jsonResponse, methodNotAllowed, preflightResponse, readJsonBody, type JsonBodyResult } from '../http';
+import { retryAfterSeconds } from '../rate-limit';
 import { accountActor } from './actor-name';
 import { describeError } from './log';
-import { ACCOUNT_MESSAGES, type AccountErrorCode, type AccountFailure } from './results';
+import { ACCOUNT_MESSAGES, rateLimitedMessage, tooManySignupsMessage, type AccountErrorCode, type AccountFailure } from './results';
 
 const STATUS_BY_CODE: Readonly<Record<AccountErrorCode, number>> = Object.freeze({
 	INVALID_INPUT: 400,
@@ -60,6 +62,9 @@ async function signup(request: Request, env: Env): Promise<Response> {
 	if (!body.ok) return unreadableBody(body);
 	const parsed = signupRequestSchema.safeParse(body.value);
 	if (!parsed.success) return invalidInput(parsed.error.issues);
+	// Counted once valid, right before the costly part (a PBKDF2 hash, a new actor).
+	const limited = clientLimited(request, 'signup');
+	if (limited !== null) return limited;
 	const result = await accountActor(env, parsed.data.username).signup(parsed.data);
 	return result.ok ? jsonResponse({ token: result.token, profile: result.profile }, 201) : failureResponse(result);
 }
@@ -69,6 +74,8 @@ async function login(request: Request, env: Env): Promise<Response> {
 	if (!body.ok) return unreadableBody(body);
 	const parsed = loginRequestSchema.safeParse(body.value);
 	if (!parsed.success) return invalidInput(parsed.error.issues);
+	const limited = clientLimited(request, 'login');
+	if (limited !== null) return limited;
 	const result = await accountActor(env, parsed.data.username).login(parsed.data);
 	return result.ok ? jsonResponse({ token: result.token, profile: result.profile }, 200) : failureResponse(result);
 }
@@ -120,8 +127,16 @@ function accountError(code: AccountErrorCode, error: string, headers?: HeadersIn
 
 function failureResponse(failure: AccountFailure): Response {
 	const headers: Record<string, string> = {};
-	if (failure.retryAfterMs !== undefined) headers['Retry-After'] = String(Math.ceil(failure.retryAfterMs / 1000));
+	if (failure.retryAfterMs !== undefined) headers['Retry-After'] = retryAfterSeconds(failure.retryAfterMs);
 	return accountError(failure.code, failure.error, headers);
+}
+
+/** `429 RATE_LIMITED` when this client address is over its `name` limit, else null. */
+function clientLimited(request: Request, name: Extract<ClientLimitName, 'signup' | 'login'>): Response | null {
+	const retryAfterMs = takeClientToken(request, name);
+	if (retryAfterMs === 0) return null;
+	const message = name === 'signup' ? tooManySignupsMessage(retryAfterMs) : rateLimitedMessage(retryAfterMs);
+	return failureResponse({ ok: false, code: 'RATE_LIMITED', error: message, retryAfterMs });
 }
 
 function unauthorized(): Response {

@@ -134,6 +134,17 @@ them when joining a room, so they are dealt less often. "Seen" means the
 player's team word, every draft card they were dealt as drawer, and the other
 team's word, because round results reveal both words to everyone.
 
+A seat in a room follows the browser's quick-account sign-in. Signing in
+(in any tab, or with "Create a quick account" on the final screen) links the
+open seat at once and credits the match so far; signing out (in any tab, or
+when the account's session turns out to be expired) unlinks it, so nothing
+more from that room is recorded to the account. A toast says which happened
+("Saved to @name: this match is in your stats." / "Signed out: this seat no
+longer saves stats."), the lobby's "Stats saved" tag follows, and the final
+screen shows "Stats saved to @name" with a "See your stats" link (opening
+/me in a new tab, so the seat stays for a rematch) in place of the sign-up
+prompt.
+
 ### Custom words and repeats
 
 The host's custom words are answers, so only the current host ever receives
@@ -233,6 +244,20 @@ Phone choices that follow from this (portrait and landscape):
   the 15-second pick; tapping a row picks it and its `?` shows the meaning
   and the "seen it" / "don't know it" swaps. The top bar's countdown is the
   only timer.
+- **Big enough to tap.** Controls are at least 40 px in their smaller
+  dimension (most are 44 px), inline links included ("Log in to save stats",
+  the account page's "Log in" / "Create an account" switch). Compact
+  keyboard keys are 40 px tall and as wide as ten keys to a row allow, like
+  the phone's own keyboard: about 35 px on a 390 px portrait phone. On
+  landscape phones the guess sidebar takes the width the drawing does not
+  need (the drawing is limited by height there), so the keys are 37 px wide
+  from about 740 px and 30 px on a 667 x 375 iPhone SE, and the drawing
+  keeps its size.
+- **Readable under pressure.** In its last 10 seconds the countdown turns
+  coral with dark text (about 6.4:1; white on coral was 2.8:1) and a ring
+  pulses out from it once a second. It never fades, and with reduced motion
+  it stays still. Other small text on coral (error toasts, a guess that did
+  not send, form errors, "Leave room") is dark for the same reason.
 
 ## Word-length reveal vote
 
@@ -346,6 +371,38 @@ connected for a full minute (or everyone has left), the match is abandoned:
 the room goes back to the lobby and the match is not recorded, so practice
 bots never play out a match, and hand someone a loss, after they closed the
 tab. A minute is meant to survive a locked phone or a brief server restart.
+
+## Fair-use limits
+
+The servers protect themselves from floods and scripts. The limits are set
+far above real play, so nobody in an actual game (or testing locally with
+many tabs) should ever meet one:
+
+- **Actions in a room.** Each player can send 20 actions back to back, then 5
+  a second (people click a few times a second at most, and guesses are
+  already paced to about 2 a second). Drawing has its own, larger budget:
+  240 updates back to back, then 30 a second. A fast scribbler sends about
+  15 a second, and the burst covers the backlog a phone sends after a
+  reconnect. An action over the limit is refused with "Too many actions at
+  once. Wait a moment and try again." and nothing happens, so it can simply
+  be sent again. Re-sending an action the room already applied (as a
+  reconnect does) is always free. The budget belongs to the player, not the
+  connection, so reconnecting does not reset it.
+- **Joining.** A connection has 30 seconds to join or rejoin the room;
+  otherwise the server closes it and the browser quietly reconnects. Someone
+  can keep the join form open as long as they like, and joining stays
+  instant.
+- **Idle rooms.** A room is deleted after 6 hours without activity once no
+  player is connected. A tab still on the join form does not keep it alive;
+  it is told the room no longer exists.
+- **Per network.** Creating rooms (30 at once, then one every 2 seconds),
+  looking up room codes or opening room connections (120, then 2 a second),
+  creating accounts (20, then one every 30 seconds), and signing in (30, then
+  one every 5 seconds) are limited per internet address. The browser on the
+  computer running the local dev server is never limited; phones on the
+  same Wi-Fi are, but far above what a party needs. These limits live in
+  server memory as a first line of defence; a public deployment should add a
+  Cloudflare rate-limiting rule as well.
 
 ## Surrender and rematch
 

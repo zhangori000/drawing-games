@@ -53,6 +53,15 @@ export const errorServerEventSchema = z.strictObject({
   details: z.json().optional(),
 })
 
+/**
+ * `details` of a room `RATE_LIMITED` error: the command was refused by the
+ * room's command budget, not applied, and may be resent unchanged (same
+ * commandId) after `retryAfterMs`. Lenient so later fields stay compatible.
+ */
+export const rateLimitDetailsSchema = z.object({
+  retryAfterMs: z.number().int().positive().max(3_600_000),
+})
+
 export const serverEventSchema = z.discriminatedUnion('type', [
   ackServerEventSchema,
   snapshotServerEventSchema,
@@ -73,6 +82,7 @@ export type SnapshotServerEvent = z.infer<typeof snapshotServerEventSchema>
 export type DomainServerEvent = z.infer<typeof domainServerEventSchema>
 export type ProtocolErrorCode = z.infer<typeof protocolErrorCodeSchema>
 export type ErrorServerEvent = z.infer<typeof errorServerEventSchema>
+export type RateLimitDetails = z.infer<typeof rateLimitDetailsSchema>
 export type ServerEvent = z.infer<typeof serverEventSchema>
 export type ServerEventEnvelopeV1 = z.infer<typeof serverEventEnvelopeV1Schema>
 

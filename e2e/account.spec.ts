@@ -143,3 +143,41 @@ test.describe('phone-sized /me', () => {
     await expect(field).toBeHidden()
   })
 })
+
+test('signing out in another tab stops the open room seat saving stats', async ({
+  page,
+}) => {
+  const username = `e2e_so${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`
+  await page.goto('/account')
+  await page.getByLabel('Username').fill(username)
+  await page.getByLabel('Password').fill('correct-horse-42')
+  await page.getByRole('button', { name: 'Create account' }).click()
+  await expect(page).toHaveURL(/\/me$/)
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Practice with bots' }).click()
+  await page.waitForURL(/\/play\/[A-Z0-9]{4,8}/, { timeout: 30_000 })
+  await expect(
+    page.getByRole('heading', { name: 'Join the room' }),
+  ).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: 'Join room' }).click()
+  const me = page
+    .locator('[data-testid="lobby-member"]')
+    .filter({ hasText: '(you)' })
+  await expect(me.getByText('Stats saved')).toBeVisible({ timeout: 30_000 })
+
+  // Sign out on /me in a second tab of the same browser.
+  const other = await page.context().newPage()
+  await other.goto('/me')
+  await other.getByRole('button', { name: 'Sign out' }).last().click()
+  await expect(
+    other.getByRole('heading', { name: 'Keep your words and stats' }),
+  ).toBeVisible()
+  await other.close()
+
+  // The room tab unlinks its seat at once, so nothing more is recorded.
+  await expect(
+    page.getByText('Signed out: this seat no longer saves stats.'),
+  ).toBeVisible()
+  await expect(me.getByText('Stats saved')).toHaveCount(0)
+})

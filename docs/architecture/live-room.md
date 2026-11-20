@@ -362,7 +362,8 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   (internal) holds members already credited: account members at match start
   or join, and guests once they link. Linking again, unlinking and relinking,
   or linking a different account never credits the match twice; in the lobby
-  nothing is credited.
+  nothing is credited. Unlinking (`accountId: null`, what a sign-out sends)
+  stops the seat's later rounds and the match summary reaching the account.
 
 ### Practice bots
 
@@ -441,6 +442,17 @@ Non-members get previews during play and full access in results/stats.
   That socket is accepted through the hibernation API without an attachment
   (never a member, nothing stored); a request-bound `accept()` closed during
   the fetch raised an uncaught "Network connection lost".
+- Per-address HTTP limits (`apps/realtime/src/client-limits.ts`, token
+  buckets keyed by `CF-Connecting-IP`, IPv6 by /64): `POST /rooms` 30 back to
+  back then one per 2 s; room lookups (`GET /rooms/:code` and socket
+  upgrades together, against code probing) 120 then 2/s. Over the limit:
+  `429 {error, code: 'RATE_LIMITED', retryAfterMs}` with `Retry-After`
+  (exposed to browsers via `Access-Control-Expose-Headers`); a refused
+  upgrade is retried by the client's backoff. Requests without an address
+  (unit tests calling the Worker directly) or from loopback (a browser on the
+  machine running `wrangler dev`, the e2e suite) are never limited. Buckets
+  live in each isolate's memory (best effort, no config); a public deployment
+  should add a Cloudflare rate-limiting rule for global limits.
 - Handshake: the first command on a socket must be `room.join` or
   `room.resume`. Join generates a member id and a 32-byte resume token, stores
   only `SHA-256(token)`, sends `session.issued` privately, then a snapshot and
@@ -448,6 +460,26 @@ Non-members get previews during play and full access in results/stats.
   `UNAUTHORIZED` so the browser can show the join screen. Only one live socket
   per member: a newer socket closes the older one with code 4001 (the client
   must not auto-reconnect after 4001).
+- Handshake deadline: a socket that is not bound to a member (never joined,
+  or its member left) is closed with code 4008 `HANDSHAKE_TIMEOUT_MS` (30 s)
+  after it connected or was unbound. The attachment stores
+  `unboundSinceMs`, and the alarm wakes at the earliest deadline. Clients
+  treat 4008 like any drop and reconnect with backoff, so a tab on the join
+  form just reopens its socket and joining stays instant. The deadline is
+  armed at its exact time even when already due: moving a due alarm (e.g.
+  from the constructor when the alarm wakes the room) makes the runtime
+  cancel its handler.
+- Command budgets (`CommandLimiter`, `COMMAND_RATE_LIMITS`), checked right
+  after decoding and before validation: a bound socket spends its member's
+  budget (so reconnecting never refills it), an unbound socket its own.
+  Control lane (everything but drawing): 20 back to back, then 5/s. Drawing
+  lane (`drawing.batch`): 240, then 30/s (the web client flushes at most
+  20/s and resends its whole backlog after a reconnect). Over budget the
+  command gets `protocol.error` `RATE_LIMITED`, `retryable: true`,
+  `details: {retryAfterMs}` (`rateLimitDetailsSchema`); it is not applied or
+  logged, so resending it unchanged after the delay is safe. Resends of
+  commands already in the command log are answered without spending budget.
+  Budgets are memory only (a woken room starts full).
 - Every command is de-duplicated by `commandId` (bounded table, newest 1000),
   including drawing batches, because undo/redo/clear are not idempotent.
 - After each accepted change: persist state, run effects, ack the sender,
@@ -459,8 +491,10 @@ Non-members get previews during play and full access in results/stats.
   sender's own socket. Previews are computed with `computeCanvasPreview` and
   throttled to at most one per canvas per 800 ms. When access widens (a team
   solves, results reveal) the newly allowed canvases are sent as snapshots.
-- Alarms wake at `min(getNextWakeAtMs, cleanup)`; idle rooms with no sockets
-  are deleted after 6 hours of inactivity.
+- Alarms wake at `min(getNextWakeAtMs, next handshake deadline, cleanup)`.
+  A room with no member socket is deleted after 6 hours of inactivity;
+  unbound sockets do not keep it alive, and any still open (someone on the
+  join form) get `ROOM_NOT_FOUND` and close 4404 when it is deleted.
 - Account effects call `apps/realtime/src/accounts/client.ts` inside
   `ctx.waitUntil` and never block or fail the game loop.
 
@@ -471,6 +505,11 @@ Non-members get previews during play and full access in results/stats.
   credentials; `429` after 8 failures in 10 minutes). `DELETE
 /accounts/session` logs out the bearer token. `GET /accounts/me` returns
   `AccountProfileView`. `PATCH /accounts/me {displayName}`.
+- Per-address limits on top of the per-account lockout, counted only once
+  the body is valid (right before the PBKDF2 work): sign-ups 20 back to back
+  then one per 30 s ("Too many new accounts from this network…"), sign-ins
+  30 then one per 5 s across usernames. Both answer `429 RATE_LIMITED` with
+  `Retry-After`; same keying and loopback exemption as the room routes.
 - Request bodies are JSON objects of at most 16 KiB (`readJsonBody`). A
   declared `Content-Length` over the cap is refused without reading the
   body, and a body without one is read only until it passes the cap: both
@@ -545,8 +584,16 @@ Non-members get previews during play and full access in results/stats.
   redo, clear; then 12 colors in a grid), and a narrow panel in the landscape
   sidebar. Sizes open from a size button. Desktop keeps the single strip.
 - Landscape phones (`wide-short`): nothing floats over the paper. The
-  drawer's sidebar is 13 rem (tools, opponent row, feed); a guesser's is
-  19 rem (opponent row, feed, dock with the compact keys).
+  drawer's sidebar is 13 rem (tools, opponent row, feed). A guesser's
+  (opponent row, feed, dock with the compact keys) takes the width the
+  height-limited 4:3 paper leaves over:
+  `clamp(19rem, 100cqw - (100cqh - 5.5rem) * 4/3 - 1rem, 26rem)`, with the
+  play area under the top bar as a size container. The 5.5 rem assumes a
+  shorter banner than the real one, so the paper never shrinks; letter keys
+  are 30 px wide on 667 x 375 and 37 px from about 740 px wide.
+- Touch targets are at least 40 px in their smaller dimension (inline links
+  get a 44 px box); compact keys are 40 px tall and one tenth of the row
+  wide.
 - The word draft on phones (narrower than 640 px or shorter than 560 px)
   shows each card as a compact row (difficulty, term, bonus; tap to pick)
   with the meaning and swap buttons behind a `?` expander, so every card and
@@ -560,8 +607,18 @@ Non-members get previews during play and full access in results/stats.
   sessionStorage. A new tab with a saved seat asks "Continue as X" or "Join as
   someone new", which also makes multi-tab local testing easy.
 - Guests keep the last 300 seen word ids locally and send them on join.
-- The account token lives in localStorage and is sent on join/resume and via
-  `account.link` after signing up mid-session.
+- The account token lives in localStorage and is sent on join/resume. A
+  bound `RoomClient` also watches the token store (this tab and, through
+  `storage` events, every other tab) and reconciles the seat with it: when
+  `view.me.accountId` differs from the signed-in account it sends
+  `account.link` with the current token, or `null` after a sign-out, so a
+  seat stops being recorded to an account the moment this browser signs out
+  (also on the first view after reopening a room signed out meanwhile). Each
+  mismatch is tried once (a refused link for an expired session is not
+  retried until the seat or the token changes), and a request for the same
+  token already in flight is shared, so the final screen's sign-up form and
+  the automatic link send one command. A seat on another device is not
+  unlinked by signing out here.
 
 ## Tests that must exist
 

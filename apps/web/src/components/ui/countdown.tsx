@@ -71,8 +71,9 @@ export function Countdown({
       aria-label={`${label}: ${secondsLeft} seconds`}
       className={cx(
         'grid min-w-16 place-items-center rounded-full border-2 border-[#181713] px-3 py-1.5 font-mono text-base font-black tabular-nums transition-colors',
+        // Ink on coral is about 6.4:1 (white on coral was 2.8:1).
         urgent
-          ? 'animate-pulse bg-[#ff6b4a] text-white'
+          ? 'animate-urgent-pulse bg-[#ff6b4a] text-[#181713] motion-reduce:animate-none'
           : 'bg-white text-[#181713]',
         className,
       )}

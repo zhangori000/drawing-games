@@ -13,7 +13,7 @@ const SOLID =
 const VARIANT_CLASSES: Readonly<Record<ButtonVariant, string>> = {
   primary: `${SOLID} bg-[#5c4cf2] text-white`,
   secondary: `${SOLID} bg-white text-[#181713]`,
-  accent: `${SOLID} bg-[#ff6b4a] text-white`,
+  accent: `${SOLID} bg-[#ff6b4a] text-[#181713]`,
   lime: `${SOLID} bg-[#f8ff80] text-[#181713]`,
   success: `${SOLID} bg-[#1f9d72] text-white`,
   dark: `${SOLID} bg-[#181713] text-white`,

@@ -176,6 +176,43 @@ test.describe('iPhone-sized screen (390 x 664)', () => {
       await expect(input).toHaveAttribute('inputmode', 'text')
       await page.getByRole('button', { name: 'Use compact keyboard' }).tap()
       await expect(keyboard).toBeVisible()
+
+      // Big enough to tap: 40 px controls; letter keys 40 px tall and as
+      // wide as ten to a row allows (like the phone's own keyboard).
+      for (const name of ['Use phone keyboard', 'Send guess', 'Send']) {
+        const box = await boxOf(page.getByRole('button', { name, exact: true }))
+        expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(40)
+      }
+      const portraitKey = await boxOf(
+        keyboard.getByRole('button', { name: 'q', exact: true }),
+      )
+      expect(portraitKey.height).toBeGreaterThanOrEqual(40)
+      expect(portraitKey.width).toBeGreaterThanOrEqual(30)
+
+      // Landscape: the guess sidebar takes the width the paper does not
+      // need, so the keys stay phone-sized and the paper keeps its size.
+      for (const [width, height, minKey] of [
+        [667, 375, 29],
+        [844, 390, 34],
+      ] as const) {
+        await page.setViewportSize({ width, height })
+        await expect(page.getByTestId('play-layout')).toHaveAttribute(
+          'data-layout',
+          'wide-short',
+        )
+        await expect(keyboard).toBeVisible()
+        const key = await boxOf(
+          keyboard.getByRole('button', { name: 'q', exact: true }),
+        )
+        expect(key.width).toBeGreaterThanOrEqual(minKey)
+        expect(key.height).toBeGreaterThanOrEqual(40)
+        const paper = await boxOf(canvas)
+        expect(paper.height).toBeGreaterThanOrEqual(200)
+        await expectOnScreen(
+          page,
+          keyboard.getByRole('button', { name: 'Send' }),
+        )
+      }
     } finally {
       await host.context.close()
     }

@@ -1,6 +1,7 @@
 'use client'
 
 import {
+  accountIdFromToken,
   MAX_PASSWORD_LENGTH,
   passwordSchema,
   usernameSchema,
@@ -19,14 +20,18 @@ type Mode = 'signup' | 'login'
 
 /**
  * Quick account from the final screen: sign up or log in, then link the
- * account to this seat so the room records history from now on.
+ * account to this seat so the room credits this match and records history
+ * from now on. The room client confirms the link in a toast; `onLinked`
+ * lets the final screen show where the stats went.
  */
 export function AccountLinkModal({
   open,
   onClose,
+  onLinked,
 }: {
   readonly open: boolean
   readonly onClose: () => void
+  readonly onLinked: () => void
 }) {
   return (
     <Modal
@@ -35,12 +40,18 @@ export function AccountLinkModal({
       title="Keep your stats"
       description="A username and password — no email. Your word history and stats follow you to every room from now on."
     >
-      {open ? <AccountLinkForm onDone={onClose} /> : null}
+      {open ? <AccountLinkForm onCancel={onClose} onLinked={onLinked} /> : null}
     </Modal>
   )
 }
 
-function AccountLinkForm({ onDone }: { readonly onDone: () => void }) {
+function AccountLinkForm({
+  onCancel,
+  onLinked,
+}: {
+  readonly onCancel: () => void
+  readonly onLinked: () => void
+}) {
   const account = useAccount()
   const { actions } = useRoomSession()
   const id = useId()
@@ -71,14 +82,21 @@ function AccountLinkForm({ onDone }: { readonly onDone: () => void }) {
     setBusy(true)
     setError(null)
     try {
-      if (mode === 'signup') {
-        await account.signup({ username: name.data, password })
-      } else {
-        await account.login({ username: name.data, password })
+      // A retry after the link failed: this browser is already signed in
+      // as this name, so only the link is left to do.
+      const signedIn = readAccountToken()
+      if (signedIn === null || accountIdFromToken(signedIn) !== name.data) {
+        if (mode === 'signup') {
+          await account.signup({ username: name.data, password })
+        } else {
+          await account.login({ username: name.data, password })
+        }
       }
+      // Signing in already links this seat (the room client follows the
+      // browser's sign-in); this waits for that same request.
       const token = readAccountToken()
       if (token) await actions.linkAccount(token)
-      onDone()
+      onLinked()
     } catch (caught) {
       setError(
         caught instanceof Error && caught.message
@@ -157,13 +175,13 @@ function AccountLinkForm({ onDone }: { readonly onDone: () => void }) {
       {error ? (
         <p
           role="alert"
-          className="rounded-xl border-2 border-[#181713] bg-[#ff6b4a] px-4 py-3 text-sm font-bold text-white"
+          className="rounded-xl border-2 border-[#181713] bg-[#ff6b4a] px-4 py-3 text-sm font-bold text-[#181713]"
         >
           {error}
         </p>
       ) : null}
       <div className="flex flex-wrap justify-end gap-2">
-        <Button variant="secondary" onClick={onDone} disabled={busy}>
+        <Button variant="secondary" onClick={onCancel} disabled={busy}>
           Not now
         </Button>
         <Button type="submit" loading={busy}>

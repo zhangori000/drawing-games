@@ -27,10 +27,19 @@ import type { Env } from '../env';
 import { isWebSocketUpgrade, jsonResponse, methodNotAllowed, upgradeRequired } from '../http';
 import { applyCanvasEffects } from './canvas-effects';
 import { CanvasStore } from './canvas-store';
+import { CommandLimiter, commandLane } from './command-limiter';
 import { CommandLog, commandSignature, type CommandRecord } from './command-log';
 import { mapMemberCommand, type MemberCommand } from './command-map';
-import { CLOSE_CODES, IDLE_ROOM_TTL_MS } from './constants';
-import { MessageTooLargeError, decodeClientMessage, domainEvent, encodeEnvelope, errorEvent, readCommandId } from './envelopes';
+import { CLOSE_CODES, HANDSHAKE_TIMEOUT_MS, IDLE_ROOM_TTL_MS } from './constants';
+import {
+	MessageTooLargeError,
+	decodeClientMessage,
+	domainEvent,
+	encodeEnvelope,
+	errorEvent,
+	rateLimitedEvent,
+	readCommandId,
+} from './envelopes';
 import { describeError } from './log';
 import { RoomOutbox } from './outbox';
 import { PreviewThrottle } from './preview-throttle';
@@ -81,6 +90,9 @@ export class GameRoom extends DurableObject<Env> {
 	private readonly commandLog: CommandLog;
 	private readonly outbox: RoomOutbox;
 	private readonly previews: PreviewThrottle;
+	private readonly limiter = new CommandLimiter();
+	/** Sockets closed for missing their handshake deadline (memory only). */
+	private readonly handshakeClosed = new WeakSet<WebSocket>();
 	/** Alarm time last requested (null: unknown, e.g. after waking up). */
 	private alarmAtMs: number | null = null;
 
@@ -146,7 +158,9 @@ export class GameRoom extends DurableObject<Env> {
 			this.ctx.acceptWebSocket(server);
 			sendRoomNotFound(server, roomCode.data);
 		} else {
-			this.sockets.accept(server, sessionId.data);
+			this.sockets.accept(server, sessionId.data, Date.now());
+			// Wake in time to close it if it never joins.
+			await this.armAlarm();
 		}
 		return new Response(null, { status: 101, webSocket: client });
 	}
@@ -170,6 +184,18 @@ export class GameRoom extends DurableObject<Env> {
 			this.outbox.send(ws, state, errorEvent('BAD_COMMAND', 'Commands must be JSON of at most 64 KiB.'));
 			if (error instanceof MessageTooLargeError) safeClose(ws, CLOSE_CODES.tooLarge, 'Message too large');
 			return;
+		}
+		// Before validation, so a flood costs no more than a JSON parse each.
+		// Refused commands are not applied or logged and can be resent as is.
+		// Resends of applied commands (a reconnect resends everything not yet
+		// acknowledged) only get their original ack back, so they are free.
+		const commandId = readCommandId(raw);
+		if (commandId === undefined || this.commandLog.find(commandId) === null) {
+			const retryAfterMs = this.limiter.take(ws, entry.memberId, commandLane(raw), Date.now());
+			if (retryAfterMs > 0) {
+				this.outbox.send(ws, state, rateLimitedEvent(commandId, retryAfterMs));
+				return;
+			}
 		}
 		const parsed = commandEnvelopeV1Schema.safeParse(raw);
 		if (!parsed.success) {
@@ -214,6 +240,7 @@ export class GameRoom extends DurableObject<Env> {
 			const result = advanceRoom(state, nowMs);
 			if (result.state !== state || result.effects.length > 0) this.commit({ next: result.state, effects: result.effects });
 		});
+		this.closeExpiredHandshakes(nowMs);
 		if (ok && this.isIdle(nowMs)) {
 			await this.destroy();
 			return;
@@ -432,9 +459,10 @@ export class GameRoom extends DurableObject<Env> {
 		this.runEffects(next, effects);
 		input.onCommitted?.(next);
 		for (const memberId of removed) {
+			this.limiter.forgetMember(memberId);
 			for (const ws of this.sockets.socketsOf(memberId)) {
-				this.sockets.unbind(ws);
-				// The leaver's own socket closes itself after its ack.
+				this.sockets.unbind(ws, nowMs);
+				// The leaver's own socket closes itself after its ack (or at its handshake deadline).
 				if (ws !== input.sender) safeClose(ws, CLOSE_CODES.removed, 'Removed from the room');
 			}
 		}
@@ -513,12 +541,41 @@ export class GameRoom extends DurableObject<Env> {
 		this.load();
 	}
 
+	/** Sockets that never joined (or whose member left) get `HANDSHAKE_TIMEOUT_MS`. */
+	private closeExpiredHandshakes(nowMs: number): void {
+		for (const { ws, unboundSinceMs } of this.sockets.unbound()) {
+			if (nowMs - unboundSinceMs < HANDSHAKE_TIMEOUT_MS || this.handshakeClosed.has(ws)) continue;
+			this.handshakeClosed.add(ws);
+			safeClose(ws, CLOSE_CODES.handshakeTimeout, 'Join or resume the room first');
+		}
+	}
+
+	/**
+	 * The exact deadline, even when already due: moving a due alarm to another
+	 * time (e.g. from the constructor on a wake for that alarm) makes the
+	 * runtime cancel its handler. Sockets already told to close are skipped,
+	 * so a socket that fails to close cannot spin the alarm.
+	 */
+	private nextHandshakeDeadlineMs(): number | null {
+		let earliest: number | null = null;
+		for (const { ws, unboundSinceMs } of this.sockets.unbound()) {
+			if (this.handshakeClosed.has(ws)) continue;
+			const deadline = unboundSinceMs + HANDSHAKE_TIMEOUT_MS;
+			if (earliest === null || deadline < earliest) earliest = deadline;
+		}
+		return earliest;
+	}
+
+	/** No member connected for the idle window. Sockets that have not joined do not count. */
 	private isIdle(nowMs: number): boolean {
 		const state = this.state;
-		return state !== null && !this.sockets.hasSockets() && nowMs - state.lastActivityAtMs >= IDLE_ROOM_TTL_MS;
+		return state !== null && !this.sockets.hasBoundSockets() && nowMs - state.lastActivityAtMs >= IDLE_ROOM_TTL_MS;
 	}
 
 	private async destroy(): Promise<void> {
+		const roomCode = this.state?.roomCode ?? this.ctx.id.name ?? '';
+		// Anyone still on the join form learns the room is gone (4404, final).
+		for (const ws of this.sockets.open()) sendRoomNotFound(ws, roomCode);
 		this.state = null;
 		this.previews.clear();
 		this.canvases.dropCache();
@@ -528,7 +585,10 @@ export class GameRoom extends DurableObject<Env> {
 		await this.ctx.storage.deleteAll();
 	}
 
-	/** Wakes at the next reducer deadline or bot action, or for idle cleanup. */
+	/**
+	 * Wakes at the next reducer deadline or bot action, the next handshake
+	 * deadline, or for idle cleanup.
+	 */
 	private armAlarm(notBeforeMs?: number): Promise<void> {
 		const state = this.state;
 		if (state === null) return Promise.resolve();
@@ -536,8 +596,10 @@ export class GameRoom extends DurableObject<Env> {
 		let cleanupAt = state.lastActivityAtMs + IDLE_ROOM_TTL_MS;
 		// Idle but still connected: look again a full window later.
 		if (cleanupAt <= nowMs) cleanupAt = nowMs + IDLE_ROOM_TTL_MS;
-		const wake = getNextWakeAtMs(state);
-		let atMs = wake === null ? cleanupAt : Math.min(wake, cleanupAt);
+		let atMs = cleanupAt;
+		for (const candidate of [getNextWakeAtMs(state), this.nextHandshakeDeadlineMs()]) {
+			if (candidate !== null) atMs = Math.min(atMs, candidate);
+		}
 		if (notBeforeMs !== undefined) atMs = Math.max(atMs, notBeforeMs);
 		if (atMs === this.alarmAtMs) return Promise.resolve();
 		this.alarmAtMs = atMs;

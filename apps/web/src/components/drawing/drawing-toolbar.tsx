@@ -181,7 +181,7 @@ export function DrawingToolbar({
         'flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border-2 text-sm font-black transition disabled:pointer-events-none disabled:opacity-35',
         layout === 'panel' ? 'px-2' : 'px-3',
         confirmingClear
-          ? 'border-[#181713] bg-[#ff6b4a] text-white shadow-[2px_2px_0_#181713]'
+          ? 'border-[#181713] bg-[#ff6b4a] text-[#181713] shadow-[2px_2px_0_#181713]'
           : 'border-transparent bg-black/5 hover:bg-black/10',
       )}
     >

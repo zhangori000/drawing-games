@@ -46,7 +46,7 @@ export default function Home() {
       <header className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-5 py-5 sm:px-8">
         <Link
           href="/"
-          className="inline-flex items-center gap-3 text-sm font-black tracking-[-0.03em]"
+          className="inline-flex min-h-11 items-center gap-3 text-sm font-black tracking-[-0.03em]"
         >
           <span
             aria-hidden="true"
@@ -59,7 +59,7 @@ export default function Home() {
         <nav aria-label="Primary" className="flex items-center gap-2">
           <a
             href="#how"
-            className="hidden rounded-full px-4 py-2 text-sm font-semibold transition hover:bg-black/5 sm:block"
+            className="hidden min-h-11 items-center rounded-full px-4 text-sm font-semibold transition hover:bg-black/5 sm:inline-flex"
           >
             How it plays
           </a>
@@ -198,7 +198,7 @@ function SampleRound() {
                 ☾ Moon 180
               </span>
             </div>
-            <span className="grid size-12 place-items-center rounded-full bg-[#ff6b4a] font-mono text-base font-black text-white ring-2 ring-[#181713]">
+            <span className="grid size-12 place-items-center rounded-full bg-[#ff6b4a] font-mono text-base font-black text-[#181713] ring-2 ring-[#181713]">
               :43
             </span>
           </div>

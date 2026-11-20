@@ -277,11 +277,11 @@ function AccountLine({ accountHref }: { readonly accountHref: string }) {
     )
   }
   return (
-    <p className="rounded-2xl border-2 border-dashed border-black/25 px-4 py-3 text-sm text-black/65">
+    <p className="rounded-2xl border-2 border-dashed border-black/25 px-4 py-1 text-sm text-black/65">
       Playing as a guest ·{' '}
       <Link
         href={accountHref}
-        className="font-bold text-[#5c4cf2] underline underline-offset-4"
+        className="inline-flex min-h-11 items-center align-middle font-bold text-[#5c4cf2] underline underline-offset-4"
       >
         Log in to save stats
       </Link>

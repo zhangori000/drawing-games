@@ -1,3 +1,5 @@
+import { retryAfterSeconds } from './rate-limit';
+
 /**
  * Shared HTTP helpers. Account and room APIs authenticate with bearer tokens
  * (never cookies), so a wildcard CORS origin grants no ambient authority.
@@ -7,6 +9,8 @@ export const CORS_HEADERS: Readonly<Record<string, string>> = Object.freeze({
 	'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
 	'Access-Control-Allow-Headers': 'Authorization, Content-Type',
 	'Access-Control-Max-Age': '600',
+	// Lets browsers read when a 429 may be retried.
+	'Access-Control-Expose-Headers': 'Retry-After',
 });
 
 export function jsonResponse(body: unknown, status: number, headers?: HeadersInit): Response {
@@ -27,6 +31,11 @@ export function methodNotAllowed(allowedMethods: string): Response {
 
 export function notFound(): Response {
 	return jsonResponse({ error: 'Not found' }, 404);
+}
+
+/** 429 with a `Retry-After` header (whole seconds, at least 1). */
+export function tooManyRequests(body: unknown, retryAfterMs: number): Response {
+	return jsonResponse(body, 429, { 'Retry-After': retryAfterSeconds(retryAfterMs) });
 }
 
 export function upgradeRequired(): Response {

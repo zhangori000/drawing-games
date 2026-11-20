@@ -13,6 +13,27 @@
 }
 
 /*
+ * A countdown in its last seconds: a ring pulses out from the timer and it
+ * nudges larger, once a second (`animate-urgent-pulse`). The text stays fully opaque (an opacity
+ * pulse made ":08" hard to read); reduced motion turns it off.
+ */
+@theme {
+  --animate-urgent-pulse: urgent-pulse 1s ease-out infinite;
+
+  @keyframes urgent-pulse {
+    0% {
+      box-shadow: 0 0 0 0 rgb(255 107 74 / 0.7);
+      transform: scale(1.06);
+    }
+    60%,
+    100% {
+      box-shadow: 0 0 0 7px rgb(255 107 74 / 0);
+      transform: scale(1);
+    }
+  }
+}
+
+/*
  * Base rules live in the base layer: unlayered CSS would beat every Tailwind
  * utility (e.g. `button { font: inherit }` silently cancelled `font-black`).
  */

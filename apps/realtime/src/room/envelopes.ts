@@ -44,6 +44,8 @@ export interface ErrorEvent {
 	readonly message: string;
 	readonly retryable: boolean;
 	readonly commandId?: string;
+	/** `RATE_LIMITED` only (`rateLimitDetailsSchema`). */
+	readonly details?: { readonly retryAfterMs: number };
 }
 
 export type OutgoingEvent =
@@ -69,6 +71,17 @@ export function errorEvent(code: ProtocolErrorCode, message: string, commandId?:
 	return commandId === undefined
 		? { type: 'protocol.error', code, message, retryable }
 		: { type: 'protocol.error', code, message, retryable, commandId };
+}
+
+/**
+ * A command refused by the room's command budget. It was not applied (nor
+ * recorded), so the client may resend it unchanged after `retryAfterMs`.
+ */
+export function rateLimitedEvent(commandId: string | undefined, retryAfterMs: number): ErrorEvent {
+	return {
+		...errorEvent('RATE_LIMITED', 'Too many actions at once. Wait a moment and try again.', commandId, true),
+		details: { retryAfterMs },
+	};
 }
 
 export class MessageTooLargeError extends Error {

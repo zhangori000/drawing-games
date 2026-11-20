@@ -38,6 +38,15 @@ export const ACCOUNT_MESSAGES = Object.freeze({
 });
 
 export function rateLimitedMessage(retryAfterMs: number): string {
+	return `Too many sign-in attempts. Try again in ${minutesText(retryAfterMs)}.`;
+}
+
+export function tooManySignupsMessage(retryAfterMs: number): string {
+	return `Too many new accounts from this network. Try again in ${minutesText(retryAfterMs)}.`;
+}
+
+/** "1 minute", "3 minutes" (rounded up, at least 1). */
+function minutesText(retryAfterMs: number): string {
 	const minutes = Math.max(1, Math.ceil(retryAfterMs / 60_000));
-	return `Too many sign-in attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`;
+	return `${minutes} minute${minutes === 1 ? '' : 's'}`;
 }

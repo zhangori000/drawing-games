@@ -187,9 +187,24 @@ function Wide({
 }
 
 /**
+ * A guesser's landscape sidebar holds the compact keyboard, so it takes the
+ * width the paper does not need. On landscape phones the 4:3 paper is limited
+ * by height, which leaves slack beside it: the paper needs about
+ * (layout height - banner - padding) x 4/3 + padding. Assuming a short
+ * banner (4.5rem, plus 1rem padding) overestimates that, so the paper never
+ * shrinks. Between 19rem and 26rem the letter keys are 26-37 px wide (31 px
+ * on a 667 x 375 iPhone SE, 37 px from about 740 px wide), like a phone's
+ * own keyboard. `cqw`/`cqh` are the play area under the top bar (safe-area
+ * insets already excluded).
+ */
+const GUESSER_SIDEBAR =
+  'clamp(19rem, calc(100cqw - (100cqh - 5.5rem) * 4 / 3 - 1rem), 26rem)'
+
+/**
  * Landscape phones. The paper's pane has nothing floating over it. The
  * drawer's sidebar is narrow (tools, opponent, feed) so the paper gets most
- * of the width; a guesser's sidebar is wider for the compact keyboard.
+ * of the width; a guesser's sidebar is as wide as the paper allows, for the
+ * compact keyboard.
  */
 function WideShort({
   banner,
@@ -201,41 +216,48 @@ function WideShort({
   chrome,
 }: PlayLayoutProps & ChromeProps) {
   return (
-    <div
-      className={cx(
-        'grid min-h-0 flex-1',
-        dock
-          ? 'grid-cols-[minmax(0,1fr)_19rem]'
-          : 'grid-cols-[minmax(0,1fr)_13rem]',
-      )}
-      data-testid="play-layout"
-      data-layout="wide-short"
-      data-typing={chrome.feedInDock || undefined}
-    >
-      <div className="flex min-h-0 min-w-0 flex-col">
-        {chrome.compactBanner ? null : banner}
-        <div className="relative min-h-0 flex-1 p-2">{canvas}</div>
-      </div>
-      <aside
-        aria-label={dock ? 'Guess' : 'Tools, team feed and opponent'}
-        className="flex min-h-0 flex-col overflow-y-auto overscroll-contain border-l-2 border-[#181713] bg-[#efe9de]"
-      >
-        {/* The device keyboard leaves a landscape phone very little height:
-            the one-line clue moves over the dock so the paper keeps it. */}
-        {chrome.compactBanner ? banner : null}
-        {tools ? (
-          <div className="relative shrink-0 border-b-2 border-[#181713] bg-[#fffdf7]">
-            {tools}
-          </div>
-        ) : null}
-        {chrome.feedInDock ? null : (
-          <div className="shrink-0 px-2 pt-2">{opponent}</div>
+    <div className="flex min-h-0 flex-1 [container-type:size]">
+      <div
+        className={cx(
+          'grid min-h-0 w-full',
+          dock ? null : 'grid-cols-[minmax(0,1fr)_13rem]',
         )}
-        <div className="flex min-h-10 flex-1 flex-col px-2 py-1.5">{feed}</div>
-        {dock ? (
-          <div className="shrink-0 border-t-2 border-[#181713]">{dock}</div>
-        ) : null}
-      </aside>
+        style={
+          dock
+            ? { gridTemplateColumns: `minmax(0, 1fr) ${GUESSER_SIDEBAR}` }
+            : undefined
+        }
+        data-testid="play-layout"
+        data-layout="wide-short"
+        data-typing={chrome.feedInDock || undefined}
+      >
+        <div className="flex min-h-0 min-w-0 flex-col">
+          {chrome.compactBanner ? null : banner}
+          <div className="relative min-h-0 flex-1 p-2">{canvas}</div>
+        </div>
+        <aside
+          aria-label={dock ? 'Guess' : 'Tools, team feed and opponent'}
+          className="flex min-h-0 flex-col overflow-y-auto overscroll-contain border-l-2 border-[#181713] bg-[#efe9de]"
+        >
+          {/* The device keyboard leaves a landscape phone very little height:
+              the one-line clue moves over the dock so the paper keeps it. */}
+          {chrome.compactBanner ? banner : null}
+          {tools ? (
+            <div className="relative shrink-0 border-b-2 border-[#181713] bg-[#fffdf7]">
+              {tools}
+            </div>
+          ) : null}
+          {chrome.feedInDock ? null : (
+            <div className="shrink-0 px-2 pt-2">{opponent}</div>
+          )}
+          <div className="flex min-h-10 flex-1 flex-col px-2 py-1.5">
+            {feed}
+          </div>
+          {dock ? (
+            <div className="shrink-0 border-t-2 border-[#181713]">{dock}</div>
+          ) : null}
+        </aside>
+      </div>
     </div>
   )
 }

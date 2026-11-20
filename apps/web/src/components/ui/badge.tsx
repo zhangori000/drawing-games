@@ -9,7 +9,7 @@ const TONES: Readonly<Record<BadgeTone, string>> = {
   neutral: 'border-black/15 bg-white/70 text-black/70',
   ink: 'border-[#181713] bg-[#181713] text-white',
   violet: 'border-[#181713] bg-[#5c4cf2] text-white',
-  coral: 'border-[#181713] bg-[#ff6b4a] text-white',
+  coral: 'border-[#181713] bg-[#ff6b4a] text-[#181713]',
   lime: 'border-[#181713] bg-[#f8ff80] text-[#181713]',
   green: 'border-[#181713] bg-[#1f9d72] text-white',
 }

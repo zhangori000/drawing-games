@@ -195,6 +195,11 @@ export class RoomSocket {
 		return this.inbox.some(predicate);
 	}
 
+	/** How many queued messages match (use after `barrier()`). */
+	count(predicate: (envelope: Envelope) => boolean): number {
+		return this.inbox.filter(predicate).length;
+	}
+
 	/** Whether any queued message is a `name` domain event matching `predicate`. */
 	hasDomain<N extends keyof PayloadByName>(name: N, predicate: (payload: PayloadByName[N]) => boolean = () => true): boolean {
 		return this.inbox.some(

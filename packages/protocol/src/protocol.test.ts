@@ -7,6 +7,7 @@ import {
   drawingOperationSchema,
   parseCommandEnvelopeV1,
   parseServerEventEnvelopeV1,
+  rateLimitDetailsSchema,
   roomSettingsPatchSchema,
   serverEventEnvelopeV1Schema,
   type ClientCommand,
@@ -218,5 +219,35 @@ describe('serverEventEnvelopeV1Schema', () => {
     })
 
     expect(result.success).toBe(false)
+  })
+
+  it('carries a retry delay on RATE_LIMITED errors', () => {
+    const envelope = parseServerEventEnvelopeV1({
+      version: PROTOCOL_VERSION,
+      roomCode: 'ABCD12',
+      roomSeq: 3,
+      serverTimeMs: 1_800_000_000_000,
+      event: {
+        type: 'protocol.error',
+        code: 'RATE_LIMITED',
+        message: 'Too many actions at once. Wait a moment and try again.',
+        retryable: true,
+        commandId: 'command_1',
+        details: { retryAfterMs: 200 },
+      },
+    })
+    if (envelope.event.type !== 'protocol.error')
+      throw new Error('expected an error')
+    expect(rateLimitDetailsSchema.parse(envelope.event.details)).toEqual({
+      retryAfterMs: 200,
+    })
+    // Lenient: later fields do not break older clients.
+    expect(
+      rateLimitDetailsSchema.safeParse({ retryAfterMs: 50, lane: 'drawing' })
+        .success,
+    ).toBe(true)
+    expect(rateLimitDetailsSchema.safeParse({ retryAfterMs: 0 }).success).toBe(
+      false,
+    )
   })
 })

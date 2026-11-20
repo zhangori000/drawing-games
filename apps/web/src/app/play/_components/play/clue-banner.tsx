@@ -189,7 +189,7 @@ function RevealButton({
       className={cx(
         'inline-flex shrink-0 items-center rounded-xl border-2 border-[#181713] font-black transition disabled:cursor-not-allowed',
         compact
-          ? 'min-h-9 gap-1 px-1.5 text-[11px]'
+          ? 'min-h-10 gap-1 px-1.5 text-[11px]'
           : 'min-h-11 gap-1.5 px-2.5 text-xs',
         voted ? 'bg-[#f8ff80]' : 'bg-white',
         !disabled &&

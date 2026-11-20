@@ -64,7 +64,7 @@ const TONE_CLASSES: Readonly<Record<FeedbackTone, string>> = {
   correct: 'bg-[#1f9d72] text-white',
   warm: 'bg-[#f8ff80] text-[#181713]',
   neutral: 'text-black/60',
-  error: 'bg-[#ff6b4a] text-white',
+  error: 'bg-[#ff6b4a] text-[#181713]',
 }
 
 /**

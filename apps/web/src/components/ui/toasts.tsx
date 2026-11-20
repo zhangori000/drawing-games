@@ -63,7 +63,7 @@ function Toast({
       className={cx(
         'pointer-events-auto flex w-full max-w-md items-start gap-3 rounded-2xl border-2 border-[#181713] px-4 py-3 text-sm font-semibold shadow-[4px_4px_0_#181713]',
         item.tone === 'error'
-          ? 'bg-[#ff6b4a] text-white'
+          ? 'bg-[#ff6b4a] text-[#181713]'
           : 'bg-[#f8ff80] text-[#181713]',
       )}
     >
@@ -72,7 +72,7 @@ function Toast({
         type="button"
         onClick={() => onDismiss(item.id)}
         aria-label="Dismiss"
-        className="-my-1 -mr-2 grid size-8 shrink-0 place-items-center rounded-lg text-lg leading-none hover:bg-black/10"
+        className="-my-2.5 -mr-3 grid size-10 shrink-0 place-items-center rounded-lg text-lg leading-none hover:bg-black/10"
       >
         ×
       </button>

@@ -1,11 +1,12 @@
 import type { DrawingAction } from '@drawing-games/drawing-model'
 import type { GuessVerdict, RoomView, TeamId } from '@drawing-games/game-core'
-import type {
-  DraftReplacementReason,
-  RoomSettingsPatch,
+import {
+  accountIdFromToken,
+  type DraftReplacementReason,
+  type RoomSettingsPatch,
 } from '@drawing-games/protocol'
 
-import { readAccountToken } from '../account/token-store'
+import { readAccountToken, subscribeAccountToken } from '../account/token-store'
 import { rememberDisplayName } from '../identity'
 import { getRecentWordIds, recordWordIds } from '../word-history'
 import { CanvasStore } from './canvas-store'
@@ -75,7 +76,11 @@ export interface RoomActions {
   voteSurrender(approve: boolean): Promise<void>
   continueRound(): Promise<void>
   rematch(mode: 'same-settings' | 'change-settings'): Promise<void>
-  /** Links (or with null, unlinks) a quick account to this seat. */
+  /**
+   * Links (or with null, unlinks) a quick account to this seat. The client
+   * already does this by itself whenever this browser signs in or out (see
+   * `syncAccountLink`); a call for the link already in flight shares it.
+   */
   linkAccount(accountToken: string | null): Promise<void>
   /** Applies ops to the local canvas now and streams them in batches. */
   sendDrawing(canvasId: string, ops: readonly DrawingAction[]): void
@@ -86,10 +91,29 @@ export interface RoomActions {
 
 const MAX_TOASTS = 4
 
+/** This browser's quick-account sign-in, shared by every tab. */
+export interface AccountTokenSource {
+  read(): string | null
+  /** Fires when the token may have changed, in this tab or another. */
+  subscribe(listener: () => void): () => void
+}
+
+const browserAccountTokens: AccountTokenSource = {
+  read: readAccountToken,
+  subscribe: subscribeAccountToken,
+}
+
 export type RoomClientConnectionOptions = Omit<
   RoomConnectionOptions,
   'roomCode' | 'getAccountToken' | 'getRecentWordIds'
->
+> & {
+  readonly accountTokens?: AccountTokenSource
+}
+
+interface AccountLinkRequest {
+  readonly token: string | null
+  readonly promise: Promise<void>
+}
 
 /**
  * Framework-free room session for one screen: owns the connection (recreated
@@ -109,7 +133,14 @@ export class RoomClient {
   private readonly guessPacer: GuessPacer
   private nextToastId = 1
   private nextFeedbackId = 1
-  private readonly connectionOptions: RoomClientConnectionOptions
+  private readonly connectionOptions: Omit<
+    RoomClientConnectionOptions,
+    'accountTokens'
+  >
+  private readonly accountTokens: AccountTokenSource
+  private accountLink: AccountLinkRequest | null = null
+  /** The seat/sign-in mismatch last acted on, so a failure is not retried. */
+  private accountSyncKey: string | null = null
 
   static readonly initialSnapshot: RoomClientSnapshot = Object.freeze({
     status: 'connecting',
@@ -125,7 +156,9 @@ export class RoomClient {
     connectionOptions: RoomClientConnectionOptions = {},
   ) {
     this.roomCode = roomCode
-    this.connectionOptions = connectionOptions
+    const { accountTokens = browserAccountTokens, ...rest } = connectionOptions
+    this.connectionOptions = rest
+    this.accountTokens = accountTokens
     this.snapshot = RoomClient.initialSnapshot
     this.canvasStore = new CanvasStore({
       timers: connectionOptions.timers,
@@ -179,15 +212,19 @@ export class RoomClient {
     const connection = new RoomConnection({
       ...this.connectionOptions,
       roomCode: this.roomCode,
-      getAccountToken: readAccountToken,
+      getAccountToken: () => this.accountTokens.read(),
       getRecentWordIds,
     })
     this.connection = connection
     const offState = connection.subscribe(() => this.syncConnectionState())
     const offEvents = connection.onEvent((event) => this.handleEvent(event))
+    const offAccount = this.accountTokens.subscribe(() =>
+      this.syncAccountLink(),
+    )
     this.detach = () => {
       offState()
       offEvents()
+      offAccount()
     }
     this.syncConnectionState()
     connection.connect()
@@ -201,6 +238,8 @@ export class RoomClient {
     this.guessPacer.cancel(
       new RoomCommandError('CLOSED', 'Not connected to the room.'),
     )
+    this.accountLink = null
+    this.accountSyncKey = null
     this.canvasStore.dispose()
     connection.dispose()
   }
@@ -233,6 +272,56 @@ export class RoomClient {
     })
     // e.g. "Max left the room. You're drawing now…", with the new screen.
     if (handoff) this.pushToast(handoff, 'info')
+    this.syncAccountLink()
+  }
+
+  /**
+   * Keeps the seat's account link in step with this browser's sign-in. A
+   * sign-out, in this tab or another (or while this room was closed), unlinks
+   * the seat so later play is no longer recorded to that account; a sign-in
+   * links it now rather than at the next reconnect (a resume carries the
+   * token too). Each mismatch is acted on once: a refused link (an expired
+   * session) is not retried until the seat or the sign-in changes again.
+   */
+  private syncAccountLink(): void {
+    const view = this.snapshot.view
+    if (this.snapshot.status !== 'open' || !view?.me) return
+    const token = this.accountTokens.read()
+    const deviceAccount = token === null ? null : accountIdFromToken(token)
+    const seatAccount = view.me.accountId
+    if (seatAccount === deviceAccount) {
+      this.accountSyncKey = null
+      return
+    }
+    const key = `${seatAccount ?? ''}|${token ?? ''}`
+    if (this.accountSyncKey === key) return
+    this.accountSyncKey = key
+    void this.linkAccount(deviceAccount === null ? null : token).catch(() => {})
+  }
+
+  /**
+   * Sends `account.link`, sharing a request already in flight for the same
+   * token (signing up on the final screen both changes the sign-in, which
+   * links automatically, and asks to link). Success is announced in a toast;
+   * failures are left to the caller (the sign-up form shows them inline).
+   */
+  private linkAccount(token: string | null): Promise<void> {
+    const current = this.accountLink
+    if (current && current.token === token) return current.promise
+    const promise = this.run(
+      { type: 'account.link', accountToken: token },
+      false,
+    )
+    const request: AccountLinkRequest = { token, promise }
+    this.accountLink = request
+    const settle = () => {
+      if (this.accountLink === request) this.accountLink = null
+    }
+    promise.then(() => {
+      settle()
+      this.pushToast(accountLinkNotice(token, this.snapshot.view), 'info')
+    }, settle)
+    return promise
   }
 
   private handleEvent(event: RoomConnectionEvent): void {
@@ -370,14 +459,28 @@ export class RoomClient {
       voteSurrender: (approve) => this.run({ type: 'surrender.vote', approve }),
       continueRound: () => this.run({ type: 'round.continue' }),
       rematch: (mode) => this.run({ type: 'rematch.vote', mode }),
-      linkAccount: (accountToken) =>
-        this.run({ type: 'account.link', accountToken }),
+      linkAccount: (accountToken) => this.linkAccount(accountToken),
       sendDrawing: (canvasId, ops) =>
         this.canvasStore.queueLocalOps(canvasId, ops),
       reclaim: () => this.connection?.reclaim(),
       dismissToast: (id) => this.dismissToast(id),
     }
   }
+}
+
+/** What changed for the seat once the room accepted an `account.link`. */
+export function accountLinkNotice(
+  token: string | null,
+  view: RoomView | null,
+): string {
+  const username = token === null ? null : accountIdFromToken(token)
+  if (username === null) {
+    return 'Signed out: this seat no longer saves stats.'
+  }
+  // Linking during a match (or on its final screen) credits the whole match.
+  return view === null || view.phase === 'lobby'
+    ? `Signed in as @${username}: your matches here will be saved.`
+    : `Saved to @${username}: this match is in your stats.`
 }
 
 /** The canvas this member may draw on right now, per the room's view. */

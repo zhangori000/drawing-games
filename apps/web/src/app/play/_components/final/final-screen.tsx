@@ -8,10 +8,11 @@ import {
   type FinalView,
   type TeamId,
 } from '@drawing-games/game-core'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-import { Button } from '@/components/ui/button'
+import { Button, buttonClassName } from '@/components/ui/button'
 import { cx } from '@/components/ui/cx'
 import { TEAM_COLORS, TEAM_SYMBOLS } from '@/components/ui/team-badge'
 
@@ -27,6 +28,7 @@ import { StatsTable } from './stats-table'
 export function FinalScreen({ final }: { readonly final: FinalView }) {
   const { me } = useRoomSession()
   const [linking, setLinking] = useState(false)
+  const [justLinked, setJustLinked] = useState(false)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -35,7 +37,10 @@ export function FinalScreen({ final }: { readonly final: FinalView }) {
           <WinnerBanner final={final} />
           <Facts final={final} />
           {me.accountId === null ? (
-            <section className="grid gap-3 rounded-3xl border-2 border-[#181713] bg-[#ded9ff] p-4 sm:flex sm:items-center">
+            <section
+              data-testid="account-prompt"
+              className="grid gap-3 rounded-3xl border-2 border-[#181713] bg-[#ded9ff] p-4 sm:flex sm:items-center"
+            >
               <p className="min-w-0 flex-1 text-sm leading-6">
                 <strong className="block text-base font-black">
                   Create a quick account to keep your stats
@@ -48,7 +53,9 @@ export function FinalScreen({ final }: { readonly final: FinalView }) {
                 Create a quick account
               </Button>
             </section>
-          ) : null}
+          ) : (
+            <StatsSaved username={me.accountId} focusLink={justLinked} />
+          )}
           <section aria-labelledby="stats-heading" className="grid gap-2">
             <h3
               id="stats-heading"
@@ -66,8 +73,67 @@ export function FinalScreen({ final }: { readonly final: FinalView }) {
         </div>
       </ScrollPane>
       <FinalActions final={final} />
-      <AccountLinkModal open={linking} onClose={() => setLinking(false)} />
+      <AccountLinkModal
+        open={linking}
+        onClose={() => setLinking(false)}
+        onLinked={() => {
+          setLinking(false)
+          setJustLinked(true)
+        }}
+      />
     </div>
+  )
+}
+
+/**
+ * Confirms where this match went once the seat has an account: right after
+ * signing up here, or for a player who was signed in all along. /me opens in
+ * a new tab so the player keeps their seat for a rematch.
+ */
+function StatsSaved({
+  username,
+  focusLink,
+}: {
+  readonly username: string
+  /** Just linked from the sign-up dialog: move focus here once it closes. */
+  readonly focusLink: boolean
+}) {
+  const linkRef = useRef<HTMLAnchorElement>(null)
+  useEffect(() => {
+    if (!focusLink) return
+    // After the dialog has closed (and stopped making the page inert).
+    const id = window.setTimeout(
+      () => linkRef.current?.focus({ preventScroll: true }),
+      0,
+    )
+    return () => window.clearTimeout(id)
+  }, [focusLink])
+  return (
+    <section
+      data-testid="stats-saved"
+      aria-label="Stats saved"
+      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-3xl border-2 border-[#181713] bg-[#ded9ff] px-4 py-3"
+    >
+      <p className="min-w-0 flex-1 text-sm leading-6">
+        <span
+          aria-hidden="true"
+          className="mr-2 inline-grid size-6 place-items-center rounded-full bg-[#181713] align-middle text-xs font-black text-[#f8ff80]"
+        >
+          ✓
+        </span>
+        <strong className="font-black">Stats saved to @{username}</strong>
+        <span className="text-black/65"> · this match is in your history.</span>
+      </p>
+      <Link
+        ref={linkRef}
+        href="/me"
+        target="_blank"
+        className={buttonClassName('secondary', 'sm')}
+      >
+        See your stats
+        <span className="sr-only"> (opens in a new tab)</span>
+      </Link>
+    </section>
   )
 }
 

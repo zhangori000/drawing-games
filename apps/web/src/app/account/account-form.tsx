@@ -249,7 +249,7 @@ export function AccountForm({ next, initialMode }: AccountFormProps) {
         {formError ? (
           <p
             role="alert"
-            className="rounded-xl border-2 border-[#181713] bg-[#ff6b4a] px-4 py-3 text-sm font-bold text-white"
+            className="rounded-xl border-2 border-[#181713] bg-[#ff6b4a] px-4 py-3 text-sm font-bold text-[#181713]"
           >
             {formError}
           </p>
@@ -263,7 +263,7 @@ export function AccountForm({ next, initialMode }: AccountFormProps) {
           <button
             type="button"
             onClick={() => switchMode(mode === 'signup' ? 'login' : 'signup')}
-            className="font-bold text-[#5c4cf2] underline underline-offset-4"
+            className="inline-flex min-h-11 items-center px-1 align-middle font-bold text-[#5c4cf2] underline underline-offset-4"
           >
             {mode === 'signup' ? 'Log in' : 'Create an account'}
           </button>

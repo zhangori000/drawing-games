@@ -1,15 +1,19 @@
 import { roomCodeSchema, sessionIdSchema } from '@drawing-games/protocol';
 
+import { takeClientToken } from '../client-limits';
 import type { Env } from '../env';
-import { isWebSocketUpgrade, jsonResponse, methodNotAllowed, notFound, upgradeRequired } from '../http';
+import { isWebSocketUpgrade, jsonResponse, methodNotAllowed, notFound, tooManyRequests, upgradeRequired } from '../http';
 import { ROOM_CREATE_ATTEMPTS } from './constants';
 import { generateRoomCode } from './secrets';
 
 const ROOM_ROUTE = /^\/rooms(?:\/([^/]+)(\/socket)?)?\/?$/;
+const LOOKUP_LIMITED = 'Too many room lookups from this network. Try again in a moment.';
 
 /**
  * Handles `/rooms` (POST create), `/rooms/:code` (GET info), and
  * `/rooms/:code/socket` (WebSocket). The room module owns this file.
+ * Creating rooms and looking codes up (info or socket) are limited per
+ * client address (`client-limits.ts`).
  */
 export async function handleRoomsRequest(request: Request, env: Env, url: URL): Promise<Response> {
 	const match = ROOM_ROUTE.exec(url.pathname);
@@ -17,14 +21,21 @@ export async function handleRoomsRequest(request: Request, env: Env, url: URL): 
 	const [, rawCode, socketSuffix] = match;
 
 	if (rawCode === undefined) {
-		return request.method === 'POST' ? createRoom(env) : methodNotAllowed('POST');
+		if (request.method !== 'POST') return methodNotAllowed('POST');
+		const retryAfterMs = takeClientToken(request, 'roomCreate');
+		return retryAfterMs > 0 ? rateLimited('Too many new rooms from this network. Try again in a moment.', retryAfterMs) : createRoom(env);
 	}
 	if (socketSuffix === undefined) {
-		return request.method === 'GET' ? roomInfo(env, rawCode) : methodNotAllowed('GET');
+		if (request.method !== 'GET') return methodNotAllowed('GET');
+		const retryAfterMs = takeClientToken(request, 'roomLookup');
+		return retryAfterMs > 0 ? rateLimited(LOOKUP_LIMITED, retryAfterMs) : roomInfo(env, rawCode);
 	}
 
 	if (request.method !== 'GET') return methodNotAllowed('GET');
 	if (!isWebSocketUpgrade(request)) return upgradeRequired();
+	// A refused upgrade looks like a network failure, so clients retry it with backoff.
+	const retryAfterMs = takeClientToken(request, 'roomLookup');
+	if (retryAfterMs > 0) return rateLimited(LOOKUP_LIMITED, retryAfterMs);
 
 	const roomCode = normalizeRoomCode(rawCode);
 	const sessionIdResult = sessionIdSchema.safeParse(url.searchParams.get('sessionId'));
@@ -55,6 +66,10 @@ async function roomInfo(env: Env, rawCode: string): Promise<Response> {
 	if (roomCode === null) return jsonResponse({ error: 'Invalid room code' }, 400);
 	const info = await env.GAME_ROOM.getByName(roomCode).info();
 	return jsonResponse(info, 200);
+}
+
+function rateLimited(error: string, retryAfterMs: number): Response {
+	return tooManyRequests({ error, code: 'RATE_LIMITED', retryAfterMs }, retryAfterMs);
 }
 
 export function normalizeRoomCode(rawRoomCode: string): string | null {
