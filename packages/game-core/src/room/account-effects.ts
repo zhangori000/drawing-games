@@ -79,6 +79,11 @@ function push(
  * Round-end events: the drawer gets `drew` and `offered`, whoever swapped a
  * card gets its report event (the drawer, or a drawer who left mid-draft);
  * each guesser on the roster gets `guessed` or `missed` for their own word.
+ * Nobody is credited with play they were not there for: a drawer who was
+ * away for the whole drawing (`round.absentIds`, e.g. a deadline pick after
+ * their phone locked) gets no `drew`/`offered`, a guesser who was away gets
+ * no `missed`, and an earlier drawer of a turn someone took over (who saw
+ * the cards but could not guess) gets `offered` for every card instead.
  */
 export function roundWordEvents(
   state: RoomState,
@@ -101,19 +106,34 @@ export function roundWordEvents(
       points: solution?.points ?? null,
     }
     const facts = optionFacts(chosen)
+    const absent = new Set(round.absentIds ?? [])
+    const former = new Set(teamRound.formerDrawerIds ?? [])
 
-    push(
-      byMember,
-      teamRound.drawerId,
-      wordEvent(state, facts, 'drew', outcome, atMs),
-    )
-    for (const option of teamRound.options) {
-      if (option.wordId === chosen.wordId) continue
+    if (!absent.has(teamRound.drawerId)) {
       push(
         byMember,
         teamRound.drawerId,
-        wordEvent(state, optionFacts(option), 'offered', DRAFT_ONLY, atMs),
+        wordEvent(state, facts, 'drew', outcome, atMs),
       )
+      for (const option of teamRound.options) {
+        if (option.wordId === chosen.wordId) continue
+        push(
+          byMember,
+          teamRound.drawerId,
+          wordEvent(state, optionFacts(option), 'offered', DRAFT_ONLY, atMs),
+        )
+      }
+    }
+    for (const formerId of former) {
+      if (formerId === teamRound.drawerId) continue
+      if (findMember(state, formerId)?.left === true) continue
+      for (const option of teamRound.options) {
+        push(
+          byMember,
+          formerId,
+          wordEvent(state, optionFacts(option), 'offered', DRAFT_ONLY, atMs),
+        )
+      }
     }
     for (const replacement of teamRound.replacements) {
       push(
@@ -134,7 +154,9 @@ export function roundWordEvents(
       if (
         member.team !== team ||
         member.left === true ||
-        member.id === teamRound.drawerId
+        member.id === teamRound.drawerId ||
+        former.has(member.id) ||
+        absent.has(member.id)
       ) {
         continue
       }
@@ -145,17 +167,22 @@ export function roundWordEvents(
   return byMember
 }
 
-/** Showdown: the relay drawer `drew` the card; the solver `guessed` it. */
+/**
+ * Showdown: the relay drawer `drew` the card (unless they were away for all
+ * of it, `drawerId` null); the solver `guessed` it.
+ */
 export function showdownCardEvents(
   state: RoomState,
   card: WordFacts,
-  drawerId: string,
+  drawerId: string | null,
   guesserId: string | null,
   outcome: Outcome,
   atMs: number,
 ): WordEventsByMember {
   const byMember: WordEventsByMember = new Map()
-  push(byMember, drawerId, wordEvent(state, card, 'drew', outcome, atMs))
+  if (drawerId !== null) {
+    push(byMember, drawerId, wordEvent(state, card, 'drew', outcome, atMs))
+  }
   if (guesserId !== null) {
     push(byMember, guesserId, wordEvent(state, card, 'guessed', outcome, atMs))
   }
@@ -174,7 +201,7 @@ export function showdownResultEvents(
   return showdownCardEvents(
     state,
     optionFacts(card),
-    result.drawerId,
+    result.drawerAbsent === true ? null : result.drawerId,
     result.guesserId,
     {
       solved,
@@ -203,6 +230,32 @@ function resultFor(match: MatchState, team: TeamId): MatchResult {
   return match.winner === team ? 'win' : 'loss'
 }
 
+/**
+ * Whether the member played any of the match: was there for a finished
+ * round (not away for its whole drawing), or drew or guessed in it.
+ */
+function tookPart(match: MatchState, member: RoomMember): boolean {
+  const stats = match.stats[member.id]
+  if (stats === undefined) return false
+  if (stats.guessesSubmitted > 0) return true
+  const presentForRound = match.history.some(
+    (round) =>
+      round.endedAtMs !== null &&
+      member.joinedAtMs <= round.endedAtMs &&
+      !(round.absentIds ?? []).includes(member.id),
+  )
+  if (presentForRound) return true
+  const showdown = match.showdown
+  if (showdown === null) return false
+  return TEAM_IDS.some((team) =>
+    (showdown.teams[team].results ?? []).some(
+      (result) =>
+        (result.drawerId === member.id && result.drawerAbsent !== true) ||
+        result.guesserId === member.id,
+    ),
+  )
+}
+
 /** The member's summary of a match, or null if they did not take part. */
 function matchSummaryFor(
   ctx: RoomContext,
@@ -210,7 +263,7 @@ function matchSummaryFor(
   member: RoomMember,
 ): MatchSummaryRecord | null {
   const stats = match.stats[member.id]
-  if (stats === undefined) return null
+  if (stats === undefined || !tookPart(match, member)) return null
   return {
     roomCode: ctx.state.roomCode,
     matchNumber: match.number,

@@ -172,6 +172,80 @@ describe('anti-repeat word memory', () => {
     }
   })
 
+  it('never swaps in the other team cards, even on the smallest custom list', () => {
+    // 6 words, 3 cards each: every word is on a hand, so a swap has nothing
+    // to offer but the other team's cards (one of them its locked answer).
+    for (let seed = 1; seed <= 40; seed += 1) {
+      const driver = new RoomDriver({ seed })
+      for (const [id, team] of [
+        ['ana', 'A'],
+        ['ben', 'A'],
+        ['cy', 'B'],
+        ['di', 'B'],
+      ] as const) {
+        driver.join(id, id, { team })
+      }
+      driver.settings('ana', {
+        customWordsMode: 'only',
+        customWords: customWordList(6),
+        packIds: [],
+        wordChoiceCount: 3,
+        replacementsPerDrawer: 1,
+      })
+      driver.readyAll()
+      driver.ok({ type: 'match.start', actorId: 'ana' })
+      const b = driver.teamRound('B')
+      driver.ok({
+        type: 'draft.select',
+        actorId: b.drawerId,
+        wordId: b.options[0]!.wordId,
+      })
+      const a = driver.teamRound('A')
+      const error = driver.fail({
+        type: 'draft.replace',
+        actorId: a.drawerId,
+        wordId: a.options[0]!.wordId,
+        reason: 'seen-before',
+      })
+      expect(error.message).toBe('There are no other words left to swap in.')
+      expect(driver.teamRound('A').options).toEqual(a.options)
+      expect(driver.teamRound('A').replacements).toEqual([])
+    }
+
+    // One spare word: the swap gets exactly that one.
+    const words = customWordList(7)
+    const driver = room({
+      customWordsMode: 'only',
+      customWords: words,
+      packIds: [],
+      wordChoiceCount: 3,
+      replacementsPerDrawer: 2,
+    })
+    const dealt = new Set(
+      (['A', 'B'] as const).flatMap((team) =>
+        driver.teamRound(team).options.map((option) => option.wordId),
+      ),
+    )
+    const first = driver.teamRound('A').options[0]!
+    driver.ok({
+      type: 'draft.replace',
+      actorId: 'ana',
+      wordId: first.wordId,
+      reason: 'unknown-definition',
+    })
+    const swapped = driver.teamRound('A').options[0]!
+    expect(dealt.has(swapped.wordId)).toBe(false)
+    // The replaced word never comes back this round, so nothing is left.
+    expect(
+      driver.fail({
+        type: 'draft.replace',
+        actorId: 'ana',
+        wordId: swapped.wordId,
+        reason: 'seen-before',
+      }).message,
+    ).toBe('There are no other words left to swap in.')
+  })
+
   it('relaxes gracefully on a tiny pool, bringing back the oldest words', () => {
     const words = customWordList(8)
     const driver = room({

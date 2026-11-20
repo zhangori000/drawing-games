@@ -113,11 +113,32 @@ export interface TeamRoundState {
   readonly canvasId: string
   /** Completed strokes accepted from the drawer (stroke.end operations). */
   readonly strokeCount: number
+  /**
+   * Internal. Approximate length of a human drawer's ink (sum of segment
+   * lengths, in canvas fractions), so practice bots only "recognize" a
+   * drawing with some substance.
+   */
+  readonly inkLength?: number
+  /** Internal. Last point of the human stroke in progress (ink measuring). */
+  readonly inkTail?: InkTail
   readonly firstStrokeAtMs: number | null
   /** Bounded team-private guess feed (most recent last). */
   readonly guesses: readonly GuessRecord[]
   readonly solution: TeamSolution | null
   readonly hint: HintState
+  /**
+   * Internal. Members who held this turn before a mid-turn takeover (an
+   * explicit leave, or a disconnect past the reconnect grace), oldest
+   * first. They saw the cards, so they may not guess or vote on this word.
+   */
+  readonly formerDrawerIds?: readonly string[]
+}
+
+/** Internal: where the human stroke in progress last ended. */
+export interface InkTail {
+  readonly strokeId: string
+  readonly x: number
+  readonly y: number
 }
 
 export interface RoundState {
@@ -133,6 +154,12 @@ export interface RoundState {
   /** Set when the round ends: the team with more round points, or null. */
   readonly winner: TeamId | null
   readonly shutdownBonus: number
+  /**
+   * Internal, set when the round ends: humans who were away for the whole
+   * drawing (disconnected since before it started). They earn no word
+   * events or drawer stats for the round.
+   */
+  readonly absentIds?: readonly string[]
 }
 
 export interface ShowdownTeamState {
@@ -142,15 +169,27 @@ export interface ShowdownTeamState {
   /** Index of the active card; equals cards.length when finished. */
   readonly cardIndex: number
   readonly drawerId: string | null
-  /** Relay rotation counter for this team. */
+  /**
+   * Relay cards started after the first (a counter). The relay drawer is
+   * the next teammate after the previous card's drawer, not derived from
+   * this.
+   */
   readonly relayTurn: number
   /** Canvas for the active card, e.g. `m1-sd-A-2`. */
   readonly canvasId: string
   readonly cardStartedAtMs: number
   readonly strokeCount: number
+  /** Internal. Like `TeamRoundState.inkLength`, for the active card. */
+  readonly inkLength?: number
+  readonly inkTail?: InkTail
   readonly firstStrokeAtMs: number | null
   /** Guess feed for the active card only. */
   readonly guesses: readonly GuessRecord[]
+  /**
+   * Internal. Members who held the active card before a takeover; they saw
+   * it, so they may not guess it.
+   */
+  readonly formerDrawerIds?: readonly string[]
   /** Set when every card is cleared. */
   readonly finishedAtMs: number | null
   /**
@@ -167,6 +206,11 @@ export interface ShowdownCardResult {
   readonly drawerId: string
   /** The solver, or null when the deadline ended the card. */
   readonly guesserId: string | null
+  /**
+   * The drawer was away for the whole card (disconnected since before it
+   * started, with nobody to take over), so it is not credited as drawn.
+   */
+  readonly drawerAbsent?: boolean
   readonly solveMs: number | null
   readonly atMs: number
 }
@@ -191,7 +235,11 @@ export interface MatchState {
   readonly scores: TeamScores
   readonly completedRounds: number
   readonly winStreak: WinStreak | null
-  /** Completed drawer turns per team; drawer = roster[turns % roster.length]. */
+  /**
+   * Completed drawer turns per team (one per normal round). The next drawer
+   * is not derived from it: rotation continues after the previous round's
+   * drawer (`nextRotationDrawer`), so roster changes never repeat a turn.
+   */
   readonly drawerTurns: Readonly<Record<TeamId, number>>
   /** The active round, or the round just completed during round-results. */
   readonly round: RoundState | null
@@ -203,7 +251,13 @@ export interface MatchState {
   /** Largest positive lead each team held after any round. */
   readonly largestLead: TeamScores
   readonly endedAtMs: number | null
+  /** null while running, and for an abandoned match. */
   readonly endedReason: 'completed' | 'surrender' | null
+  /**
+   * Internal. Set when the match was abandoned (no human connected for
+   * `ABANDON_MATCH_MS`): it ended in the lobby without a result.
+   */
+  readonly abandoned?: boolean
   /** null while running or on a tie. */
   readonly winner: TeamId | null
   readonly stats: Readonly<Record<string, MemberMatchStats>>
@@ -243,7 +297,20 @@ export interface BotScheduleItem {
   readonly botId: string
   readonly action:
     | { readonly type: 'draft.pick' }
+    /** Retired (the bot wrote the word out); ignored if still stored. */
     | { readonly type: 'draw.next-stroke'; readonly canvasId: string }
+    /** One blank (or hyphen/apostrophe) of the letter puzzle. */
+    | {
+        readonly type: 'draw.outline'
+        readonly canvasId: string
+        readonly index: number
+      }
+    /** Reveals one letter of the puzzle above its blank. */
+    | {
+        readonly type: 'draw.letter'
+        readonly canvasId: string
+        readonly slot: number
+      }
     | {
         readonly type: 'guess'
         readonly canvasId: string

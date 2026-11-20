@@ -1,5 +1,7 @@
 import type { Metadata } from 'next'
 
+import { safeNextPath } from '@/lib/account/safe-next-path'
+
 import { AccountForm } from './account-form'
 
 export const metadata: Metadata = {
@@ -16,12 +18,4 @@ export default async function AccountPage({ searchParams }: AccountPageProps) {
   const params = await searchParams
   const mode = params.mode === 'login' ? 'login' : 'signup'
   return <AccountForm next={safeNextPath(params.next)} initialMode={mode} />
-}
-
-/** Only same-site paths, so `?next=` can never send someone off-site. */
-function safeNextPath(value: string | string[] | undefined): string | null {
-  const next = Array.isArray(value) ? value[0] : value
-  if (!next || !next.startsWith('/') || next.startsWith('//')) return null
-  if (next.includes('\\') || next.startsWith('/account')) return null
-  return next
 }

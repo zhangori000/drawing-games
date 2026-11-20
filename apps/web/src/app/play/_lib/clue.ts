@@ -51,3 +51,16 @@ export function describePattern(pattern: string): string {
   if (groups.length <= 1) return `${total} letters`
   return `${total} letters: ${groups.join(' + ')}`
 }
+
+/**
+ * `_ _ A   _ _` → `['__A', '__']`: the pattern's words with the letter
+ * spacing removed, for the one-line banner shown while a keyboard is up
+ * (letter-spacing in CSS keeps the blanks countable at half the width).
+ */
+export function patternWords(pattern: string): string[] {
+  return pattern
+    .trim()
+    .split(/\s{2,}/)
+    .map((word) => word.replace(/\s/g, ''))
+    .filter((word) => word.length > 0)
+}

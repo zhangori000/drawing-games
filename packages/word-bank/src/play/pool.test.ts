@@ -4,13 +4,16 @@ import { CURATED_PACKS, CUSTOM_PACK_ID, WORD_PACKS } from '../packs'
 import {
   answerKeyForWordId,
   buildWordPool,
+  canonicalWordId,
   customPlayableWords,
   getAllPlayableWords,
   getPackWordCount,
   getPlayableWordById,
+  LEGACY_WORD_IDS,
   playableWordsForPack,
   slugifyTerm,
 } from './pool'
+import { selectDraftOptions } from './selection'
 import { normalizeAnswer } from './text'
 
 const ALL_PACK_IDS = WORD_PACKS.map((pack) => pack.id)
@@ -245,5 +248,60 @@ describe('buildWordPool', () => {
     expect(new Set(pool.map((word) => normalizeAnswer(word.term))).size).toBe(
       pool.length,
     )
+  })
+})
+
+describe('words that moved packs', () => {
+  it('keep resolving under their old ids', () => {
+    expect(Object.keys(LEGACY_WORD_IDS).length).toBeGreaterThan(0)
+    for (const [oldId, newId] of Object.entries(LEGACY_WORD_IDS)) {
+      const word = getPlayableWordById(newId)
+      expect(word, newId).toBeDefined()
+      // The old id is free (never reused) and names the same word.
+      expect(getAllPlayableWords().some((entry) => entry.id === oldId)).toBe(
+        false,
+      )
+      expect(canonicalWordId(oldId)).toBe(newId)
+      expect(getPlayableWordById(oldId)).toBe(word)
+      expect(answerKeyForWordId(oldId)).toBe(normalizeAnswer(word!.term))
+    }
+    expect(canonicalWordId('animals/cat')).toBe('animals/cat')
+  })
+
+  it('are still excluded when a memory holds the old id', () => {
+    const pool = buildWordPool({
+      packIds: ['body-health'],
+      customWords: [],
+      customWordsMode: 'mix',
+    })
+    const hand = pool.find((word) => word.id === 'body-health/hand')!
+    expect(hand).toBeDefined()
+    for (let seed = 0; seed < 20; seed += 1) {
+      let state = seed
+      const random = () => {
+        state = (state * 1103515245 + 12345) % 2147483648
+        return state / 2147483648
+      }
+      const picks = selectDraftOptions({
+        pool,
+        slots: ['easy', 'easy', 'easy', 'easy', 'easy'],
+        hardExclude: new Set(['space-science/hand']),
+        penalties: new Map(),
+        avoidStems: new Set(),
+        random,
+      })
+      expect(picks.map((word) => word.id)).not.toContain(hand.id)
+    }
+  })
+
+  it('moved the body words out of Space & Science', () => {
+    const science = buildWordPool({
+      packIds: ['space-science'],
+      customWords: [],
+      customWordsMode: 'mix',
+    }).map((word) => word.term)
+    for (const term of ['hand', 'sunburn', 'tooth', 'elevator', 'escalator']) {
+      expect(science).not.toContain(term)
+    }
   })
 })

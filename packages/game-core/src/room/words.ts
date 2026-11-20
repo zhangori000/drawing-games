@@ -250,6 +250,13 @@ export interface DraftRequest {
   /** Words replaced earlier this round by either team. */
   readonly replacedWordIds: readonly string[]
   readonly wordMemory: RoomWordMemory
+  /**
+   * Whether a tiny pool may fall back to the other team's cards (stage 5).
+   * Only a fresh deal may: a swap that handed the drawer an opponent card
+   * (possibly the opponent's locked answer) would leak it, so swaps pass
+   * false and are refused when nothing else is left.
+   */
+  readonly allowOpponentCards?: boolean
 }
 
 function draftPenalties(request: DraftRequest): Map<string, number> {
@@ -310,7 +317,7 @@ function lastDrawnStems(
  * 3. words drawn in this room, least recently drawn first (avoid memory
  *    still excluded), only as many of the oldest as the slots need;
  * 4. any word but the other team's cards;
- * 5. (tiny pools) the other team's cards too.
+ * 5. (tiny pools, fresh deals only) the other team's cards too.
  *
  * So a drawn word only comes back once the pool has no never-drawn word
  * left for that slot, and then the oldest one does. The drawer's own live
@@ -369,7 +376,7 @@ export function selectDraftWords(
   }
   if (fill([base, opponent, avoid])) return chosen
   if (fill([base, opponent])) return chosen
-  fill([base])
+  if (request.allowOpponentCards !== false) fill([base])
   return chosen
 }
 

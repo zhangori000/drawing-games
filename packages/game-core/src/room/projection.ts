@@ -279,6 +279,7 @@ function hintView(
     teamRound.team,
     teamRound.drawerId,
     now,
+    teamRound.formerDrawerIds,
   )
   const isElector =
     member !== null && electorate.some((entry) => entry.id === member.id)
@@ -368,7 +369,11 @@ function myTeamRoundView(
             breakdown: solution.breakdown,
           },
     hint: hintView(viewer, round, teamRound),
-    canGuess: drawing && !amDrawer && solution === null,
+    canGuess:
+      drawing &&
+      !amDrawer &&
+      solution === null &&
+      teamRound.formerDrawerIds?.includes(member.id) !== true,
     canDraw: drawing && amDrawer,
   }
 }
@@ -514,7 +519,10 @@ function showdownMineView(
     canvasId: teamState.canvasId,
     guesses: guessViews(viewer, teamState.guesses, amDrawer),
     finished,
-    canGuess: !finished && !amDrawer,
+    canGuess:
+      !finished &&
+      !amDrawer &&
+      !(member !== null && teamState.formerDrawerIds?.includes(member.id)),
     canDraw: amDrawer && !finished,
   }
 }

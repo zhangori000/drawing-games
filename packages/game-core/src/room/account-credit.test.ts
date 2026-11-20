@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { ABANDON_MATCH_MS } from './constants'
+import { getNextWakeAtMs } from './engine'
 import { EMPTY_WORD_MEMORY } from './records'
 import type { MatchSummaryRecord, WordHistoryEvent } from './records'
 import { customWordList, RoomDriver } from './test-driver'
@@ -220,5 +222,143 @@ describe('crediting a match to an account linked late', () => {
     expect(driver.state.match?.creditedMemberIds).toEqual(['cy'])
     link(driver)
     expect(driver.effects).toEqual([])
+  })
+})
+
+/** Solo practice: Pat (with an account) and a bot on A, two bots on B. */
+function practice(): RoomDriver {
+  const driver = new RoomDriver({ seed: 21 })
+  driver.join('pat', 'Pat', { team: 'A', accountId: 'pat-acct' })
+  driver.ok({ type: 'lobby.add-bot', actorId: 'pat', team: 'A' })
+  driver.ok({ type: 'lobby.add-bot', actorId: 'pat', team: 'B' })
+  driver.ok({ type: 'lobby.add-bot', actorId: 'pat', team: 'B' })
+  driver.settings('pat', { rounds: 4, showdown: false })
+  driver.ok({ type: 'match.start', actorId: 'pat' })
+  return driver
+}
+
+/** The team's drawer picks their first card (if the draft is still open). */
+function pickFor(driver: RoomDriver, team: 'A' | 'B'): void {
+  if (driver.state.phase !== 'word-draft') return
+  const teamRound = driver.teamRound(team)
+  if (teamRound.chosenWordId !== null) return
+  driver.ok({
+    type: 'draft.select',
+    actorId: teamRound.drawerId,
+    wordId: teamRound.options[0]!.wordId,
+  })
+}
+
+function runUntilIdle(driver: RoomDriver, untilMs: number): void {
+  for (let step = 0; step < 2_000; step += 1) {
+    const next = getNextWakeAtMs(driver.state)
+    if (next === null || next > untilMs) break
+    driver.advanceTo(Math.max(next, driver.now))
+  }
+  driver.advanceTo(untilMs)
+}
+
+describe('play nobody was there for', () => {
+  it('abandons a practice match a minute after the only human closed the tab', () => {
+    const driver = practice()
+    driver.advanceBy(2_000)
+    driver.ok({ type: 'member.presence', memberId: 'pat', connected: false })
+    const droppedAt = driver.now
+    runUntilIdle(driver, droppedAt + 4 * 60_000)
+    expect(driver.state.phase).toBe('lobby')
+    expect(driver.state.match).toMatchObject({
+      abandoned: true,
+      endedAtMs: droppedAt + ABANDON_MATCH_MS,
+      completedRounds: 0,
+    })
+    expect(driver.state.bots.schedule).toEqual([])
+    expect(getNextWakeAtMs(driver.state)).toBeNull()
+    expect(
+      driver.history.filter((effect) => effect.type.startsWith('account.')),
+    ).toEqual([])
+
+    // Back later: Pat finds the lobby and can start a fresh match.
+    driver.ok({ type: 'member.presence', memberId: 'pat', connected: true })
+    driver.ok({ type: 'match.start', actorId: 'pat' })
+    expect(driver.state.match?.number).toBe(2)
+  })
+
+  it('keeps the practice match going for a human who comes back in time', () => {
+    const driver = practice()
+    driver.ok({ type: 'member.presence', memberId: 'pat', connected: false })
+    driver.advanceBy(ABANDON_MATCH_MS - 1_000)
+    driver.ok({ type: 'member.presence', memberId: 'pat', connected: true })
+    runUntilIdle(driver, driver.now + 10 * 60_000)
+    expect(driver.state.phase).toBe('stats')
+    const { summaries } = accountEffects(driver.history, 'pat-acct')
+    expect(summaries).toHaveLength(1)
+  })
+
+  it('abandons at once when every human has left', () => {
+    const driver = setup(ACCOUNT)
+    driver.pickWords()
+    for (const memberId of ['ana', 'ben', 'cy', 'di']) {
+      driver.ok({ type: 'member.leave', memberId })
+    }
+    expect(driver.state.phase).toBe('lobby')
+    expect(driver.state.match?.abandoned).toBe(true)
+    expect(accountEffects(driver.history, ACCOUNT)).toEqual({
+      words: [],
+      summaries: [],
+    })
+  })
+
+  it('records no drew, offered, or missed for a round someone was away for', () => {
+    const driver = setup(ACCOUNT)
+    // Round 1: Cy (B's drawer) and Di both lock their phones in the draft.
+    driver.ok({ type: 'member.presence', memberId: 'cy', connected: false })
+    driver.ok({ type: 'member.presence', memberId: 'di', connected: false })
+    pickFor(driver, 'A')
+    expect(driver.state.phase).toBe('word-draft')
+    driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    expect(driver.teamRound('B')).toMatchObject({
+      drawerId: 'cy',
+      chosenBy: 'auto',
+    })
+    driver.solve('A')
+    driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    expect(driver.state.phase).toBe('round-results')
+    expect(driver.state.match!.round!.absentIds).toEqual(['cy', 'di'])
+    expect(accountEffects(driver.history, ACCOUNT).words).toEqual([])
+    expect(driver.state.match!.stats.cy!.roundsDrawn).toBe(0)
+
+    // Back for round 2 (Di draws): Cy gets "missed" as usual.
+    driver.ok({ type: 'member.presence', memberId: 'cy', connected: true })
+    driver.ok({ type: 'member.presence', memberId: 'di', connected: true })
+    driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    driver.pickWords()
+    driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    expect(
+      accountEffects(driver.history, ACCOUNT).words.map((event) => event.role),
+    ).toEqual(['missed'])
+  })
+
+  it('sends no match summary to someone who was away for the whole match', () => {
+    const driver = setup(ACCOUNT)
+    driver.ok({
+      type: 'member.link-account',
+      memberId: 'ana',
+      accountId: 'ana-acct',
+      memory: EMPTY_WORD_MEMORY,
+    })
+    driver.ok({ type: 'member.presence', memberId: 'cy', connected: false })
+    while (driver.state.phase !== 'stats') {
+      if (driver.state.phase === 'word-draft') {
+        pickFor(driver, 'A')
+        if (driver.teamRound('B').drawerId !== 'cy') pickFor(driver, 'B')
+      }
+      driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    }
+    expect(accountEffects(driver.history, ACCOUNT)).toEqual({
+      words: [],
+      summaries: [],
+    })
+    // Ana, who played, gets hers as usual.
+    expect(accountEffects(driver.history, 'ana-acct').summaries).toHaveLength(1)
   })
 })

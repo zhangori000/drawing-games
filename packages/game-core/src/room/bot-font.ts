@@ -346,3 +346,170 @@ export function renderTextStrokes(text: string): BotStroke[] {
   })
   return strokes
 }
+
+/* ------------------------------------------------------------------------ */
+/* Letter puzzle                                                            */
+/* ------------------------------------------------------------------------ */
+
+/** Letters and digits get a blank; hyphens and apostrophes are shown. */
+function isPuzzleMark(char: string): boolean {
+  return char === '-' || char === "'"
+}
+
+/**
+ * Every letter slot is as wide as the widest glyph, so the blanks never
+ * hint at which letters are narrow (`I`) or wide (`M`).
+ */
+const PUZZLE_SLOT_EM = Math.max(
+  ...Object.entries(GLYPHS)
+    .filter(([char]) => !isPuzzleMark(char))
+    .map(([, shape]) => shape.width),
+)
+const PUZZLE_SLOT_GAP_EM = 0.28
+/** The blank sits this far below the letter's baseline. */
+const PUZZLE_BLANK_DROP_EM = 0.25
+const PUZZLE_BLANK_INSET_EM = 0.04
+
+function puzzleCharEm(char: string): number {
+  return isPuzzleMark(char) ? (GLYPHS[char]?.width ?? 0) : PUZZLE_SLOT_EM
+}
+
+function puzzleWordEm(word: string): number {
+  const chars = Array.from(word)
+  return (
+    chars.reduce((sum, char) => sum + puzzleCharEm(char), 0) +
+    PUZZLE_SLOT_GAP_EM * Math.max(0, chars.length - 1)
+  )
+}
+
+function puzzleLineEm(words: readonly string[]): number {
+  return (
+    words.reduce((sum, word) => sum + puzzleWordEm(word), 0) +
+    WORD_GAP_EM * Math.max(0, words.length - 1)
+  )
+}
+
+function puzzleBlockHeight(lineCount: number, height: number): number {
+  return (
+    height *
+    (lineCount * (1 + PUZZLE_BLANK_DROP_EM) + LINE_GAP_EM * (lineCount - 1))
+  )
+}
+
+function puzzleLayoutAt(
+  words: readonly string[],
+  height: number,
+): string[][] | null {
+  const maxEm = (BOX_WIDTH * CANVAS_ASPECT) / height
+  const lines: string[][] = []
+  let current: string[] = []
+  for (const word of words) {
+    const candidate = [...current, word]
+    if (current.length > 0 && puzzleLineEm(candidate) > maxEm) {
+      lines.push(current)
+      current = [word]
+    } else {
+      current = candidate
+    }
+  }
+  if (current.length > 0) lines.push(current)
+  const fits =
+    lines.every((line) => emToX(puzzleLineEm(line), height) <= BOX_WIDTH) &&
+    puzzleBlockHeight(lines.length, height) <= BOX_HEIGHT
+  return fits ? lines : null
+}
+
+/** One letter (or digit) of the puzzle: its blank, and its hidden glyph. */
+export interface BotPuzzleSlot {
+  readonly char: string
+  readonly blank: BotStroke
+  readonly glyph: readonly BotStroke[]
+}
+
+export interface BotPuzzle {
+  /** Letters and digits in reading order. */
+  readonly slots: readonly BotPuzzleSlot[]
+  /** Hyphens and apostrophes, drawn with the blanks (word shape only). */
+  readonly marks: readonly BotStroke[]
+}
+
+/**
+ * Lays out `text` as a fill-in-the-blanks puzzle for practice bot drawers:
+ * one equal-width blank per letter or digit (spaces are gaps, hyphens and
+ * apostrophes are drawn), plus each letter's glyph above its blank, so a
+ * bot can reveal letters one at a time without ever writing the answer.
+ * Same character rules, bounds, and rounding as `renderTextStrokes`.
+ */
+export function renderLetterPuzzle(text: string): BotPuzzle {
+  const words = drawableWords(text)
+  if (words.length === 0) return { slots: [], marks: [] }
+  let lines = puzzleLayoutAt(words, MAX_GLYPH_HEIGHT)
+  let height = MAX_GLYPH_HEIGHT
+  if (lines === null) {
+    let low = 0
+    let high = MAX_GLYPH_HEIGHT
+    for (let step = 0; step < LAYOUT_SEARCH_STEPS; step += 1) {
+      const middle = (low + high) / 2
+      const fitted = puzzleLayoutAt(words, middle)
+      if (fitted === null) {
+        high = middle
+      } else {
+        low = middle
+        lines = fitted
+      }
+    }
+    height = low
+  }
+  if (lines === null || height <= 0) return { slots: [], marks: [] }
+
+  const point = (xEm: number, lineLeft: number, y: number) => ({
+    x: roundCoordinate(
+      lineLeft + emToX(xEm, height),
+      BOT_TEXT_BOUNDS.left,
+      BOT_TEXT_BOUNDS.right,
+    ),
+    y: roundCoordinate(y, BOT_TEXT_BOUNDS.top, BOT_TEXT_BOUNDS.bottom),
+  })
+  const slots: BotPuzzleSlot[] = []
+  const marks: BotStroke[] = []
+  const blockTop =
+    BOT_TEXT_BOUNDS.top +
+    (BOX_HEIGHT - puzzleBlockHeight(lines.length, height)) / 2
+  lines.forEach((line, lineIndex) => {
+    const lineLeft =
+      BOT_TEXT_BOUNDS.left + (BOX_WIDTH - emToX(puzzleLineEm(line), height)) / 2
+    const lineTop =
+      blockTop + lineIndex * height * (1 + PUZZLE_BLANK_DROP_EM + LINE_GAP_EM)
+    const blankY = lineTop + height * (1 + PUZZLE_BLANK_DROP_EM)
+    let cursorEm = 0
+    line.forEach((word, wordIndex) => {
+      if (wordIndex > 0) cursorEm += WORD_GAP_EM
+      Array.from(word).forEach((char, charIndex) => {
+        const shape = GLYPHS[char]
+        if (shape === undefined) return
+        if (charIndex > 0) cursorEm += PUZZLE_SLOT_GAP_EM
+        const width = puzzleCharEm(char)
+        const offsetEm = cursorEm + (width - shape.width) / 2
+        const strokes = shape.strokes.map((polyline) =>
+          polyline.map(([x, y]) =>
+            point(offsetEm + x, lineLeft, lineTop + y * height),
+          ),
+        )
+        if (isPuzzleMark(char)) {
+          marks.push(...strokes)
+        } else {
+          slots.push({
+            char,
+            blank: [
+              point(cursorEm + PUZZLE_BLANK_INSET_EM, lineLeft, blankY),
+              point(cursorEm + width - PUZZLE_BLANK_INSET_EM, lineLeft, blankY),
+            ],
+            glyph: strokes,
+          })
+        }
+        cursorEm += width
+      })
+    })
+  })
+  return { slots, marks }
+}

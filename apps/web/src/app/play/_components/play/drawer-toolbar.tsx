@@ -10,7 +10,11 @@ import { useCanvasDrawing } from '@/lib/realtime/use-canvas'
 import { useRoomSession } from '../room-session'
 import { usePlayLayout } from './play-layout'
 
-/** Tools for the active drawer; undo/redo/clear stream like strokes. */
+/**
+ * Tools for the active drawer; undo/redo/clear stream like strokes. Phones
+ * get every tool on screen at once: two rows under the canvas in portrait,
+ * a narrow panel in the landscape sidebar.
+ */
 export function DrawerToolbar({
   canvasId,
   tools,
@@ -21,7 +25,7 @@ export function DrawerToolbar({
   const { canvasStore, actions } = useRoomSession()
   const drawing = useCanvasDrawing(canvasStore, canvasId)
   const history = drawingHistoryState(drawing)
-  const wrap = usePlayLayout() === 'wide'
+  const layout = usePlayLayout()
   return (
     <DrawingToolbar
       tool={tools.tool}
@@ -34,7 +38,10 @@ export function DrawerToolbar({
       canRedo={history.canRedo}
       canClear={history.canClear}
       onOps={(ops) => actions.sendDrawing(canvasId, ops)}
-      className={wrap ? 'flex-wrap justify-center' : undefined}
+      layout={
+        layout === 'wide' ? 'strip' : layout === 'stacked' ? 'rows' : 'panel'
+      }
+      className={layout === 'wide' ? 'flex-wrap justify-center' : undefined}
     />
   )
 }

@@ -33,7 +33,7 @@ import {
   requireChosen,
   teamElectorate,
 } from './selectors'
-import type { RoomCommand, RoundState } from './types'
+import type { InkTail, RoomCommand, RoundState } from './types'
 import { recordChosenWords, roomPool } from './words'
 
 type Command<T extends RoomCommand['type']> = Extract<RoomCommand, { type: T }>
@@ -68,6 +68,7 @@ export function startDrawing(ctx: RoomContext): void {
       drawerId: teamRound.drawerId,
       term: word.term,
       aliases: word.aliases,
+      difficulty: word.difficulty,
       budgetMs: settings.drawingSeconds * 1000,
       reservedTerms,
     })
@@ -119,6 +120,37 @@ function isValidDrawingAction(op: unknown): op is DrawingAction {
   }
 }
 
+interface InkState {
+  readonly inkLength?: number
+  readonly inkTail?: InkTail
+}
+
+/**
+ * Adds a human batch's ink to a canvas: the length of every segment drawn,
+ * continuing from the last point of the stroke in progress (`inkTail`), so
+ * streamed appends are measured in full. Rounded so state stays tidy.
+ */
+function addInk(canvas: InkState, ops: readonly DrawingAction[]): InkState {
+  let total = canvas.inkLength ?? 0
+  let tail = canvas.inkTail
+  for (const op of ops) {
+    if (op.type === 'stroke.begin') {
+      tail = { strokeId: op.strokeId, x: op.point.x, y: op.point.y }
+    } else if (op.type === 'stroke.append') {
+      for (const point of op.points) {
+        if (tail !== undefined && tail.strokeId === op.strokeId) {
+          total += Math.hypot(point.x - tail.x, point.y - tail.y)
+        }
+        tail = { strokeId: op.strokeId, x: point.x, y: point.y }
+      }
+    }
+  }
+  return {
+    inkLength: Math.round(total * 10_000) / 10_000,
+    ...(tail === undefined ? {} : { inkTail: tail }),
+  }
+}
+
 /**
  * Counts completed strokes, stamps the first stroke, and emits the ops
  * unchanged for the realtime layer to apply and fan out.
@@ -134,12 +166,16 @@ export function applyDrawerOps(
   const ended = ops.filter((op) => op.type === 'stroke.end').length
   const began = ops.some((op) => op.type === 'stroke.begin')
   const bump = <
-    T extends { strokeCount: number; firstStrokeAtMs: number | null },
+    T extends InkState & {
+      strokeCount: number
+      firstStrokeAtMs: number | null
+    },
   >(
     canvas: T,
   ): T => ({
     ...canvas,
     strokeCount: canvas.strokeCount + ended,
+    ...(origin === 'member' ? addInk(canvas, ops) : {}),
     firstStrokeAtMs: canvas.firstStrokeAtMs ?? (began ? ctx.now : null),
   })
   if (ctx.state.phase === 'showdown') updateShowdownTeam(ctx, team, bump)
@@ -205,6 +241,9 @@ export function handleHintVote(
   if (teamRound.drawerId === actor.id) {
     reject('NOT_ALLOWED', 'The drawer does not vote on hints.')
   }
+  if (teamRound.formerDrawerIds?.includes(actor.id) === true) {
+    reject('NOT_ALLOWED', 'You saw this word as the drawer.')
+  }
   if (teamRound.solution !== null) {
     reject('NOT_ALLOWED', 'Your team already solved it.')
   }
@@ -227,6 +266,7 @@ export function handleHintVote(
     actor.team,
     teamRound.drawerId,
     ctx.now,
+    teamRound.formerDrawerIds,
   )
   const revealed =
     countVotes(votes, electorate) >= majorityNeeded(electorate.length)
@@ -249,8 +289,11 @@ function roundPoints(round: RoundState, team: TeamId): number {
 }
 
 function updateRoundStats(ctx: RoomContext, round: RoundState): void {
+  const absent = new Set(round.absentIds ?? [])
   for (const team of TEAM_IDS) {
     const teamRound = round.teams[team]
+    // A drawer who was away for the whole drawing did not draw it.
+    if (absent.has(teamRound.drawerId)) continue
     const word = chosenOption(teamRound)
     const solution = teamRound.solution
     const solveMs =
@@ -292,6 +335,22 @@ function updateRoundMemory(ctx: RoomContext, round: RoundState): void {
 }
 
 /**
+ * Humans who were away for the whole drawing: disconnected (or gone) now,
+ * and since before it started.
+ */
+function absentForDrawing(ctx: RoomContext, round: RoundState): string[] {
+  const startedAt = round.drawingStartedAtMs ?? ctx.now
+  return ctx.state.members
+    .filter(
+      (member) =>
+        member.kind === 'human' &&
+        !member.connected &&
+        member.lastSeenAtMs <= startedAt,
+    )
+    .map((member) => member.id)
+}
+
+/**
  * Scores the round (winner, shutdown bounty, streak, lead), advances both
  * drawer turns, updates stats and memory, emits account word events, and
  * opens the results phase.
@@ -315,6 +374,7 @@ export function endRound(ctx: RoomContext): void {
     endedAtMs: ctx.now,
     winner,
     shutdownBonus,
+    absentIds: absentForDrawing(ctx, live),
   }
   const scores = {
     A: match.scores.A + points.A + (winner === 'A' ? shutdownBonus : 0),

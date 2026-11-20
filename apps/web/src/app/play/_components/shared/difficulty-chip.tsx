@@ -24,7 +24,11 @@ export interface DifficultyChipProps {
   readonly difficulty: WordDifficulty
   /** Append the solve bonus, e.g. "Hard · +40 pts". */
   readonly showBonus?: boolean
-  readonly size?: 'sm' | 'md'
+  /**
+   * `xs` is the one-line banner chip used while a keyboard is up: pips plus
+   * the bonus ("+40"), or the label when there is no bonus.
+   */
+  readonly size?: 'xs' | 'sm' | 'md'
   readonly className?: string
 }
 
@@ -35,6 +39,30 @@ export function DifficultyChip({
   className,
 }: DifficultyChipProps) {
   const bonus = DIFFICULTY_BONUSES[difficulty]
+  if (size === 'xs') {
+    return (
+      <span
+        className={cx(
+          'inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border-2 border-[#181713] px-1.5 text-[11px] font-black leading-5',
+          STYLES[difficulty],
+          className,
+        )}
+      >
+        <Pips difficulty={difficulty} />
+        <span className="sr-only">
+          {DIFFICULTY_LABELS[difficulty]}
+          {showBonus && bonus > 0 ? `, +${bonus} points` : ''}
+        </span>
+        <span aria-hidden="true">
+          {showBonus && bonus > 0 ? (
+            <span className="font-mono tabular-nums">+{bonus}</span>
+          ) : (
+            DIFFICULTY_LABELS[difficulty]
+          )}
+        </span>
+      </span>
+    )
+  }
   return (
     <span
       className={cx(
@@ -44,21 +72,27 @@ export function DifficultyChip({
         className,
       )}
     >
-      <span aria-hidden="true" className="flex gap-0.5">
-        {[1, 2, 3].map((pip) => (
-          <span
-            key={pip}
-            className={cx(
-              'block size-1.5 rounded-full',
-              pip <= PIPS[difficulty] ? 'bg-current' : 'bg-current opacity-20',
-            )}
-          />
-        ))}
-      </span>
+      <Pips difficulty={difficulty} />
       {DIFFICULTY_LABELS[difficulty]}
       {showBonus && bonus > 0 ? (
         <span className="font-mono tabular-nums">+{bonus} pts</span>
       ) : null}
+    </span>
+  )
+}
+
+function Pips({ difficulty }: { readonly difficulty: WordDifficulty }) {
+  return (
+    <span aria-hidden="true" className="flex gap-0.5">
+      {[1, 2, 3].map((pip) => (
+        <span
+          key={pip}
+          className={cx(
+            'block size-1.5 rounded-full',
+            pip <= PIPS[difficulty] ? 'bg-current' : 'bg-current opacity-20',
+          )}
+        />
+      ))}
     </span>
   )
 }

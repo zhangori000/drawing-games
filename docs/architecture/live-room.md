@@ -92,7 +92,9 @@ names and meanings in `types.ts` must hold.
   rotation). Host transfers to the earliest-joined connected human, else any
   human.
 - Host also transfers automatically when the host has been disconnected for
-  15 s and another human is connected (checked in `advanceRoom`).
+  15 s and another human is connected (checked in `advanceRoom`). A drawer
+  disconnected for 10 s hands the turn to a connected teammate (see Drawer
+  rotation).
 - `lobby.set-team` (lobby only): anyone may move themselves; the host may
   move anyone including bots. Teams cap at 8.
 - `lobby.shuffle-teams` (host, lobby): seeded shuffle of all members into
@@ -123,10 +125,20 @@ Blotto`. Bots are always connected and ready and never have accounts.
 
 ### Drawer rotation
 
-Each team keeps `drawerTurns[team]`. The drawer is
-`roster[turns % roster.length]`, skipping members disconnected for more than
-10 s (reconnect grace); if everyone is gone the base pick stands. Both teams
-advance by one turn after every normal round.
+Rotation is round-robin per team in join order, with a cursor: each
+round's drawer is the first member after the team's previous drawer (the
+one who finished last round's turn, after any takeover) who is within the
+reconnect grace (connected, or disconnected for at most 10 s)
+(`nextRotationDrawer`). Members who left are skipped; a mid-match joiner
+slots in at their join position; if nobody is within grace the next
+remaining member draws, and if everyone left the next former member keeps
+the seat. So nobody draws twice in a row while a teammate within grace is
+waiting, and roster changes never shift or repeat turns (e.g. with P2 away
+the whole match, A goes P1, P3, P1, P3). `drawerTurns[team]` still counts
+completed turns (one per normal round) but no longer picks the drawer. The
+showdown relay uses the same cursor: its first card goes to the member
+after the last round's drawer, and each new card to the member after the
+previous card's drawer.
 
 **A drawer who leaves mid-turn** (an explicit `member.leave` during
 `word-draft`, `drawing`, or on an active showdown card) hands the turn to the
@@ -139,9 +151,27 @@ for the remaining time (bots re-plan around them; a showdown takeover counts
 as a card drawn). The opponent's turn and every deadline are untouched. A team
 that already solved, or has nobody left, is unchanged. Results then name the
 new drawer, who gets `drew`/`offered`; swap reports stay with whoever swapped.
-The rotation continues from the remaining roster. Disconnects never trigger
-this (they only fall under the grace rule at the next pick), and
+The rotation continues after whoever finished the turn.
 `lobby.remove-member` is lobby-only, so it cannot interrupt a turn.
+
+**A drawer who stays disconnected** past the reconnect grace hands the turn
+over the same way. `advanceRoom` has due work (`nextDrawerTakeover`, part of
+`getNextWakeAtMs`) at `drawer.lastSeenAtMs + 10 s` for every live turn (a
+draft, a drawing, or an active showdown card, of a team that has not solved
+it) whose human drawer is disconnected while a teammate is connected and a
+third teammate (not an earlier drawer of the turn) could still guess. When it
+runs,
+the first connected teammate after the drawer in join order (a bot counts)
+continues the same cards and swaps, or the same word and canvas, for the
+remaining time; a showdown takeover counts as a card drawn, as for a leave.
+A drawer back within the grace keeps the turn; one back later is recorded in
+`formerDrawerIds` and sits the turn out (no guesses or hint votes on a word
+they saw), guessing again from the next turn; the rotation continues after
+the teammate who took over. In a pair (or one human with one bot) nobody
+would be left to guess, so the turn waits for the drawer. With nobody
+connected the turn stays put, and the first teammate to connect (or join)
+takes it at once. A drawer who left with nobody to hand to is treated the
+same way, without the grace.
 
 ### Word draft (the headline improvement)
 
@@ -162,7 +192,7 @@ At round start, for team A then team B:
    3. words drawn in this room, least recently drawn first: only the oldest
       few are let back in, a step at a time (avoid memory still excluded);
    4. any word but the other team's cards;
-   5. (tiny pools only) the other team's cards too.
+   5. (tiny pools only, fresh deals only) the other team's cards too.
 
    So a drawn word only comes back once no never-drawn word is left for the
    slot. With at least `roundWordDemand` never-drawn words at each draft no
@@ -192,7 +222,11 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   When both teams have chosen, drawing starts immediately.
 - `draft.replace`: drawer only, while unchosen, within
   `replacementsPerDrawer`. The replacement keeps the replaced card's
-  difficulty and excludes all current cards and previously replaced words.
+  difficulty and excludes all current cards (both teams') and previously
+  replaced words. It never falls back to stage 5: on a custom-only list so
+  short that only the other team's cards remain, the swap is refused with
+  "There are no other words left to swap in." (an opponent card could be
+  their locked answer).
   `seen-before` adds the word to the drawer's in-room `memory.avoid`;
   `unknown-definition` adds it to `memory.soft`. The UI shows the definition
   first, so "don't know it" is a last resort rather than the only help.
@@ -233,7 +267,11 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   guessers approving reveals the pattern to that team only and costs
   `hintCost` if they later solve. `shown` reveals from the start for free;
   `hidden` never reveals.
-- `categoryHint` shows guessers the pack name of their own word.
+- `categoryHint` shows guessers the pack name of their own word, so every
+  curated word sits in the pack a guesser would look in (body words are in
+  Body & Health, not Space & Science). A word that moves packs gets a new id;
+  `canonicalWordId` maps its old id (`LEGACY_WORD_IDS`), and member memories
+  are canonicalized on join and account link (`capMemory`).
 - Own-word clues (`MyTeamRoundView.difficulty`, `category`, and the length
   pattern) are withheld from guessers while `opponentDraftVisibility` is
   `options-and-actions` (`ownWordCluesAllowed`): the word-length mode then
@@ -266,6 +304,26 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   and clears ready flags. Room word memory survives rematches.
 - Results and final views carry each revealed word's `wordId` (with the
   term), so guests' browsers can remember the words they saw.
+- **Only play someone was there for is credited.** At round end the
+  reducer records `round.absentIds` (internal): humans disconnected since
+  before the drawing started. An absent drawer (a deadline pick nobody
+  saw) gets no `drew`/`offered` and no drawer stats; an absent guesser gets
+  no `missed`. Earlier drawers of a turn someone took over
+  (`teamRound.formerDrawerIds`, internal) get `offered` for every card and
+  no guesser event; they cannot `guess.submit` or `hint.vote` on that word
+  (they saw it) and guess again from the next turn (showdown: the next
+  card). A showdown card whose relay drawer was away for all of it is not
+  `drew` (`ShowdownCardResult.drawerAbsent`). `account.match` goes only to
+  members who took part: present for a finished round, a guess, or a
+  showdown card.
+- **Abandoned matches.** When no human is connected for 60 s
+  (`ABANDON_MATCH_MS`; at once if every human left) during a running match,
+  due work abandons it: `match.abandoned` (internal) is set, `endedAtMs` is
+  stamped with `endedReason: null`, bots stop, and the room returns to the
+  lobby (left members pruned, ready flags cleared). No `account.match` is
+  emitted; rounds that finished earlier were already reported. So bots never
+  play out (and record a 0-point loss for) a practice match whose player
+  closed the tab.
 - **Late account link.** `member.link-account` with an account during a match
   or on its final (`stats`) screen credits that match to the account once:
   one `account.words` with the member's events for every finished round they
@@ -284,12 +342,25 @@ by the reducer through `state.bots.schedule` and executed in `advanceRoom`;
 `getNextWakeAtMs` includes the next bot action.
 
 - Bot drawer: picks a card 2–5 s into the draft (a never-drawn one when the
-  hand has one); then draws the word as single-stroke letters
-  (`renderTextStrokes`) one stroke every 0.7–1.2 s.
-- Bot guessers: 1–3 wrong guesses (other pool words) at random times, then a
-  correct guess. With a bot drawer: a few seconds after most letters are
-  drawn. With a human drawer: at a random point in 35–85 % of the round, but
-  only once the drawer has at least 3 strokes (otherwise retry 5 s later).
+  hand has one); then draws a **letter puzzle** (`renderLetterPuzzle`), never
+  the word written out: one equal-width blank per letter or digit (spaces are
+  gaps; hyphens and apostrophes are drawn), one stroke every 0.25–0.45 s
+  (`draw.outline` items), then reveals letters one at a time above their
+  blanks (`draw.letter`) in a seeded random order: at most 60 % of them and
+  never all, spread from 15 % to 75 % of the time budget (±1.5 s). Equal
+  blanks keep narrow and wide letters indistinguishable.
+- Bot guessers follow **one timing model whoever draws** (`SOLVE_MODEL`), so
+  both teams of a practice match play by the same clock: 1–3 clearly wrong
+  guesses (other pool words), then the answer at a uniform share of the time
+  budget by difficulty (easy 20–60 %, medium 30–70 %, hard 40–85 %), or, with
+  8 % / 12 % / 20 % odds, never (one more wrong guess instead). Showdown cards
+  (30 s budget per card) never miss, since there is no per-card deadline.
+- A human drawer's canvas must look like a real attempt when the answer is
+  due: at least 2 strokes and 1.2 canvas-widths of ink (easy), 4 and 2.5
+  (medium), 6 and 4 (hard); otherwise the bot keeps looking and retries every
+  4 s until the deadline. Ink is measured by the reducer from human
+  `stroke.begin`/`stroke.append` points (`inkLength`, internal).
+- Retired `draw.next-stroke` items in a stored schedule are ignored.
 - Bots never vote and never record account data.
 
 ### Projection secrecy (must be tested with properties)
@@ -396,17 +467,43 @@ Non-members get previews during play and full access in results/stats.
   viewport; the document itself never scrolls (`overscroll-behavior: none`).
   The play route's viewport uses `interactive-widget=resizes-content` and
   `viewport-fit=cover`, and safe-area insets are respected.
-- The whole play UI uses `touch-action: manipulation` (no double-tap zoom);
-  the canvas uses `touch-action: none` and cancels Safari `gesture*` events,
-  so pinching or double-tapping while drawing never zooms the page. Page zoom
-  is not globally disabled (accessibility).
+- The whole play UI (`GameViewport`) uses `touch-action: pan-x pan-y`: scroll
+  panes still scroll, but pinch zoom and double-tap zoom are blocked
+  everywhere on the play screen in Chrome/Android/Firefox (`manipulation`
+  would still allow pinch). Safari's `gesture*` events are cancelled too, and
+  the canvas uses `touch-action: none`. Page zoom is not disabled in the
+  viewport meta (no `maximum-scale`), so browser and accessibility zoom still
+  work; while the visual viewport is zoomed (`scale > 1.01`) the layout keeps
+  its last unzoomed size instead of re-pinning into the zoomed rectangle.
 - The canvas has a fixed 4:3 logical aspect ratio, letterboxed in its pane,
   so every device sees the same drawing proportions and the keyboard opening
   only rescales it.
-- Optional **compact keyboard** on touch devices: an in-app QWERTY that never
-  opens the native keyboard, so the viewport never resizes. Default on for
-  coarse pointers; one tap switches to the native keyboard; the choice
-  persists.
+- Optional **compact keyboard** on touch devices: an in-app QWERTY (40 px
+  rows, about 180 px tall) that never opens the native keyboard. Default on
+  for coarse pointers. A keyboard button in the guess input row switches to
+  the native keyboard and back (the choice persists); a "hide keyboard" key
+  tucks the keys away for this screen and tapping the input brings them back.
+- Keyboard-aware layout: `GameViewport` exposes `keyboardOpen` (device
+  keyboard, from the visual viewport) and `inAppKeyboard` (the guess dock
+  registers its compact keys with `useInAppKeyboard`). While either is up on
+  a phone (`PlayLayout` stacked or landscape), the guesser's layout tightens
+  instead of shrinking the drawing: the clue banner collapses to one 44 px
+  line, the feed row and opponent tile hide and the dock's status line shows
+  the newest teammate guess and an opponent progress chip, and the top bar
+  slims to 44 px while the device keyboard is open. On a 390 x 664 phone the
+  paper stays 374 x 280 with the compact keys up and about 250 px wide with
+  the device keyboard covering 45% of the screen.
+- Drawer tools on phones are all on screen at once (no hidden sideways
+  scroll): two rows under the canvas in portrait (pen, eraser, size, undo,
+  redo, clear; then 12 colors in a grid), and a narrow panel in the landscape
+  sidebar. Sizes open from a size button. Desktop keeps the single strip.
+- Landscape phones (`wide-short`): nothing floats over the paper. The
+  drawer's sidebar is 13 rem (tools, opponent row, feed); a guesser's is
+  19 rem (opponent row, feed, dock with the compact keys).
+- The word draft on phones (narrower than 640 px or shorter than 560 px)
+  shows each card as a compact row (difficulty, term, bonus; tap to pick)
+  with the meaning and swap buttons behind a `?` expander, so every card and
+  bonus is visible without scrolling.
 - Desktop: type anywhere to start a guess; `↑` recalls the last guess;
   drawer shortcuts B/E, 1–9 colors, `[`/`]` size, Ctrl/Cmd+Z, Shift+Ctrl/Cmd+Z.
 
@@ -430,4 +527,8 @@ Non-members get previews during play and full access in results/stats.
 - Realtime: join/resume/replace, command dedupe, alarm-driven phase changes,
   canvas fan-out and access, account signup/login/verify/record.
 - Browser: create → practice bots → play a round on desktop; two real
-  players in two contexts; mobile keyboard stability on the play screen.
+  players in two contexts; mobile keyboard stability on the play screen; on a
+  390 x 664 phone the guesser's paper stays at least 250 px wide with the
+  compact keyboard up, all draft cards fit on screen, and every drawing tool
+  is visible in portrait and landscape; pinching the play screen never zooms
+  it; `?next=` after signing in never leaves the site.

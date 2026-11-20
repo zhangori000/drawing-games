@@ -95,3 +95,14 @@ export function SendIcon(props: IconProps) {
     </Icon>
   )
 }
+
+/** "Hide keyboard": a keyboard with a down chevron under it. */
+export function KeyboardHideIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2.5" y="3" width="19" height="11" rx="2" />
+      <path d="M6 7h.01M10 7h.01M14 7h.01M18 7h.01M7 10.5h10" />
+      <path d="M9 18l3 3 3-3" />
+    </Icon>
+  )
+}

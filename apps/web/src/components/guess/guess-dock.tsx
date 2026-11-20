@@ -9,9 +9,11 @@ import {
   useState,
   type FormEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from 'react'
 
 import { isEditableElement, isModalOpen } from '../layout/editable'
+import { useInAppKeyboard } from '../layout/game-viewport'
 import { cx } from '../ui/cx'
 import { KeyboardIcon, SendIcon } from '../ui/icons'
 import { CompactKeyboard } from './compact-keyboard'
@@ -27,6 +29,10 @@ import {
 
 export type { GuessDockFeedback }
 
+/** The status line's default note while there is nothing else to show. */
+export const GUESS_PRIVACY_NOTE =
+  'Only you and your drawer see how close your guesses are.'
+
 /** The room accepts 1–60 characters per guess. */
 export const MAX_GUESS_LENGTH = 60
 
@@ -39,6 +45,14 @@ export interface GuessDockProps {
   readonly placeholder?: string
   /** Desktop: typing anywhere on the page starts a guess. Default on. */
   readonly typeAnywhere?: boolean
+  /**
+   * Shown in the status line while there is no feedback to show (e.g. the
+   * latest teammate guess when the feed is hidden). Defaults to a privacy
+   * note about near-miss feedback.
+   */
+  readonly idleStatus?: ReactNode
+  /** Small extra item at the end of the status line (e.g. opponent status). */
+  readonly statusAside?: ReactNode
   readonly className?: string
 }
 
@@ -53,7 +67,10 @@ const TONE_CLASSES: Readonly<Record<FeedbackTone, string>> = {
  * The guess composer. It never scrolls or navigates: submitting keeps focus
  * in the input (with `preventScroll`), clears it on success, and keeps the
  * text when sending fails. With the compact keyboard on, the input uses
- * `inputMode="none"` so the phone keyboard never opens.
+ * `inputMode="none"` so the phone keyboard never opens; the keys can be
+ * tucked away and come back when the input is tapped. While the keys show,
+ * the dock tells the surrounding `GameViewport` (`useInAppKeyboard`) so the
+ * play layout tightens around the drawing just as for a device keyboard.
  */
 export function GuessDock({
   onGuess,
@@ -61,6 +78,8 @@ export function GuessDock({
   feedback = null,
   placeholder = 'Type your guess',
   typeAnywhere = true,
+  idleStatus,
+  statusAside,
   className,
 }: GuessDockProps) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -73,9 +92,13 @@ export function GuessDock({
     afterFeedbackId: number | null
   } | null>(null)
   const [compact, setCompact] = useCompactKeyboardPreference()
+  // Hiding the compact keys is for this screen only; the input brings them back.
+  const [compactHidden, setCompactHidden] = useState(false)
   const coarsePointer = useCoarsePointer()
   const feedbackId = useId()
   const disabled = disabledReason !== null
+  const showCompact = compact && !disabled && !compactHidden
+  useInAppKeyboard(showCompact)
 
   const focusInput = () => inputRef.current?.focus({ preventScroll: true })
 
@@ -185,6 +208,7 @@ export function GuessDock({
   const switchKeyboard = (useCompact: boolean) => {
     const input = inputRef.current
     setCompact(useCompact)
+    setCompactHidden(false)
     if (!input) return
     // Change the attribute before refocusing so iOS honors it in this tap.
     input.inputMode = useCompact ? 'none' : 'text'
@@ -199,13 +223,18 @@ export function GuessDock({
         ? describeFeedback(feedback)
         : null
 
-  const showCompact = compact && !disabled
+  const showKeyboardSwitch = !disabled && coarsePointer
   return (
     <div className={cx('shrink-0 bg-[#f5f0e8]', className)}>
       <form
         onSubmit={submit}
         aria-label="Guess the drawing"
-        className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-3 pt-2"
+        className={cx(
+          'grid gap-x-2 gap-y-0.5 px-3 pb-0.5 pt-1.5 @container',
+          showKeyboardSwitch
+            ? 'grid-cols-[minmax(0,1fr)_auto_auto]'
+            : 'grid-cols-[minmax(0,1fr)_auto]',
+        )}
       >
         <label className="sr-only" htmlFor={`${feedbackId}-input`}>
           Your guess
@@ -219,6 +248,8 @@ export function GuessDock({
             setValue(event.target.value.slice(0, MAX_GUESS_LENGTH))
           }
           onKeyDown={handleKeyDown}
+          // A tap on the input brings tucked-away compact keys back.
+          onClick={() => setCompactHidden(false)}
           disabled={disabled}
           placeholder={disabled ? (disabledReason ?? '') : placeholder}
           aria-describedby={feedbackId}
@@ -227,21 +258,39 @@ export function GuessDock({
           autoCapitalize="off"
           spellCheck={false}
           enterKeyHint="send"
-          inputMode={showCompact ? 'none' : 'text'}
+          inputMode={compact && !disabled ? 'none' : 'text'}
           maxLength={MAX_GUESS_LENGTH}
-          className="min-h-12 min-w-0 rounded-xl border-2 border-[#181713] bg-white px-4 text-base text-[#181713] outline-none placeholder:text-black/40 focus:ring-4 focus:ring-[#5c4cf2]/25 disabled:bg-white/60"
+          className="min-h-11 min-w-0 rounded-xl border-2 border-[#181713] bg-white px-4 text-base text-[#181713] outline-none placeholder:text-black/40 focus:ring-4 focus:ring-[#5c4cf2]/25 disabled:bg-white/60"
         />
+        {showKeyboardSwitch ? (
+          <button
+            type="button"
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => switchKeyboard(!compact)}
+            aria-label={compact ? 'Use phone keyboard' : 'Use compact keyboard'}
+            title={compact ? 'Use phone keyboard' : 'Use compact keyboard'}
+            data-testid="keyboard-switch"
+            className="grid min-h-11 min-w-11 place-items-center rounded-xl border-2 border-[#181713]/20 bg-white text-black/65 transition active:scale-95"
+          >
+            <KeyboardIcon width={20} height={20} />
+          </button>
+        ) : null}
         <button
           type="submit"
           disabled={disabled || value.trim().length === 0}
           onPointerDown={(event) => event.preventDefault()}
           aria-label="Send guess"
-          className="inline-flex min-h-12 min-w-12 items-center justify-center gap-1.5 rounded-xl border-2 border-[#181713] bg-[#5c4cf2] px-4 font-black text-white shadow-[2px_2px_0_#181713] transition active:translate-x-px active:translate-y-px active:shadow-none disabled:opacity-45"
+          className="inline-flex min-h-11 min-w-12 items-center justify-center gap-1.5 rounded-xl border-2 border-[#181713] bg-[#5c4cf2] px-4 font-black text-white shadow-[2px_2px_0_#181713] transition active:translate-x-px active:translate-y-px active:shadow-none disabled:opacity-45"
         >
           <SendIcon width={18} height={18} />
-          <span className="hidden sm:inline">Guess</span>
+          <span className="hidden @min-[28rem]:inline">Guess</span>
         </button>
-        <div className="col-span-2 flex h-7 min-w-0 items-center gap-2">
+        <div
+          className={cx(
+            'flex h-6 min-w-0 items-center gap-2',
+            showKeyboardSwitch ? 'col-span-3' : 'col-span-2',
+          )}
+        >
           <p
             id={feedbackId}
             role="status"
@@ -258,25 +307,19 @@ export function GuessDock({
               >
                 {status.message}
               </span>
+            ) : disabled ? (
+              <span className="truncate px-1 text-xs text-black/45">
+                {disabledReason}
+              </span>
+            ) : idleStatus !== undefined ? (
+              idleStatus
             ) : (
               <span className="truncate px-1 text-xs text-black/45">
-                {disabled
-                  ? disabledReason
-                  : 'Only you and your drawer see how close your guesses are.'}
+                {GUESS_PRIVACY_NOTE}
               </span>
             )}
           </p>
-          {!disabled && coarsePointer && !compact ? (
-            <button
-              type="button"
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={() => switchKeyboard(true)}
-              className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-bold text-black/60 hover:bg-black/5"
-            >
-              <KeyboardIcon width={16} height={16} />
-              Use compact keyboard
-            </button>
-          ) : null}
+          {statusAside}
         </div>
       </form>
       {showCompact ? (
@@ -284,7 +327,7 @@ export function GuessDock({
           onKey={replaceSelection}
           onBackspace={backspace}
           onSend={() => void submit()}
-          onUsePhoneKeyboard={() => switchKeyboard(false)}
+          onHide={() => setCompactHidden(true)}
           sendDisabled={value.trim().length === 0}
         />
       ) : null}

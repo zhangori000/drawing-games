@@ -53,6 +53,46 @@ export function playableWordsForPack(pack: WordPackData): PlayableWord[] {
   }))
 }
 
+/**
+ * Curated words that moved to another pack, by their old id. Ids are
+ * stable forever, so memories and histories that still hold an old id (an
+ * account's never-again list, a guest's seen words, a room's drawn words)
+ * keep naming the same word: `answerKeyForWordId`, `getPlayableWordById`,
+ * and `canonicalWordId` resolve them.
+ */
+export const LEGACY_WORD_IDS: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries([
+    ...[
+      'brain',
+      'skeleton',
+      'muscle',
+      'eye',
+      'ear',
+      'nose',
+      'tooth',
+      'tongue',
+      'bone',
+      'hand',
+      'foot',
+      'lungs',
+      'fingerprint',
+      'belly-button',
+      'sunburn',
+      'freckles',
+      'brain-freeze',
+      'goosebumps',
+      'heartbeat',
+    ].map((slug) => [`space-science/${slug}`, `body-health/${slug}`]),
+    ['space-science/elevator', 'places/elevator'],
+    ['space-science/escalator', 'places/escalator'],
+  ] as const),
+)
+
+/** The current id of a word id (itself unless the word moved packs). */
+export function canonicalWordId(id: string): string {
+  return LEGACY_WORD_IDS[id] ?? id
+}
+
 interface CuratedIndex {
   readonly words: readonly PlayableWord[]
   readonly byId: ReadonlyMap<string, PlayableWord>
@@ -87,7 +127,7 @@ export function getAllPlayableWords(): readonly PlayableWord[] {
 }
 
 export function getPlayableWordById(id: string): PlayableWord | undefined {
-  return getCuratedIndex().byId.get(id)
+  return getCuratedIndex().byId.get(canonicalWordId(id))
 }
 
 export function getPackWordCount(packId: string): number {
@@ -100,7 +140,7 @@ export function getPackWordCount(packId: string): number {
  * Lets room memory recognize `custom/cat` and `animals/cat` as one word.
  */
 export function answerKeyForWordId(id: string): string | null {
-  const curated = getCuratedIndex().answerKeyById.get(id)
+  const curated = getCuratedIndex().answerKeyById.get(canonicalWordId(id))
   if (curated !== undefined) return curated
   const prefix = `${CUSTOM_PACK_ID}/`
   if (!id.startsWith(prefix)) return null

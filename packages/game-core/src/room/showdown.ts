@@ -19,7 +19,7 @@ import {
   updateStats,
 } from './context'
 import { endMatch } from './match'
-import { pickRotationMember } from './members'
+import { findMember, nextRotationDrawer } from './members'
 import { chosenOption } from './selectors'
 import type {
   DraftOption,
@@ -43,13 +43,17 @@ function showdownCardsFor(ctx: RoomContext, team: TeamId): DraftOption[] {
   })
 }
 
+/**
+ * The relay drawer after `afterId`: the relay continues the team's normal
+ * rotation (it starts after the last round's drawer) and moves on one
+ * teammate per card, skipping anyone past their reconnect grace.
+ */
 function relayDrawerId(
   ctx: RoomContext,
   team: TeamId,
-  relayTurn: number,
+  afterId: string | null,
 ): string {
-  const turns = requireMatch(ctx.state).drawerTurns[team]
-  return pickRotationMember(ctx.state, team, turns + relayTurn, ctx.now).id
+  return nextRotationDrawer(ctx.state, team, afterId, ctx.now).id
 }
 
 /** Resets the card's canvas, credits the relay drawer, and plans bots. */
@@ -68,6 +72,9 @@ function openCard(ctx: RoomContext, team: TeamId): void {
     drawerId: teamState.drawerId,
     term: card.term,
     aliases: card.aliases,
+    difficulty: card.difficulty,
+    // No per-card deadline: a bot that "misses" would stall the relay.
+    canMiss: false,
     budgetMs: SHOWDOWN_BOT_CARD_BUDGET_MS,
     reservedTerms: teamState.cards.map((entry) => entry.term),
   })
@@ -78,13 +85,17 @@ export function startShowdown(ctx: RoomContext): void {
   const match = requireMatch(ctx.state)
   const settings = ctx.state.settings
   const deadlineAtMs = ctx.now + settings.showdownSeconds * 1000
+  const lastRound = match.history[match.history.length - 1]
   const relayTeam = (team: TeamId): ShowdownTeamState => {
     const cards = ctx.rng.shuffle(showdownCardsFor(ctx, team))
     return {
       team,
       cards,
       cardIndex: 0,
-      drawerId: cards.length === 0 ? null : relayDrawerId(ctx, team, 0),
+      drawerId:
+        cards.length === 0
+          ? null
+          : relayDrawerId(ctx, team, lastRound?.teams[team].drawerId ?? null),
       relayTurn: 0,
       canvasId: showdownCanvasId(match.number, team, 0),
       cardStartedAtMs: ctx.now,
@@ -143,10 +154,17 @@ function finishActiveCard(
   const active = requireShowdown(ctx.state).teams[team]
   const card = active.cards[active.cardIndex]
   if (card === undefined || active.drawerId === null) return false
+  const drawer = findMember(ctx.state, active.drawerId)
+  const drawerAbsent =
+    drawer !== undefined &&
+    drawer.kind === 'human' &&
+    !drawer.connected &&
+    drawer.lastSeenAtMs <= active.cardStartedAtMs
   const result: ShowdownCardResult = {
     cardIndex: active.cardIndex,
     drawerId: active.drawerId,
     guesserId,
+    ...(drawerAbsent ? { drawerAbsent: true } : {}),
     solveMs: guesserId === null ? null : ctx.now - active.cardStartedAtMs,
     atMs: ctx.now,
   }
@@ -182,24 +200,29 @@ export function clearShowdownCard(
   const cardIndex = teamState.cardIndex + 1
   const finished = cardIndex >= teamState.cards.length
   const relayTurn = teamState.relayTurn + 1
+  // The ink of the cleared card does not carry over.
+  const { inkTail: _clearedTail, ...cleared } = teamState
   const next: ShowdownTeamState = finished
     ? {
-        ...teamState,
+        ...cleared,
         cardIndex,
         drawerId: null,
         guesses: [],
+        formerDrawerIds: [],
         finishedAtMs: ctx.now,
       }
     : {
-        ...teamState,
+        ...cleared,
         cardIndex,
         relayTurn,
-        drawerId: relayDrawerId(ctx, team, relayTurn),
+        drawerId: relayDrawerId(ctx, team, teamState.drawerId),
         canvasId: showdownCanvasId(match.number, team, cardIndex),
         cardStartedAtMs: ctx.now,
         strokeCount: 0,
+        inkLength: 0,
         firstStrokeAtMs: null,
         guesses: [],
+        formerDrawerIds: [],
       }
   const firstClear =
     finished && requireShowdown(ctx.state).firstClearTeam === null

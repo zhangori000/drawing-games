@@ -10,6 +10,7 @@ import { cx } from '@/components/ui/cx'
 
 import { breakdownSentence, signedPoints } from '../../_lib/format'
 import { DifficultyChip } from '../shared/difficulty-chip'
+import { usePlayChrome } from './play-layout'
 
 const BANNER =
   'relative flex min-h-[3.75rem] shrink-0 items-center gap-2 border-b-2 border-[#181713] px-3 py-1.5'
@@ -133,10 +134,12 @@ export function NoteBanner({
   readonly children: ReactNode
   readonly tone?: 'plain' | 'dark'
 }) {
+  const { compactBanner } = usePlayChrome()
   return (
     <div
       className={cx(
         BANNER,
+        compactBanner && 'min-h-11 py-1',
         tone === 'dark'
           ? 'bg-[#181713] text-white'
           : 'bg-[#fffdf7] text-[#181713]',
@@ -145,4 +148,20 @@ export function NoteBanner({
       {children}
     </div>
   )
+}
+
+/**
+ * A secondary banner line (rules, notes) that steps aside while a keyboard
+ * squeezes the screen, so the drawing keeps the room.
+ */
+export function BannerDetail({
+  children,
+  className,
+}: {
+  readonly children: ReactNode
+  readonly className?: string
+}) {
+  const { compactBanner } = usePlayChrome()
+  if (compactBanner) return null
+  return <p className={className}>{children}</p>
 }

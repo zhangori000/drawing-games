@@ -76,3 +76,30 @@ test('a quick account signs up, sees /me, signs out, and logs back in', async ({
   await page.goto('/')
   await expect(page.getByRole('link', { name: `@${username}` })).toBeVisible()
 })
+
+test('?next= after signing up never leaves this site', async ({ page }) => {
+  const username = `e2e_nx${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`
+  const offSite: string[] = []
+  await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, async (route) => {
+    if (route.request().isNavigationRequest()) {
+      offSite.push(route.request().url())
+    }
+    await route.fulfill({ status: 200, body: 'off-site' })
+  })
+
+  // A tab after the first slash would turn into `//example.com` in the
+  // browser's URL parser; the page must fall back to /me instead.
+  await page.goto('/account?next=/%09/example.com/pwn')
+  await page.getByLabel('Username').fill(username)
+  await page.getByLabel('Password').fill('correct-horse-42')
+  await page.getByRole('button', { name: 'Create account' }).click()
+  await expect(page).toHaveURL(/127\.0\.0\.1:\d+\/me$/)
+  expect(offSite).toEqual([])
+
+  // Signed in, a same-site `next` becomes the Continue link as is.
+  await page.goto('/account?next=/play/ABCD')
+  await expect(page.getByRole('link', { name: 'Continue' })).toHaveAttribute(
+    'href',
+    '/play/ABCD',
+  )
+})

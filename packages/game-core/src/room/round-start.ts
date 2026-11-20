@@ -4,7 +4,7 @@ import type { TeamId } from '../types'
 import { planBotDraftPick } from './bots'
 import type { RoomContext } from './context'
 import { emit, patchState, requireMatch, updateMatch } from './context'
-import { pickRotationMember, teamRoster } from './members'
+import { nextRotationDrawer, teamRoster } from './members'
 import type {
   DraftOption,
   RoomMember,
@@ -95,16 +95,19 @@ export function startRound(ctx: RoomContext): void {
   const settings = ctx.state.settings
   const pool = roomPool(settings)
 
-  const drawerA = pickRotationMember(
+  // Each team's rotation continues after whoever drew its last round
+  // (after any mid-turn takeover), so nobody draws twice in a row.
+  const previous = match.history[match.history.length - 1]
+  const drawerA = nextRotationDrawer(
     ctx.state,
     'A',
-    match.drawerTurns.A,
+    previous?.teams.A.drawerId ?? null,
     ctx.now,
   )
-  const drawerB = pickRotationMember(
+  const drawerB = nextRotationDrawer(
     ctx.state,
     'B',
-    match.drawerTurns.B,
+    previous?.teams.B.drawerId ?? null,
     ctx.now,
   )
   const optionsA = draftCards(ctx, pool, drawerA, [])

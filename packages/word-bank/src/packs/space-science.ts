@@ -104,78 +104,13 @@ export const SPACE_SCIENCE_PACK: WordPackData = {
       definition:
         'A thin, round-bottomed glass vial that scientists fill with liquids.',
     },
-    {
-      term: 'elevator',
-      difficulty: 'easy',
-      definition:
-        'A box that carries people up and down between floors of a building.',
-    },
-    {
-      term: 'brain',
-      difficulty: 'easy',
-      definition:
-        'The wrinkly organ inside your skull that does your thinking.',
-    },
-    {
-      term: 'skeleton',
-      difficulty: 'easy',
-      definition: 'The full frame of bones that holds up a body.',
-    },
-    {
-      term: 'muscle',
-      difficulty: 'easy',
-      definition:
-        'Body tissue that tightens to move you, like a bulging flexed arm.',
-      aliases: ['bicep'],
-    },
-    {
-      term: 'eye',
-      difficulty: 'easy',
-      definition:
-        'The round body part you see through, with a colored iris and a dark pupil.',
-      aliases: ['eyeball'],
-    },
-    {
-      term: 'ear',
-      difficulty: 'easy',
-      definition: 'The body part on each side of your head that you hear with.',
-    },
-    {
-      term: 'nose',
-      difficulty: 'easy',
-      definition:
-        'The body part in the middle of your face that you smell and breathe with.',
-    },
-    {
-      term: 'tooth',
-      difficulty: 'easy',
-      definition:
-        'One of the hard white points in your mouth that you chew with.',
-    },
-    {
-      term: 'tongue',
-      difficulty: 'easy',
-      definition: 'The soft pink muscle in your mouth that tastes food.',
-    },
-    {
-      term: 'bone',
-      difficulty: 'easy',
-      definition:
-        'A hard white piece of a skeleton, the kind a dog loves to chew.',
-    },
-    {
-      term: 'hand',
-      difficulty: 'easy',
-      definition:
-        'The body part at the end of your arm with four fingers and a thumb.',
-    },
-    {
-      term: 'foot',
-      difficulty: 'easy',
-      definition:
-        'The body part at the end of your leg that you stand and walk on.',
-    },
 
+    {
+      term: 'beaker',
+      difficulty: 'easy',
+      definition:
+        'A glass lab cup with a little spout and measuring lines up the side.',
+    },
     // Medium
     {
       term: 'telescope',
@@ -232,24 +167,6 @@ export const SPACE_SCIENCE_PACK: WordPackData = {
       term: 'solar panel',
       difficulty: 'medium',
       definition: 'A flat dark sheet that turns sunlight into electricity.',
-    },
-    {
-      term: 'lungs',
-      difficulty: 'medium',
-      definition:
-        'The two spongy organs in your chest that fill with air when you breathe.',
-    },
-    {
-      term: 'fingerprint',
-      difficulty: 'medium',
-      definition:
-        'The unique swirly pattern of ridges on each fingertip, used to catch crooks.',
-    },
-    {
-      term: 'belly button',
-      difficulty: 'medium',
-      definition: 'The little dent or knot in the middle of your tummy.',
-      aliases: ['navel'],
     },
     {
       term: 'x-ray',
@@ -317,33 +234,16 @@ export const SPACE_SCIENCE_PACK: WordPackData = {
         'A beeping wand you sweep over sand to find buried coins and treasure.',
     },
     {
-      term: 'sunburn',
-      difficulty: 'medium',
-      definition:
-        'Red, sore skin from staying out in strong sunshine too long.',
-    },
-    {
       term: 'typewriter',
       difficulty: 'medium',
       definition:
         'An old-fashioned machine with keys that stamps letters onto paper.',
     },
     {
-      term: 'escalator',
-      difficulty: 'medium',
-      definition: 'A moving staircase that carries people between floors.',
-    },
-    {
       term: 'pulley',
       difficulty: 'medium',
       definition:
         'A wheel with a rope over it that makes lifting heavy loads easier.',
-    },
-    {
-      term: 'freckles',
-      difficulty: 'medium',
-      definition:
-        "Small brown dots sprinkled across someone's nose and cheeks.",
     },
     {
       term: 'computer chip',
@@ -353,6 +253,24 @@ export const SPACE_SCIENCE_PACK: WordPackData = {
       aliases: ['microchip'],
     },
 
+    {
+      term: 'comet',
+      difficulty: 'medium',
+      definition:
+        'An icy space rock with a long glowing tail streaking across the sky.',
+    },
+    {
+      term: 'spacesuit',
+      difficulty: 'medium',
+      definition:
+        'The puffy white outfit and helmet an astronaut wears outside the ship.',
+    },
+    {
+      term: 'wind turbine',
+      difficulty: 'medium',
+      definition:
+        'A tall white tower with giant spinning blades that makes electricity.',
+    },
     // Hard
     {
       term: 'black hole',
@@ -409,23 +327,6 @@ export const SPACE_SCIENCE_PACK: WordPackData = {
         'The crackly charge that makes hair stand up when rubbed with a balloon.',
     },
     {
-      term: 'brain freeze',
-      difficulty: 'hard',
-      definition: 'A sudden headache from eating something icy too fast.',
-    },
-    {
-      term: 'goosebumps',
-      difficulty: 'hard',
-      definition:
-        'Tiny raised dots that pop up on your skin when you feel cold or scared.',
-    },
-    {
-      term: 'heartbeat',
-      difficulty: 'hard',
-      definition:
-        'The steady thump of the organ pumping blood through your chest.',
-    },
-    {
       term: 'food chain',
       difficulty: 'hard',
       definition:
@@ -478,6 +379,12 @@ export const SPACE_SCIENCE_PACK: WordPackData = {
       difficulty: 'hard',
       definition:
         'Colors or patterns that help something blend into its surroundings.',
+    },
+    {
+      term: 'prism',
+      difficulty: 'hard',
+      definition:
+        'A clear glass triangle that splits sunlight into a rainbow of colors.',
     },
   ],
 }

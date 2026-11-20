@@ -84,6 +84,7 @@ export const DEFAULT_ROOM_PACK_IDS: readonly string[] = Object.freeze([
   'fantasy',
   'vehicles',
   'space-science',
+  'body-health',
 ])
 
 export const DEFAULT_ROOM_SETTINGS: RoomSettings = Object.freeze({

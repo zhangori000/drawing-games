@@ -2,8 +2,11 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -14,19 +17,47 @@ import { cx } from '../ui/cx'
 import { isEditableElement } from './editable'
 
 export interface GameViewportState {
-  /** An on-screen keyboard is (very likely) covering part of the screen. */
+  /** The device's on-screen keyboard is (very likely) covering the screen. */
   readonly keyboardOpen: boolean
+  /** An in-app keyboard (the compact guess keyboard) is on screen. */
+  readonly inAppKeyboard: boolean
+  /** Either keyboard takes part of the screen: layouts should tighten up. */
+  readonly keyboardShown: boolean
   /** Visible height in CSS pixels (0 before the first measurement). */
+  readonly height: number
+}
+
+interface MeasuredViewport {
+  readonly keyboardOpen: boolean
   readonly height: number
 }
 
 const GameViewportContext = createContext<GameViewportState>({
   keyboardOpen: false,
+  inAppKeyboard: false,
+  keyboardShown: false,
   height: 0,
 })
 
+/** Registers one on-screen in-app keyboard; returns its unregister. */
+const InAppKeyboardContext = createContext<() => () => void>(() => () => {})
+
 export function useGameViewport(): GameViewportState {
   return useContext(GameViewportContext)
+}
+
+/**
+ * Tells the surrounding `GameViewport` that an in-app keyboard is showing,
+ * so the play layout can make room for it the same way it does for the
+ * device keyboard. A no-op outside a `GameViewport`.
+ */
+export function useInAppKeyboard(shown: boolean): void {
+  const register = useContext(InAppKeyboardContext)
+  // Layout effect: the layout tightens in the same frame the keys appear.
+  useLayoutEffect(() => {
+    if (!shown) return
+    return register()
+  }, [shown, register])
 }
 
 /** The visible area shrinking below this share of its tallest size means a keyboard. */
@@ -40,55 +71,81 @@ export interface GameViewportProps {
   readonly className?: string
 }
 
+/** Above this visual-viewport scale the page is zoomed (not a keyboard). */
+const ZOOMED_SCALE = 1.01
+
 /**
  * Full-screen play container pinned to the *visual* viewport, so opening a
  * phone keyboard shrinks the layout instead of scrolling the drawing away.
- * While mounted the document never scrolls, double-tap and Safari gesture
- * zoom are suppressed inside it, and safe-area insets are respected.
+ * While mounted the document never scrolls, pinch and double-tap zoom are
+ * blocked inside it (`touch-action: pan-x pan-y` for Chrome/Android/Firefox,
+ * plus cancelling Safari's `gesture*` events), and safe-area insets are
+ * respected. If the page is zoomed anyway (browser or accessibility zoom),
+ * the layout keeps its unzoomed size instead of re-flowing into the zoomed
+ * rectangle.
  *
  * The route should also use `gameViewport` (viewport-fit=cover,
  * interactive-widget=resizes-content) from `./game-viewport-meta`.
  */
 export function GameViewport({ children, className }: GameViewportProps) {
   const rootRef = useRef<HTMLDivElement>(null)
-  const [state, setState] = useState<GameViewportState>({
+  const [measured, setMeasured] = useState<MeasuredViewport>({
     keyboardOpen: false,
     height: 0,
   })
+  const [inAppKeyboards, setInAppKeyboards] = useState(0)
+  const registerInAppKeyboard = useCallback(() => {
+    setInAppKeyboards((count) => count + 1)
+    return () => setInAppKeyboards((count) => Math.max(0, count - 1))
+  }, [])
+  const state = useMemo<GameViewportState>(
+    () => ({
+      keyboardOpen: measured.keyboardOpen,
+      inAppKeyboard: inAppKeyboards > 0,
+      keyboardShown: measured.keyboardOpen || inAppKeyboards > 0,
+      height: measured.height,
+    }),
+    [measured, inAppKeyboards],
+  )
 
-  useVisualViewportPin(rootRef, setState)
+  useVisualViewportPin(rootRef, setMeasured)
   useDocumentScrollLock()
   useZoomGuards(rootRef)
 
   return (
     <GameViewportContext value={state}>
-      <div
-        ref={rootRef}
-        data-keyboard-open={state.keyboardOpen || undefined}
-        className={cx(
-          'fixed inset-x-0 top-0 flex h-dvh flex-col overflow-hidden bg-[#f5f0e8] text-[#181713] will-change-transform',
-          className,
-        )}
-        style={{
-          touchAction: 'manipulation',
-          overscrollBehavior: 'none',
-          paddingTop: 'env(safe-area-inset-top)',
-          paddingRight: 'env(safe-area-inset-right)',
-          paddingBottom: 'env(safe-area-inset-bottom)',
-          paddingLeft: 'env(safe-area-inset-left)',
-        }}
-      >
-        {children}
-      </div>
+      <InAppKeyboardContext value={registerInAppKeyboard}>
+        <div
+          ref={rootRef}
+          data-game-viewport=""
+          data-keyboard-open={state.keyboardOpen || undefined}
+          data-keyboard-shown={state.keyboardShown || undefined}
+          className={cx(
+            'fixed inset-x-0 top-0 flex h-dvh flex-col overflow-hidden bg-[#f5f0e8] text-[#181713] will-change-transform',
+            className,
+          )}
+          style={{
+            // Pans only: no pinch zoom and no double-tap zoom anywhere on the
+            // game surface. Scroll panes inside still scroll; the canvas sets
+            // `none` for itself. (`manipulation` would still allow pinch.)
+            touchAction: 'pan-x pan-y',
+            overscrollBehavior: 'none',
+            paddingTop: 'env(safe-area-inset-top)',
+            paddingRight: 'env(safe-area-inset-right)',
+            paddingBottom: 'env(safe-area-inset-bottom)',
+            paddingLeft: 'env(safe-area-inset-left)',
+          }}
+        >
+          {children}
+        </div>
+      </InAppKeyboardContext>
     </GameViewportContext>
   )
 }
 
 function useVisualViewportPin(
   rootRef: RefObject<HTMLDivElement | null>,
-  setState: (
-    update: (previous: GameViewportState) => GameViewportState,
-  ) => void,
+  setState: (update: (previous: MeasuredViewport) => MeasuredViewport) => void,
 ): void {
   useEffect(() => {
     const root = rootRef.current
@@ -100,6 +157,10 @@ function useVisualViewportPin(
 
     const measure = () => {
       frame = 0
+      // A zoomed page (accessibility or browser zoom) also shrinks the
+      // visual viewport. Re-pinning then would squeeze the whole layout into
+      // the zoomed rectangle, so keep the last unzoomed size until zoom ends.
+      if ((viewport?.scale ?? 1) > ZOOMED_SCALE) return
       const height = Math.round(viewport?.height ?? window.innerHeight)
       const offsetTop = Math.round(viewport?.offsetTop ?? 0)
       root.style.height = `${height}px`
@@ -178,7 +239,7 @@ function useZoomGuards(rootRef: RefObject<HTMLDivElement | null>): void {
       }
     }
 
-    // Belt and braces for browsers that ignore touch-action: manipulation.
+    // Belt and braces for browsers that ignore touch-action (old iOS).
     // Only non-interactive targets are guarded so fast double taps on
     // buttons and keys still click twice.
     let lastTouchEndAt = 0

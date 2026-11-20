@@ -9,6 +9,7 @@ import { SPORTS_PACK } from './sports'
 import { FANTASY_PACK } from './fantasy'
 import { VEHICLES_PACK } from './vehicles'
 import { SPACE_SCIENCE_PACK } from './space-science'
+import { BODY_HEALTH_PACK } from './body-health'
 import { ACTIONS_PACK } from './actions'
 import { MUSIC_ARTS_PACK } from './music-arts'
 import { HOLIDAYS_PACK } from './holidays'
@@ -26,6 +27,7 @@ export const CURATED_PACKS: readonly WordPackData[] = Object.freeze([
   FANTASY_PACK,
   VEHICLES_PACK,
   SPACE_SCIENCE_PACK,
+  BODY_HEALTH_PACK,
   ACTIONS_PACK,
   MUSIC_ARTS_PACK,
   HOLIDAYS_PACK,

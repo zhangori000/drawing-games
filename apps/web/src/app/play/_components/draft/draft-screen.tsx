@@ -15,6 +15,7 @@ import { cx } from '@/components/ui/cx'
 import { TEAM_COLORS, TEAM_SYMBOLS } from '@/components/ui/team-badge'
 
 import { difficultyStake, plural } from '../../_lib/format'
+import { useCompactScreen } from '../../_lib/use-media-query'
 import { useRoomSession } from '../room-session'
 import { DifficultyChip } from '../shared/difficulty-chip'
 import { Card, Eyebrow, ScrollPane } from '../shared/layout'
@@ -27,17 +28,30 @@ export function DraftScreen({ round }: { readonly round: RoundView }) {
     round.draftDeadlineAtMs,
     serverNow,
   )
+  // Phones: the top bar already shows the countdown, so the big copy goes
+  // and the cards become compact rows that all fit on screen.
+  const compact = useCompactScreen()
   const mine = round.mine
   const opponent = round.opponent
   if (!mine) return null
 
   return (
     <ScrollPane>
-      <div className="mx-auto grid w-full max-w-5xl gap-4 px-3 py-4 sm:px-5 sm:py-6">
+      <div
+        className={cx(
+          'mx-auto grid w-full max-w-5xl px-3 sm:px-5',
+          compact ? 'gap-3 py-3' : 'gap-4 py-4 sm:py-6',
+        )}
+      >
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <Eyebrow>Round {round.number} · word draft</Eyebrow>
-            <h2 className="text-3xl font-black tracking-[-0.04em] sm:text-4xl">
+            <h2
+              className={cx(
+                'font-black tracking-[-0.04em]',
+                compact ? 'text-2xl' : 'text-3xl sm:text-4xl',
+              )}
+            >
               {mine.amDrawer
                 ? mine.chosen
                   ? 'Locked in!'
@@ -47,7 +61,7 @@ export function DraftScreen({ round }: { readonly round: RoundView }) {
                   : `${mine.drawerName} is picking your word…`}
             </h2>
           </div>
-          {secondsLeft !== null ? (
+          {secondsLeft !== null && !compact ? (
             <p
               className={cx(
                 'rounded-2xl border-2 border-[#181713] px-4 py-2 font-mono text-2xl font-black tabular-nums',
@@ -61,7 +75,7 @@ export function DraftScreen({ round }: { readonly round: RoundView }) {
         </header>
 
         {mine.amDrawer ? (
-          <DrawerDraft mine={mine} />
+          <DrawerDraft mine={mine} compact={compact} />
         ) : (
           <TeammateDraft mine={mine} />
         )}
@@ -71,7 +85,13 @@ export function DraftScreen({ round }: { readonly round: RoundView }) {
   )
 }
 
-function DrawerDraft({ mine }: { readonly mine: MyTeamRoundView }) {
+function DrawerDraft({
+  mine,
+  compact,
+}: {
+  readonly mine: MyTeamRoundView
+  readonly compact: boolean
+}) {
   if (mine.chosen && mine.word) {
     return (
       <Card className="grid gap-2 bg-[#f8ff80]">
@@ -96,15 +116,24 @@ function DrawerDraft({ mine }: { readonly mine: MyTeamRoundView }) {
     )
   }
   return (
-    <div className="grid gap-3">
-      <p className="text-sm leading-6 text-black/65">
-        Tap a card to pick it (or press its number). Harder words score a bigger
-        bonus if your team solves them. Not sure what one means? Tap{' '}
-        <em>What’s this?</em> first.
-      </p>
+    <div className={cx('grid', compact ? 'gap-2' : 'gap-3')}>
+      {compact ? (
+        <p className="text-sm leading-5 text-black/65">
+          Tap a word to pick it; harder ones earn a bigger bonus. Tap{' '}
+          <span className="font-black text-[#5c4cf2]">?</span> for its meaning
+          or to swap it.
+        </p>
+      ) : (
+        <p className="text-sm leading-6 text-black/65">
+          Tap a card to pick it (or press its number). Harder words score a
+          bigger bonus if your team solves them. Not sure what one means? Tap{' '}
+          <em>What’s this?</em> first.
+        </p>
+      )}
       <DraftCards
         options={mine.options ?? []}
         replacementsLeft={mine.replacementsLeft ?? 0}
+        compact={compact}
       />
     </div>
   )

@@ -9,10 +9,10 @@ import { cx } from '@/components/ui/cx'
 
 import { useRoomSession } from '../room-session'
 import { DrawerCanvas, ReadOnlyCanvas } from '../shared/room-canvas'
-import { NoteBanner, WordBanner } from './banners'
+import { BannerDetail, NoteBanner, WordBanner } from './banners'
 import { DrawerToolbar } from './drawer-toolbar'
-import { GuessFeed } from './guess-feed'
-import { OpponentTile } from './opponent-tile'
+import { GuessFeed, LatestTeamGuess } from './guess-feed'
+import { OpponentChip, OpponentTile } from './opponent-tile'
 import { PlayLayout } from './play-layout'
 import { Scoreboard } from './scoreboard'
 import { useFreshFeedback } from './use-fresh-feedback'
@@ -36,6 +36,7 @@ export function ShowdownScreen({
   const watchingOpponent = watching && opponent.canvasAccess === 'full'
   const drawing = mine.canDraw && !watchingOpponent
   const firstClear = showdown.firstClearTeam === mine.team
+  const opponentStatus = `${opponent.cleared}/${opponent.cardCount} cards`
 
   const banner =
     mine.amDrawer && mine.word && !mine.finished ? (
@@ -55,14 +56,14 @@ export function ShowdownScreen({
                 : `Card ${mine.cardIndex + 1} of ${mine.cardCount} · ${mine.drawerName ?? 'Someone'} is drawing`}
             </span>
           </p>
-          <p
+          <BannerDetail
             className={cx(
               'line-clamp-2 text-xs font-semibold',
               mine.finished ? 'text-white/70' : 'text-black/55',
             )}
           >
             {rules}
-          </p>
+          </BannerDetail>
         </div>
       </NoteBanner>
     )
@@ -109,6 +110,14 @@ export function ShowdownScreen({
             <GuessDock
               onGuess={actions.guess}
               feedback={feedback}
+              idleStatus={<LatestTeamGuess guesses={mine.guesses} />}
+              statusAside={
+                <OpponentChip
+                  team={opponent.team}
+                  done={opponent.finished}
+                  status={opponentStatus}
+                />
+              }
               disabledReason={
                 mine.canGuess
                   ? null
@@ -138,7 +147,7 @@ export function ShowdownScreen({
           access={opponent.canvasAccess}
           drawerName={opponent.drawerName}
           done={opponent.finished}
-          status={`${opponent.cleared}/${opponent.cardCount} cards`}
+          status={opponentStatus}
           watching={watchingOpponent}
           onToggleWatch={() => setWatching((value) => !value)}
         />

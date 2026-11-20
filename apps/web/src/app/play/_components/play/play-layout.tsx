@@ -2,20 +2,49 @@
 
 import { createContext, useContext, type ReactNode } from 'react'
 
+import { useGameViewport } from '@/components/layout/game-viewport'
+import { cx } from '@/components/ui/cx'
+
 import { useMediaQuery, useWideLayout } from '../../_lib/use-media-query'
 
 /**
  * - `stacked`: portrait phones and narrow windows.
  * - `wide`: canvas left, full sidebar right.
- * - `wide-short`: landscape phones; the sidebar holds the guess dock (or the
- *   drawer's feed), and the opponent tile floats over the canvas pane.
+ * - `wide-short`: landscape phones. The canvas pane holds only the banner
+ *   and the paper; a sidebar holds the drawer's tools (narrow) or the guess
+ *   dock (wider), plus the opponent tile and the feed. Nothing floats over
+ *   the paper, so the drawer can reach every corner.
  */
 export type PlayLayoutMode = 'stacked' | 'wide' | 'wide-short'
 
-const PlayLayoutContext = createContext<PlayLayoutMode>('stacked')
+export interface PlayChrome {
+  readonly mode: PlayLayoutMode
+  /**
+   * A keyboard squeezes the canvas column: banners collapse to one line so
+   * the drawing keeps most of the space.
+   */
+  readonly compactBanner: boolean
+  /**
+   * The feed row and opponent tile make way for a keyboard; the guess dock's
+   * status line carries the latest teammate guess and the opponent's
+   * progress instead (see `LatestTeamGuess` and `OpponentChip`).
+   */
+  readonly feedInDock: boolean
+}
+
+const PlayLayoutContext = createContext<PlayChrome>({
+  mode: 'stacked',
+  compactBanner: false,
+  feedInDock: false,
+})
 
 /** The layout the surrounding PlayLayout chose (for tiles and feeds). */
 export function usePlayLayout(): PlayLayoutMode {
+  return useContext(PlayLayoutContext).mode
+}
+
+/** Layout mode plus how much the screen is squeezed by a keyboard. */
+export function usePlayChrome(): PlayChrome {
   return useContext(PlayLayoutContext)
 }
 
@@ -26,7 +55,7 @@ export interface PlayLayoutProps {
   readonly banner: ReactNode
   /** The main 4:3 paper; it flexes and letterboxes. */
   readonly canvas: ReactNode
-  /** Drawer toolbar under the canvas. */
+  /** Drawer toolbar under the canvas (in the sidebar on landscape phones). */
   readonly tools?: ReactNode
   /** Guess dock (with the compact keyboard) at the very bottom. */
   readonly dock?: ReactNode
@@ -41,20 +70,44 @@ export interface PlayLayoutProps {
  * canvas, a short feed beside a mini opponent tile, and the dock; wide
  * screens put the canvas left and a sidebar right. Every region except the
  * canvas has a fixed size, so guesses and feedback never move the drawing.
+ *
+ * While a keyboard (the device's or the in-app compact one) is up on a
+ * phone, the layout tightens instead of shrinking the drawing to a
+ * thumbnail: the banner collapses to one line and the feed row hides, its
+ * news moving into the dock's status line.
  */
 export function PlayLayout(props: PlayLayoutProps) {
   const wide = useWideLayout()
   const short = useMediaQuery(SHORT_QUERY)
+  const { keyboardOpen, keyboardShown } = useGameViewport()
   const mode: PlayLayoutMode = !wide ? 'stacked' : short ? 'wide-short' : 'wide'
+  const guessing = Boolean(props.dock)
+  const chrome: PlayChrome = {
+    mode,
+    // Landscape phones keep the compact keys in the sidebar, so only the
+    // device keyboard squeezes their canvas column.
+    compactBanner:
+      guessing &&
+      (mode === 'stacked'
+        ? keyboardShown
+        : mode === 'wide-short' && keyboardOpen),
+    feedInDock: guessing && keyboardShown && mode !== 'wide',
+  }
   return (
-    <PlayLayoutContext value={mode}>
+    <PlayLayoutContext value={chrome}>
       {mode === 'stacked' ? (
-        <Stacked {...props} />
+        <Stacked {...props} chrome={chrome} />
+      ) : mode === 'wide-short' ? (
+        <WideShort {...props} chrome={chrome} />
       ) : (
-        <Wide {...props} short={mode === 'wide-short'} />
+        <Wide {...props} />
       )}
     </PlayLayoutContext>
   )
+}
+
+interface ChromeProps {
+  readonly chrome: PlayChrome
 }
 
 function Stacked({
@@ -64,16 +117,31 @@ function Stacked({
   dock,
   feed,
   opponent,
-}: PlayLayoutProps) {
+  chrome,
+}: PlayLayoutProps & ChromeProps) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      data-testid="play-layout"
+      data-layout="stacked"
+      data-typing={chrome.feedInDock || undefined}
+    >
       {banner}
-      <div className="relative min-h-0 flex-1 px-2 pt-2 pb-1">{canvas}</div>
-      {tools ? <ToolsBar>{tools}</ToolsBar> : null}
-      <div className="flex h-[5.25rem] shrink-0 gap-2 border-t-2 border-[#181713] bg-[#efe9de] px-2 py-1.5">
-        <div className="flex min-w-0 flex-1 flex-col">{feed}</div>
-        <div className="w-[6.75rem] shrink-0">{opponent}</div>
+      <div
+        className={cx(
+          'relative min-h-0 flex-1 px-2',
+          chrome.feedInDock ? 'py-1' : 'pt-2 pb-1',
+        )}
+      >
+        {canvas}
       </div>
+      {tools ? <ToolsBar>{tools}</ToolsBar> : null}
+      {chrome.feedInDock ? null : (
+        <div className="flex h-[5.25rem] shrink-0 gap-2 border-t-2 border-[#181713] bg-[#efe9de] px-2 py-1.5">
+          <div className="flex min-w-0 flex-1 flex-col">{feed}</div>
+          <div className="w-[6.75rem] shrink-0">{opponent}</div>
+        </div>
+      )}
       {dock ? (
         <div className="shrink-0 border-t-2 border-[#181713]">{dock}</div>
       ) : null}
@@ -89,51 +157,92 @@ function Wide({
   feed,
   opponent,
   aside,
-  short,
-}: PlayLayoutProps & { readonly short: boolean }) {
+}: PlayLayoutProps) {
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_19rem] xl:grid-cols-[minmax(0,1fr)_23rem]">
+    <div
+      className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_19rem] xl:grid-cols-[minmax(0,1fr)_23rem]"
+      data-testid="play-layout"
+      data-layout="wide"
+    >
       <div className="flex min-h-0 min-w-0 flex-col">
         {banner}
-        <div className="relative min-h-0 flex-1 p-3">
-          {canvas}
-          {short ? (
-            <div className="absolute right-2 top-2 z-10 w-24">{opponent}</div>
-          ) : null}
-        </div>
+        <div className="relative min-h-0 flex-1 p-3">{canvas}</div>
         {tools ? <ToolsBar>{tools}</ToolsBar> : null}
-        {dock && !short ? (
+        {dock ? (
           <div className="shrink-0 border-t-2 border-[#181713] pb-2">
             {dock}
           </div>
         ) : null}
       </div>
-      {short && dock ? (
-        // Landscape phones: the dock (and compact keyboard) gets the whole
-        // sidebar; it scrolls rather than clip if the screen is very short.
-        <aside
-          aria-label="Guess"
-          className="min-h-0 overflow-y-auto overscroll-contain border-l-2 border-[#181713] bg-[#efe9de]"
-        >
-          {dock}
-        </aside>
-      ) : (
-        <aside
-          aria-label="Team feed and opponent"
-          className="flex min-h-0 flex-col gap-3 border-l-2 border-[#181713] bg-[#efe9de] p-3"
-        >
-          <div className="flex min-h-0 flex-1 flex-col">{feed}</div>
-          {short ? null : <div className="shrink-0">{opponent}</div>}
-          {aside && !short ? <div className="shrink-0">{aside}</div> : null}
-        </aside>
+      <aside
+        aria-label="Team feed and opponent"
+        className="flex min-h-0 flex-col gap-3 border-l-2 border-[#181713] bg-[#efe9de] p-3"
+      >
+        <div className="flex min-h-0 flex-1 flex-col">{feed}</div>
+        <div className="shrink-0">{opponent}</div>
+        {aside ? <div className="shrink-0">{aside}</div> : null}
+      </aside>
+    </div>
+  )
+}
+
+/**
+ * Landscape phones. The paper's pane has nothing floating over it. The
+ * drawer's sidebar is narrow (tools, opponent, feed) so the paper gets most
+ * of the width; a guesser's sidebar is wider for the compact keyboard.
+ */
+function WideShort({
+  banner,
+  canvas,
+  tools,
+  dock,
+  feed,
+  opponent,
+  chrome,
+}: PlayLayoutProps & ChromeProps) {
+  return (
+    <div
+      className={cx(
+        'grid min-h-0 flex-1',
+        dock
+          ? 'grid-cols-[minmax(0,1fr)_19rem]'
+          : 'grid-cols-[minmax(0,1fr)_13rem]',
       )}
+      data-testid="play-layout"
+      data-layout="wide-short"
+      data-typing={chrome.feedInDock || undefined}
+    >
+      <div className="flex min-h-0 min-w-0 flex-col">
+        {chrome.compactBanner ? null : banner}
+        <div className="relative min-h-0 flex-1 p-2">{canvas}</div>
+      </div>
+      <aside
+        aria-label={dock ? 'Guess' : 'Tools, team feed and opponent'}
+        className="flex min-h-0 flex-col overflow-y-auto overscroll-contain border-l-2 border-[#181713] bg-[#efe9de]"
+      >
+        {/* The device keyboard leaves a landscape phone very little height:
+            the one-line clue moves over the dock so the paper keeps it. */}
+        {chrome.compactBanner ? banner : null}
+        {tools ? (
+          <div className="relative shrink-0 border-b-2 border-[#181713] bg-[#fffdf7]">
+            {tools}
+          </div>
+        ) : null}
+        {chrome.feedInDock ? null : (
+          <div className="shrink-0 px-2 pt-2">{opponent}</div>
+        )}
+        <div className="flex min-h-10 flex-1 flex-col px-2 py-1.5">{feed}</div>
+        {dock ? (
+          <div className="shrink-0 border-t-2 border-[#181713]">{dock}</div>
+        ) : null}
+      </aside>
     </div>
   )
 }
 
 function ToolsBar({ children }: { readonly children: ReactNode }) {
   return (
-    <div className="shrink-0 border-t-2 border-[#181713] bg-[#fffdf7]">
+    <div className="relative shrink-0 border-t-2 border-[#181713] bg-[#fffdf7]">
       {children}
     </div>
   )

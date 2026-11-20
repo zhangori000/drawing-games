@@ -1,3 +1,5 @@
+import { canonicalWordId } from '@drawing-games/word-bank'
+
 import type { TeamId } from '../types'
 import { RECONNECT_GRACE_MS } from './constants'
 import type { PlayerWordMemory } from './records'
@@ -35,28 +37,67 @@ export function isWithinGrace(member: RoomMember, now: number): boolean {
 }
 
 /**
- * `roster[turn % length]`, skipping members past their reconnect grace. If
- * nobody qualifies the base pick stands. An empty roster (everyone left
- * mid-match) falls back to the team's former members.
+ * Every member ever on `team` in rotation (join) order, starting with the
+ * one after `afterId` and ending with `afterId` itself; from the first
+ * member when `afterId` is null or not on the team. Left members are kept
+ * so a former drawer still marks the cursor; callers filter them out.
  */
-export function pickRotationMember(
+function rotationFrom(
   state: RoomState,
   team: TeamId,
-  turn: number,
+  afterId: string | null,
+): RoomMember[] {
+  const order = state.members.filter((member) => member.team === team)
+  const start =
+    afterId === null ? -1 : order.findIndex((member) => member.id === afterId)
+  return [...order.slice(start + 1), ...order.slice(0, start + 1)]
+}
+
+/**
+ * The team's next drawer after `afterId`, its previous drawer (null for the
+ * first turn): the first member after them in join order who is within the
+ * reconnect grace. So everyone draws once per cycle, a member who is away
+ * is skipped without anyone drawing twice in a row while a teammate within
+ * grace is waiting, and a mid-match joiner slots in at their join position.
+ * Left members are skipped. If nobody is within grace the next remaining
+ * member draws; if everyone left, the next former member keeps the seat.
+ */
+export function nextRotationDrawer(
+  state: RoomState,
+  team: TeamId,
+  afterId: string | null,
   now: number,
 ): RoomMember {
-  const roster = teamRoster(state, team)
-  const candidates =
-    roster.length > 0
-      ? roster
-      : state.members.filter((member) => member.team === team)
-  if (candidates.length === 0) throw new Error(`Team ${team} has no members`)
-  const base = Math.max(0, turn) % candidates.length
-  for (let offset = 0; offset < candidates.length; offset += 1) {
-    const member = candidates[(base + offset) % candidates.length] as RoomMember
-    if (isWithinGrace(member, now)) return member
+  const order = rotationFrom(state, team, afterId)
+  const remaining = order.filter((member) => member.left !== true)
+  const pick =
+    remaining.find((member) => isWithinGrace(member, now)) ??
+    remaining[0] ??
+    order[0]
+  if (pick === undefined) throw new Error(`Team ${team} has no members`)
+  return pick
+}
+
+/**
+ * The teammate after `drawerId` in rotation order who can take over their
+ * turn, or null. `within-grace` (an explicit leave) prefers the first one
+ * within the reconnect grace, else any remaining teammate; `connected` (a
+ * drawer whose grace ran out) only takes someone who is here right now.
+ */
+export function nextTeammate(
+  state: RoomState,
+  team: TeamId,
+  drawerId: string,
+  now: number,
+  mode: 'within-grace' | 'connected' = 'within-grace',
+): RoomMember | null {
+  const after = rotationFrom(state, team, drawerId).filter(
+    (member) => member.left !== true && member.id !== drawerId,
+  )
+  if (mode === 'connected') {
+    return after.find((member) => member.connected) ?? null
   }
-  return candidates[base] as RoomMember
+  return after.find((member) => isWithinGrace(member, now)) ?? after[0] ?? null
 }
 
 /** Display name for any member ever in the room, including left members. */
@@ -75,12 +116,15 @@ export function chooseHost(
   return (humans.find((member) => member.connected) ?? humans[0])?.id ?? null
 }
 
+/** Valid, de-duplicated ids; a word that moved packs gets its new id. */
 function cleanIds(ids: unknown, limit: number): string[] {
   if (!Array.isArray(ids)) return []
   const unique: string[] = []
   const seen = new Set<string>()
-  for (const id of ids) {
-    if (typeof id !== 'string' || id.length === 0 || seen.has(id)) continue
+  for (const raw of ids) {
+    if (typeof raw !== 'string' || raw.length === 0) continue
+    const id = canonicalWordId(raw)
+    if (seen.has(id)) continue
     seen.add(id)
     unique.push(id)
   }

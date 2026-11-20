@@ -1,7 +1,7 @@
 import { matchGuess } from '@drawing-games/word-bank'
 
-import type { TeamId } from '../types'
-import { renderTextStrokes } from './bot-font'
+import type { TeamId, WordDifficulty } from '../types'
+import { renderLetterPuzzle } from './bot-font'
 import type { RoomContext } from './context'
 import { patchState } from './context'
 import { findMember, teamRoster } from './members'
@@ -10,14 +10,31 @@ import type { BotScheduleItem } from './types'
 
 /** Bot drawers pick a card this long into the draft. */
 const DRAFT_PICK_DELAY_MS = { min: 2_000, max: 5_000 } as const
-const STROKE_INTERVAL_MS = { min: 700, max: 1_200 } as const
-/** Share of planned strokes after which bot guessers "recognize" the word. */
-const RECOGNIZE_STROKE_SHARE = 0.6
-const RECOGNIZE_DELAY_MS = { min: 2_000, max: 5_000 } as const
-/** With nothing drawn (empty font), bot guessers still answer after this. */
-const BLANK_CANVAS_DELAY_MS = { min: 4_000, max: 8_000 } as const
-/** With a human drawer, the correct guess lands in this share of the round. */
-const HUMAN_DRAWER_WINDOW = { min: 0.35, max: 0.85 } as const
+/** A bot drawer lays out its blanks one stroke at a time, this fast. */
+const OUTLINE_INTERVAL_MS = { min: 250, max: 450 } as const
+/**
+ * Letters a bot drawer reveals: at most this share of them, and never all,
+ * spread over this window of the time budget. A practice puzzle, not the
+ * answer written out.
+ */
+const MAX_REVEAL_SHARE = 0.6
+const REVEAL_WINDOW = { start: 0.15, end: 0.75 } as const
+const REVEAL_JITTER_MS = 1_500
+
+/**
+ * One timing model for every bot guesser, whoever draws, so both teams of
+ * a practice match play by the same clock: the correct guess lands in this
+ * share of the time budget, and with `miss` odds it never comes (normal
+ * rounds only). Harder words take longer and fail more, which is what the
+ * difficulty bonus pays for.
+ */
+const SOLVE_MODEL: Readonly<
+  Record<WordDifficulty, { min: number; max: number; miss: number }>
+> = Object.freeze({
+  easy: { min: 0.2, max: 0.6, miss: 0.08 },
+  medium: { min: 0.3, max: 0.7, miss: 0.12 },
+  hard: { min: 0.4, max: 0.85, miss: 0.2 },
+})
 const WRONG_GUESSES = { min: 1, max: 3 } as const
 const FIRST_GUESS_DELAY_MS = 1_500
 const WRONG_GUESS_ATTEMPTS = 12
@@ -85,16 +102,71 @@ export interface CanvasPlan {
   readonly drawerId: string
   readonly term: string
   readonly aliases: readonly string[]
-  /** Time budget used to place guesses when a human draws. */
+  readonly difficulty: WordDifficulty
+  /** Time the bots plan around (the remaining round, or a showdown card). */
   readonly budgetMs: number
   /** Terms bots must never use as wrong guesses (every live card). */
   readonly reservedTerms: readonly string[]
+  /**
+   * Whether a bot guesser may never get it (default true). Off for showdown
+   * cards, which have no per-card deadline to end a stuck card.
+   */
+  readonly canMiss?: boolean
+}
+
+/** Schedules a bot drawer's letter puzzle (see `renderLetterPuzzle`). */
+function planBotPuzzle(ctx: RoomContext, plan: CanvasPlan): void {
+  const start = ctx.now
+  const puzzle = renderLetterPuzzle(plan.term)
+  const outlineCount = puzzle.marks.length + puzzle.slots.length
+  let at = start
+  for (let index = 0; index < outlineCount; index += 1) {
+    at += ctx.rng.int(OUTLINE_INTERVAL_MS.min, OUTLINE_INTERVAL_MS.max)
+    scheduleBotItem(ctx, {
+      atMs: at,
+      botId: plan.drawerId,
+      action: { type: 'draw.outline', canvasId: plan.canvasId, index },
+    })
+  }
+  const letters = puzzle.slots.length
+  const reveals = Math.min(letters - 1, Math.floor(letters * MAX_REVEAL_SHARE))
+  if (reveals <= 0) return
+  const order = ctx.rng.shuffle(
+    Array.from({ length: letters }, (_, slot) => slot),
+  )
+  const outlineDone = at
+  for (let step = 0; step < reveals; step += 1) {
+    const share =
+      REVEAL_WINDOW.start +
+      ((REVEAL_WINDOW.end - REVEAL_WINDOW.start) * step) /
+        Math.max(1, reveals - 1)
+    const atMs = Math.max(
+      outlineDone + 1,
+      start +
+        Math.round(plan.budgetMs * share) +
+        ctx.rng.int(-REVEAL_JITTER_MS, REVEAL_JITTER_MS),
+    )
+    scheduleBotItem(ctx, {
+      atMs,
+      botId: plan.drawerId,
+      action: {
+        type: 'draw.letter',
+        canvasId: plan.canvasId,
+        slot: order[step] as number,
+      },
+    })
+  }
 }
 
 /**
- * Plans practice-bot behavior for a fresh canvas starting at `ctx.now`: the
- * bot drawer's strokes, and for every bot guesser 1–3 wrong guesses followed
- * by a correct one. Everything is drawn from the room PRNG.
+ * Plans practice-bot behavior for a fresh canvas starting at `ctx.now`. A
+ * bot drawer draws a letter puzzle: a blank per letter, then a few letters
+ * revealed over the budget (never the whole word), so a human guesser gets
+ * a fair puzzle rather than the answer to read. Every bot guesser follows
+ * `SOLVE_MODEL` whoever draws: 1–3 wrong guesses, then the answer at a
+ * random share of the budget, or (sometimes) never. A human drawer's ink
+ * must also look like a real attempt before the answer lands (bot-runner).
+ * Everything is drawn from the room PRNG.
  */
 export function planBotsForCanvas(ctx: RoomContext, plan: CanvasPlan): void {
   const start = ctx.now
@@ -102,45 +174,20 @@ export function planBotsForCanvas(ctx: RoomContext, plan: CanvasPlan): void {
   const guessers = teamRoster(ctx.state, plan.team).filter(
     (member) => member.kind === 'bot' && member.id !== plan.drawerId,
   )
-  const drawerIsBot = drawer?.kind === 'bot'
+  if (drawer?.kind === 'bot') planBotPuzzle(ctx, plan)
 
-  let recognizedAt = start
-  if (drawerIsBot) {
-    const strokeCount = renderTextStrokes(plan.term).length
-    const strokeTimes: number[] = []
-    let at = start
-    for (let index = 0; index < strokeCount; index += 1) {
-      at += ctx.rng.int(STROKE_INTERVAL_MS.min, STROKE_INTERVAL_MS.max)
-      strokeTimes.push(at)
-      scheduleBotItem(ctx, {
-        atMs: at,
-        botId: plan.drawerId,
-        action: { type: 'draw.next-stroke', canvasId: plan.canvasId },
-      })
-    }
-    const recognizeIndex = Math.max(
-      0,
-      Math.ceil(strokeCount * RECOGNIZE_STROKE_SHARE) - 1,
-    )
-    recognizedAt =
-      strokeTimes[recognizeIndex] ??
-      start + ctx.rng.int(BLANK_CANVAS_DELAY_MS.min, BLANK_CANVAS_DELAY_MS.max)
-  }
-
+  const model = SOLVE_MODEL[plan.difficulty]
   for (const guesser of guessers) {
-    const correctAt = drawerIsBot
-      ? recognizedAt +
-        ctx.rng.int(RECOGNIZE_DELAY_MS.min, RECOGNIZE_DELAY_MS.max)
-      : start +
-        Math.round(
-          plan.budgetMs *
-            (HUMAN_DRAWER_WINDOW.min +
-              (HUMAN_DRAWER_WINDOW.max - HUMAN_DRAWER_WINDOW.min) *
-                ctx.rng.next()),
-        )
-    const wrongCount = ctx.rng.int(WRONG_GUESSES.min, WRONG_GUESSES.max)
+    const share = model.min + (model.max - model.min) * ctx.rng.next()
+    const correctAt = start + Math.round(plan.budgetMs * share)
+    const misses = plan.canMiss !== false && ctx.rng.next() < model.miss
+    const wrongCount =
+      ctx.rng.int(WRONG_GUESSES.min, WRONG_GUESSES.max) + (misses ? 1 : 0)
     const earliest = start + FIRST_GUESS_DELAY_MS
-    const latest = Math.max(earliest, correctAt - 500)
+    const latest = Math.max(
+      earliest,
+      misses ? start + Math.round(plan.budgetMs * 0.95) : correctAt - 500,
+    )
     for (let index = 0; index < wrongCount; index += 1) {
       const text = pickWrongGuess(ctx, plan)
       if (text === null) break
@@ -155,6 +202,7 @@ export function planBotsForCanvas(ctx: RoomContext, plan: CanvasPlan): void {
         },
       })
     }
+    if (misses) continue
     scheduleBotItem(ctx, {
       atMs: correctAt,
       botId: guesser.id,

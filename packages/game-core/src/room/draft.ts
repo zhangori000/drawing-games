@@ -73,7 +73,8 @@ export function handleDraftSelect(
 
 /**
  * Swaps one card for another of the same difficulty, excluding every live
- * card and every word replaced earlier this round. "Seen it" goes to the
+ * card (both teams') and every word replaced earlier this round; refused
+ * when no such word is left (tiny custom-only lists). "Seen it" goes to the
  * drawer's in-room avoid memory, "don't know it" to soft memory.
  */
 export function handleDraftReplace(
@@ -118,6 +119,8 @@ export function handleDraftReplace(
         round.teams[team].replacements.map((entry) => entry.replacedWordId),
       ),
       wordMemory: ctx.state.wordMemory,
+      // Never the other team's cards: one could be their locked answer.
+      allowOpponentCards: false,
     },
     random,
   )

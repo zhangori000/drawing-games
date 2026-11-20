@@ -445,5 +445,16 @@ export const PLACES_PACK: WordPackData = {
       definition:
         'The room where the head of a school works and where students get sent for trouble.',
     },
+    {
+      term: 'elevator',
+      difficulty: 'easy',
+      definition:
+        'A box that carries people up and down between floors of a building.',
+    },
+    {
+      term: 'escalator',
+      difficulty: 'medium',
+      definition: 'A moving staircase that carries people between floors.',
+    },
   ],
 }

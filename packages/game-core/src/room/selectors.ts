@@ -1,4 +1,4 @@
-import type { TeamId } from '../types'
+import type { TeamId, WordDifficulty } from '../types'
 import { isWithinGrace, teamRoster } from './members'
 import type {
   DraftOption,
@@ -41,9 +41,14 @@ export interface ActiveCanvas {
   readonly drawerId: string
   readonly term: string
   readonly aliases: readonly string[]
+  readonly difficulty: WordDifficulty
   readonly strokeCount: number
+  /** Approximate human ink length (see `TeamRoundState.inkLength`). */
+  readonly inkLength: number
   /** Start of the guessing window (drawing start or showdown card start). */
   readonly startedAtMs: number
+  /** Earlier drawers of this turn (they saw the word, so they sit it out). */
+  readonly formerDrawerIds: readonly string[]
 }
 
 export function activeCanvas(
@@ -62,8 +67,11 @@ export function activeCanvas(
       drawerId: teamRound.drawerId,
       term: chosen.term,
       aliases: chosen.aliases,
+      difficulty: chosen.difficulty,
       strokeCount: teamRound.strokeCount,
+      inkLength: teamRound.inkLength ?? 0,
       startedAtMs: match.round.drawingStartedAtMs ?? match.round.startedAtMs,
+      formerDrawerIds: teamRound.formerDrawerIds ?? [],
     }
   }
   if (state.phase === 'showdown' && match.showdown !== null) {
@@ -76,8 +84,11 @@ export function activeCanvas(
       drawerId: teamState.drawerId,
       term: card.term,
       aliases: card.aliases,
+      difficulty: card.difficulty,
       strokeCount: teamState.strokeCount,
+      inkLength: teamState.inkLength ?? 0,
       startedAtMs: teamState.cardStartedAtMs,
+      formerDrawerIds: teamState.formerDrawerIds ?? [],
     }
   }
   return null
@@ -99,17 +110,22 @@ export function currentDrawerId(state: RoomState, team: TeamId): string | null {
   return null
 }
 
-/** Human guessers who may vote: non-drawers within reconnect grace. */
+/**
+ * Human guessers who may vote: non-drawers within reconnect grace, minus
+ * `alsoExclude` (earlier drawers of the turn, for hint votes).
+ */
 export function teamElectorate(
   state: RoomState,
   team: TeamId,
   excludeId: string | null,
   now: number,
+  alsoExclude: readonly string[] = [],
 ): RoomMember[] {
   return teamRoster(state, team).filter(
     (member) =>
       member.kind === 'human' &&
       member.id !== excludeId &&
+      !alsoExclude.includes(member.id) &&
       isWithinGrace(member, now),
   )
 }

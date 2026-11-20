@@ -4,7 +4,7 @@ import {
   type NormalizedPoint,
 } from '@drawing-games/drawing-model'
 
-import { renderTextStrokes } from './bot-font'
+import { renderLetterPuzzle, type BotPuzzle } from './bot-font'
 import { scheduleBotItem } from './bots'
 import {
   BOT_STROKE_STYLE,
@@ -18,11 +18,39 @@ import { applyDrawerOps } from './drawing'
 import { applyGuess, checkGuess } from './guess'
 import { findActiveMember, findMember } from './members'
 import { activeCanvas } from './selectors'
+import type { WordDifficulty } from '../types'
 import type { BotScheduleItem, RoomMember } from './types'
 
-/** Human drawers must have this many strokes before bots answer. */
-const MIN_HUMAN_STROKES_FOR_BOT_ANSWER = 3
-const BOT_ANSWER_RETRY_MS = 5_000
+/**
+ * A bot only "recognizes" a human drawing with at least this much ink by
+ * the time its answer is due (strokes, and total length in canvas
+ * fractions); otherwise it keeps looking. A few slashes are not a
+ * lighthouse.
+ */
+const MIN_HUMAN_INK: Readonly<
+  Record<WordDifficulty, { strokes: number; length: number }>
+> = Object.freeze({
+  easy: { strokes: 2, length: 1.2 },
+  medium: { strokes: 4, length: 2.5 },
+  hard: { strokes: 6, length: 4 },
+})
+const BOT_ANSWER_RETRY_MS = 4_000
+
+const PUZZLE_CACHE = new Map<string, BotPuzzle>()
+const PUZZLE_CACHE_LIMIT = 64
+
+/** Memoized: every outline/letter item of a canvas asks for the same term. */
+function puzzleFor(term: string): BotPuzzle {
+  const cached = PUZZLE_CACHE.get(term)
+  if (cached !== undefined) return cached
+  const puzzle = renderLetterPuzzle(term)
+  if (PUZZLE_CACHE.size >= PUZZLE_CACHE_LIMIT) {
+    const oldest = PUZZLE_CACHE.keys().next().value
+    if (oldest !== undefined) PUZZLE_CACHE.delete(oldest)
+  }
+  PUZZLE_CACHE.set(term, puzzle)
+  return puzzle
+}
 
 /** `[begin, append…, end]` for one glyph polyline (appends chunked). */
 export function botStrokeOps(
@@ -46,10 +74,12 @@ export function botStrokeOps(
   return ops
 }
 
-function drawNextStroke(
+/** Draws `strokes` on the bot's active canvas as one batch. */
+function drawStrokes(
   ctx: RoomContext,
   bot: RoomMember,
   canvasId: string,
+  pick: (puzzle: BotPuzzle) => readonly (readonly NormalizedPoint[])[],
 ): void {
   const canvas = activeCanvas(ctx.state, bot.team)
   if (
@@ -59,21 +89,34 @@ function drawNextStroke(
   ) {
     return
   }
+  const strokes = pick(puzzleFor(canvas.term))
   const drawn = ctx.state.bots.strokesDrawn[canvasId] ?? 0
-  const stroke = renderTextStrokes(canvas.term)[drawn]
+  const ops: DrawingAction[] = []
+  let next = drawn
+  for (const stroke of strokes) {
+    const batch = botStrokeOps(
+      `b-${canvasId}-${next}`,
+      stroke.filter(isNormalizedPoint),
+    )
+    if (batch.length === 0) continue
+    ops.push(...batch)
+    next += 1
+  }
+  if (ops.length === 0) return
   patchState(ctx, {
     bots: {
       ...ctx.state.bots,
-      strokesDrawn: { ...ctx.state.bots.strokesDrawn, [canvasId]: drawn + 1 },
+      strokesDrawn: { ...ctx.state.bots.strokesDrawn, [canvasId]: next },
     },
   })
-  if (stroke === undefined) return
-  const ops = botStrokeOps(
-    `b-${canvasId}-${drawn}`,
-    stroke.filter(isNormalizedPoint),
-  )
-  if (ops.length === 0) return
   applyDrawerOps(ctx, bot.team, canvasId, ops, 'bot', bot.id)
+}
+
+/** Blanks first (and hyphens/apostrophes), then glyphs, in puzzle order. */
+function outlineStroke(puzzle: BotPuzzle, index: number) {
+  const outline = [...puzzle.marks, ...puzzle.slots.map((slot) => slot.blank)]
+  const stroke = outline[index]
+  return stroke === undefined ? [] : [stroke]
 }
 
 function guess(
@@ -98,7 +141,8 @@ function guess(
     action.correct &&
     findMember(ctx.state, canvas.drawerId)?.kind === 'human'
   ) {
-    if (canvas.strokeCount < MIN_HUMAN_STROKES_FOR_BOT_ANSWER) {
+    const ink = MIN_HUMAN_INK[canvas.difficulty]
+    if (canvas.strokeCount < ink.strokes || canvas.inkLength < ink.length) {
       retry(BOT_ANSWER_RETRY_MS)
       return
     }
@@ -118,7 +162,20 @@ export function runBotItem(ctx: RoomContext, item: BotScheduleItem): void {
       botPickWord(ctx, bot.id)
       return
     case 'draw.next-stroke':
-      drawNextStroke(ctx, bot, action.canvasId)
+      // Retired: bots no longer write the answer out.
+      return
+    case 'draw.outline':
+      drawStrokes(ctx, bot, action.canvasId, (puzzle) =>
+        outlineStroke(puzzle, action.index),
+      )
+      return
+    case 'draw.letter':
+      drawStrokes(
+        ctx,
+        bot,
+        action.canvasId,
+        (puzzle) => puzzle.slots[action.slot]?.glyph ?? [],
+      )
       return
     case 'guess':
       guess(ctx, bot, item, action)

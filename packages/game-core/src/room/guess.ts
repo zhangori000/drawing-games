@@ -82,6 +82,9 @@ export function checkGuess(
     )
   }
   if (canvas.drawerId === member.id) return fail("The drawer can't guess.")
+  if (canvas.formerDrawerIds.includes(member.id)) {
+    return fail('You saw this word as the drawer, so sit this one out.')
+  }
 
   const text = typeof rawText === 'string' ? cleanText(rawText) : ''
   const length = codePointLength(text)

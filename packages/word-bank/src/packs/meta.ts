@@ -77,6 +77,13 @@ export const WORD_PACKS: readonly WordPackInfo[] = Object.freeze([
     kidFriendly: true,
   },
   {
+    id: 'body-health',
+    name: 'Body & Health',
+    description: 'Body parts, bumps and bruises, and getting better.',
+    defaultEnabled: true,
+    kidFriendly: true,
+  },
+  {
     id: 'actions',
     name: 'Actions',
     description: 'Verbs and activities — draw someone doing it.',

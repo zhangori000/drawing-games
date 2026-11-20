@@ -103,6 +103,25 @@ export function endMatch(
 }
 
 /**
+ * Nobody human is here any more (see `ABANDON_MATCH_MS`): the match stops
+ * where it is and the room goes back to the lobby. It never reaches an
+ * account as a match (no `account.match`, no result); rounds that finished
+ * while someone was playing were already reported when they ended.
+ */
+export function abandonMatch(ctx: RoomContext): void {
+  updateMatch(ctx, (match) => ({
+    ...match,
+    endedAtMs: ctx.now,
+    endedReason: null,
+    winner: null,
+    surrender: null,
+    guessLimits: {},
+    abandoned: true,
+  }))
+  enterLobby(ctx)
+}
+
+/**
  * Back to the lobby: left members are removed and every human must ready up
  * again. The finished match stays in state only for match numbering.
  */

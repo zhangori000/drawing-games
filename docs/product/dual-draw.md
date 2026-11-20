@@ -65,8 +65,11 @@ changes; the game starts only when every connected player marks ready.
 ## Teams, rotation, and word choice
 
 Drawer rotation is independent and round-robin within each team, skipping
-players only after their reconnect grace expires. Each team has one active
-drawer and its own draft, prompt, canvas, guesses, and round score.
+players only after their reconnect grace expires. The turn always passes to
+the next teammate (in join order) after whoever drew last, so a teammate who
+is away, joins late, or leaves never makes someone draw twice in a row while
+another teammate is waiting. Each team has one active drawer and its own
+draft, prompt, canvas, guesses, and round score.
 
 During the 15-second draft, each active drawer sees their candidate words and
 difficulty labels and may select one or replace it for either of two explicit
@@ -137,7 +140,10 @@ has one. The lobby counts the room's never-drawn words and, when they cannot
 cover every card the configured match could deal (two drafts plus every swap
 per round, two words drawn per round), warns everyone from which round cards
 may repeat. The host can still start: a short family list is a legitimate
-choice, as long as nobody is told words never repeat.
+choice, as long as nobody is told words never repeat. A swap never hands a
+drawer a card from the other team's hand (it could be their answer): on a
+list so short that nothing else is left, the swap is refused with "There are
+no other words left to swap in."
 
 ## Drawing and guessing
 
@@ -180,6 +186,33 @@ opens, with safe-area insets respected.
 Acceptance is behavioral: on supported iPhone and Android sizes, a player can
 focus, type, submit a wrong guess, and type again while the same meaningful
 portion of the drawing remains visible.
+
+Phone choices that follow from this (portrait and landscape):
+
+- **The drawing stays the main element while typing.** Touch phones default
+  to the in-app compact keyboard. While it (or the phone's own keyboard) is
+  up, the clue collapses to one line (letter blanks, category, difficulty
+  with its bonus, and the reveal vote), the team feed and opponent tile step
+  aside, and the guess status line carries the newest teammate guess and the
+  other team's progress. On a typical 390 x 664 phone the drawing keeps its
+  full width with the compact keys up, and stays about two-thirds of the
+  width with the phone keyboard open. A keyboard button next to the input
+  switches between the compact and the phone keyboard; a "hide keyboard" key
+  tucks the compact keys away to see the drawing larger, and tapping the
+  input brings them back.
+- **No zoom on the game surface.** Pinch and double-tap never zoom any play
+  screen (join, lobby, draft, drawing, results). Browser and accessibility
+  zoom are still allowed for players who need them, and then the layout
+  keeps its size rather than squeezing into the zoomed area.
+- **Every drawing tool is on screen.** Phones show pen, eraser, size, undo,
+  redo, clear, and all 12 colors without a sideways scroll: two rows under
+  the canvas in portrait, a narrow tool panel beside it in landscape. Nothing
+  floats over the drawer's paper, so every corner can be drawn on.
+- **The whole draft fits.** On phones the three cards are compact rows with
+  the difficulty and bonus side by side, so they compare at a glance during
+  the 15-second pick; tapping a row picks it and its `?` shows the meaning
+  and the "seen it" / "don't know it" swaps. The top bar's countdown is the
+  only timer.
 
 ## Word-length reveal vote
 
@@ -255,16 +288,36 @@ Disconnecting does not remove a player from the room. Their role, team, score,
 and drawing remain. A returning browser resumes the current phase, even if the
 round advanced while it was away.
 
-Proposed fairness rule: an active drawer gets a 10-second reconnect grace. If a
-teammate is connected, the team may then take over; the returning player rejoins
-as a guesser until their next rotation. A single disconnect does not pause both
-teams. This is a **hypothesis** that needs mobile playtesting.
+An active drawer gets a 10-second reconnect grace (a locked phone or a quick
+app switch). Back within it, they simply carry on. If they are still away
+when it runs out and a teammate is connected, the next connected teammate in
+rotation takes over the same turn: the same cards and remaining swaps during
+the draft, or the same word and canvas while drawing or on a Showdown card,
+for the remaining time. The returning player sits out the rest of that turn
+(below) and plays on as usual. The team never loses a whole round (or the rest of the Showdown) to
+one dropped phone, and a single disconnect never pauses either team. If
+nobody on the team is connected the turn waits, and the first teammate back
+takes it. The 10 seconds remain a playtest target.
 
-Leaving is different from disconnecting. In v1, an active drawer who explicitly
-leaves during the word draft, the drawing, or a Showdown card hands the turn to
-the next teammate in rotation, who continues it with the same cards (or word and
-canvas) and the remaining time. The team keeps playing instead of waiting out
-the clock; the other team is unaffected.
+An active drawer who explicitly leaves during the word draft, the drawing, or
+a Showdown card hands the turn over the same way, at once (to a teammate
+within their own grace if there is one). The team keeps playing instead of
+waiting out the clock; the other team is unaffected.
+
+A drawer whose turn was taken over has already seen its cards (and maybe the
+word), so when they come back they watch the rest of that turn instead of
+guessing it, and guess as usual from the next turn. For the same reason a
+takeover only happens when someone else on the team could still guess: in a
+pair (or one player with one practice bot) the turn waits for the drawer.
+
+Nobody is credited with play they were not there for. A word auto-picked for
+a drawer who was away the whole time is not "drew" (and never joins their
+never-again list), a guesser who was away is not "missed", and a player who
+was away for the entire match gets no match result. If nobody human is
+connected for a full minute (or everyone has left), the match is abandoned:
+the room goes back to the lobby and the match is not recorded, so practice
+bots never play out a match, and hand someone a loss, after they closed the
+tab. A minute is meant to survive a locked phone or a brief server restart.
 
 ## Surrender and rematch
 
@@ -313,14 +366,41 @@ The final page should make different kinds of contribution visible:
 Avoid a single “best player” number until evidence shows it cannot reward spam,
 easy-word selection, or other behavior that makes the game worse.
 
+## Practice bots
+
+Practice bots let one person play a whole match. They should give a fair
+contest, not a reading test or a walkover:
+
+- **A bot drawer sets a puzzle, it never writes the answer.** It draws one
+  blank per letter (all the same width, so they give nothing away beyond the
+  length and word breaks), then reveals letters one at a time over the round,
+  at most 60 % of them and never the whole word. The human guesses from the
+  blanks, the revealed letters, and the category, with the usual forgiving
+  matching.
+- **Both teams' bots play by the same clock.** A bot guesser gets the word at
+  a random point of the round that depends only on its difficulty (easy
+  sooner, hard later) and sometimes not at all (more often for hard words),
+  whether a bot or a human is drawing. So the opposing bot pair no longer
+  solves every round in seconds, and the difficulty bonus is a real gamble.
+- **A bot teammate only "recognizes" a real attempt.** It needs a few strokes
+  and some ink (more for harder words) before it answers a human's drawing;
+  a few slashes are not a lighthouse. Bots cannot see the picture, so this is
+  deliberately loose.
+
+In simulated solo matches (the human draws properly and solves the bot's
+puzzle at its 2nd, 3rd, or 5th letter) the human's team wins about 13, 11,
+and 4 of 16: skill decides, and the solo player can win. The constants are
+playtest targets.
+
 ## Open product questions
 
 1. Should a later game mode let both teams draw the same shared prompt?
 2. Should Showdown eventually allow a timed pass that moves a stuck card to the
    back of the team's queue?
-3. Should disconnected active drawers be replaced, should the round pause, or
-   should this be a host setting? (Drawers who explicitly leave already hand
-   the turn to a teammate.)
+3. Resolved: a drawer disconnected past the 10-second grace is replaced by
+   the next connected teammate for the rest of the turn (see Disconnect
+   behavior). A host setting to pause instead can be revisited after mobile
+   playtests.
 4. Are rooms private-by-code only, or will public matchmaking and moderation be
    required? This materially changes safety and account architecture.
 5. How long should drawings, transcripts, and personal statistics be retained,

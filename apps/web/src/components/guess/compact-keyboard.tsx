@@ -10,7 +10,7 @@ import {
 } from 'react'
 
 import { cx } from '../ui/cx'
-import { BackspaceIcon, KeyboardIcon, SendIcon } from '../ui/icons'
+import { BackspaceIcon, KeyboardHideIcon, SendIcon } from '../ui/icons'
 
 export { useCompactKeyboardPreference } from './keyboard-preference'
 
@@ -22,8 +22,8 @@ export interface CompactKeyboardProps {
   readonly onKey: (text: string) => void
   readonly onBackspace: () => void
   readonly onSend: () => void
-  /** Switch to the device keyboard. */
-  readonly onUsePhoneKeyboard?: () => void
+  /** Tuck the keys away (tapping the guess input brings them back). */
+  readonly onHide?: () => void
   readonly disabled?: boolean
   readonly sendDisabled?: boolean
   readonly className?: string
@@ -33,13 +33,15 @@ export interface CompactKeyboardProps {
  * In-app QWERTY for guessing on phones. It never opens the native keyboard,
  * so the visual viewport (and the drawing) never resizes. Keys act on
  * pointer-down with `preventDefault`, so focus and the caret stay in the
- * guess input.
+ * guess input. Rows are 40 px tall (four rows, about 180 px in all) so the
+ * drawing above keeps most of a phone screen; switching to the device
+ * keyboard lives in the guess input row.
  */
 export function CompactKeyboard({
   onKey,
   onBackspace,
   onSend,
-  onUsePhoneKeyboard,
+  onHide,
   disabled = false,
   sendDisabled = false,
   className,
@@ -48,26 +50,14 @@ export function CompactKeyboard({
     <div
       role="group"
       aria-label="Compact keyboard"
+      data-testid="compact-keyboard"
       className={cx(
-        'select-none border-t-2 border-[#181713] bg-[#e9e3d8] px-1 pb-1.5 pt-1',
+        'select-none border-t-2 border-[#181713] bg-[#e9e3d8] px-1 pb-1 pt-1',
         disabled && 'opacity-50',
         className,
       )}
       style={{ touchAction: 'manipulation', WebkitUserSelect: 'none' }}
     >
-      {onUsePhoneKeyboard ? (
-        <div className="flex justify-end px-1 pb-1">
-          <button
-            type="button"
-            onPointerDown={(event) => event.preventDefault()}
-            onClick={onUsePhoneKeyboard}
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-bold text-black/60 hover:bg-black/5"
-          >
-            <KeyboardIcon width={16} height={16} />
-            Use phone keyboard
-          </button>
-        </div>
-      ) : null}
       <div className="flex flex-col gap-1">
         {LETTER_ROWS.map((row, rowIndex) => (
           <div
@@ -91,6 +81,17 @@ export function CompactKeyboard({
           </div>
         ))}
         <div className="flex gap-1">
+          {onHide ? (
+            <Key
+              label="Hide keyboard"
+              disabled={false}
+              onPress={onHide}
+              tone="action"
+              className="max-w-12"
+            >
+              <KeyboardHideIcon width={20} height={20} />
+            </Key>
+          ) : null}
           <Key
             label="Backspace"
             disabled={disabled}
@@ -105,7 +106,7 @@ export function CompactKeyboard({
             label="Apostrophe"
             disabled={disabled}
             onPress={() => onKey("'")}
-            className="max-w-11"
+            className="max-w-10"
           >
             &apos;
           </Key>
@@ -113,7 +114,7 @@ export function CompactKeyboard({
             label="Hyphen"
             disabled={disabled}
             onPress={() => onKey('-')}
-            className="max-w-11"
+            className="max-w-10"
           >
             -
           </Key>
@@ -227,7 +228,7 @@ function Key({
       onClick={handleClick}
       onContextMenu={(event) => event.preventDefault()}
       className={cx(
-        'flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1 rounded-lg border-2 text-lg font-bold lowercase shadow-[0_2px_0_rgba(24,23,19,0.25)] transition-transform duration-75 disabled:opacity-60',
+        'flex h-10 min-w-0 flex-1 items-center justify-center gap-1 rounded-lg border-2 text-lg font-bold lowercase shadow-[0_2px_0_rgba(24,23,19,0.25)] transition-transform duration-75 disabled:opacity-60',
         KEY_TONES[tone],
         'data-[pressed]:translate-y-0.5 data-[pressed]:scale-95 data-[pressed]:shadow-none data-[pressed]:brightness-90',
         className,

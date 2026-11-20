@@ -1,8 +1,9 @@
 import type { GuessView } from '@drawing-games/game-core'
 
+import { GUESS_PRIVACY_NOTE } from '@/components/guess/guess-dock'
 import { cx } from '@/components/ui/cx'
 
-import { usePlayLayout } from './play-layout'
+import { usePlayChrome, usePlayLayout } from './play-layout'
 
 export interface GuessFeedProps {
   readonly guesses: readonly GuessView[]
@@ -105,5 +106,48 @@ function GuessRow({
         </span>
       ) : null}
     </li>
+  )
+}
+
+/**
+ * The guess dock's idle status line. While a keyboard has pushed the feed
+ * row off a portrait phone screen, it shows the newest teammate guess so the
+ * team chatter stays visible; otherwise the usual privacy note.
+ */
+export function LatestTeamGuess({
+  guesses,
+}: {
+  readonly guesses: readonly GuessView[]
+}) {
+  const { feedInDock, mode } = usePlayChrome()
+  const latest =
+    feedInDock && mode === 'stacked'
+      ? guesses.findLast((guess) => !guess.mine)
+      : undefined
+  if (!latest) {
+    return (
+      <span className="truncate px-1 text-xs text-black/45">
+        {GUESS_PRIVACY_NOTE}
+      </span>
+    )
+  }
+  if (latest.verdict === 'correct') {
+    return (
+      <span
+        data-testid="latest-team-guess"
+        className="truncate px-1 text-xs font-black text-[#1f9d72]"
+      >
+        ✓ {latest.memberName} guessed it!
+      </span>
+    )
+  }
+  return (
+    <span
+      data-testid="latest-team-guess"
+      className="flex min-w-0 items-baseline gap-1.5 px-1 text-xs"
+    >
+      <span className="shrink-0 font-black">{latest.memberName}</span>
+      <span className="min-w-0 truncate text-black/75">{latest.text}</span>
+    </span>
   )
 }

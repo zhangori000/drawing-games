@@ -12,8 +12,8 @@ import { DrawerCanvas, ReadOnlyCanvas } from '../shared/room-canvas'
 import { SolvedBanner, WordBanner } from './banners'
 import { ClueBanner } from './clue-banner'
 import { DrawerToolbar } from './drawer-toolbar'
-import { GuessFeed } from './guess-feed'
-import { OpponentTile } from './opponent-tile'
+import { GuessFeed, LatestTeamGuess } from './guess-feed'
+import { OpponentChip, OpponentTile } from './opponent-tile'
 import { PlayLayout } from './play-layout'
 import { Scoreboard } from './scoreboard'
 import { useFreshFeedback } from './use-fresh-feedback'
@@ -32,6 +32,9 @@ export function DrawingScreen({ round }: { readonly round: RoundView }) {
   const watchingOpponent = watching && opponent.canvasAccess === 'full'
   const drawing = mine.amDrawer && mine.canDraw && !watchingOpponent
   const solution = mine.solution
+  const opponentStatus = opponent.solved
+    ? 'Solved!'
+    : plural(opponent.guessCount, 'guess', 'guesses')
 
   const watchToggle =
     opponent.canvasAccess === 'full' ? (
@@ -117,6 +120,14 @@ export function DrawingScreen({ round }: { readonly round: RoundView }) {
             <GuessDock
               onGuess={actions.guess}
               feedback={feedback}
+              idleStatus={<LatestTeamGuess guesses={mine.guesses} />}
+              statusAside={
+                <OpponentChip
+                  team={opponent.team}
+                  done={opponent.solved}
+                  status={opponentStatus}
+                />
+              }
               disabledReason={
                 mine.canGuess
                   ? null
@@ -146,11 +157,7 @@ export function DrawingScreen({ round }: { readonly round: RoundView }) {
           access={opponent.canvasAccess}
           drawerName={opponent.drawerName}
           done={opponent.solved}
-          status={
-            opponent.solved
-              ? 'Solved!'
-              : plural(opponent.guessCount, 'guess', 'guesses')
-          }
+          status={opponentStatus}
           watching={watchingOpponent}
           onToggleWatch={() => setWatching((value) => !value)}
         />

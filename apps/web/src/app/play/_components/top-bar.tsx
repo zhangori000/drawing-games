@@ -4,6 +4,7 @@ import { TEAM_IDS, TEAM_NAMES } from '@drawing-games/game-core'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 
+import { useGameViewport } from '@/components/layout/game-viewport'
 import { Button } from '@/components/ui/button'
 import { copyText } from '@/components/ui/copy-button'
 import { Countdown } from '@/components/ui/countdown'
@@ -29,20 +30,31 @@ export function useInviteLink(roomCode: string): string {
 
 /**
  * Persistent match header: leave, room code (tap to copy the invite link),
- * round or phase, the countdown, and both scores.
+ * round or phase, the countdown, and both scores. While the device keyboard
+ * is open it slims from 56 to 44 px so the drawing keeps more of the screen.
  */
 export function TopBar() {
   const { view, roomCode, serverNow } = useRoomSession()
   const [confirmLeave, setConfirmLeave] = useState(false)
+  const slim = useGameViewport().keyboardOpen
 
   return (
-    <header className="relative z-10 flex h-14 shrink-0 items-center gap-1.5 border-b-2 border-[#181713] bg-[#fffdf7] px-2 sm:gap-3 sm:px-4">
-      <IconButton label="Leave room" onClick={() => setConfirmLeave(true)}>
+    <header
+      className={cx(
+        'relative z-10 flex shrink-0 items-center gap-1.5 border-b-2 border-[#181713] bg-[#fffdf7] px-2 sm:gap-3 sm:px-4',
+        slim ? 'h-11' : 'h-14',
+      )}
+    >
+      <IconButton
+        label="Leave room"
+        onClick={() => setConfirmLeave(true)}
+        className={slim ? 'size-9!' : undefined}
+      >
         <span aria-hidden="true" className="text-xl font-black leading-none">
           ←
         </span>
       </IconButton>
-      <InviteChip roomCode={roomCode} />
+      <InviteChip roomCode={roomCode} slim={slim} />
       <p className="min-w-0 truncate text-xs font-black sm:text-sm">
         <span className="sm:hidden">{shortPhaseLabel(view)}</span>
         <span className="hidden sm:inline">{phaseLabel(view)}</span>
@@ -52,6 +64,7 @@ export function TopBar() {
           deadlineAtMs={view.phaseDeadlineAtMs}
           serverNow={serverNow}
           label={timerLabel(view)}
+          className={slim ? 'py-1!' : undefined}
         />
         <Scores />
       </div>
@@ -84,7 +97,13 @@ function Scores() {
   )
 }
 
-function InviteChip({ roomCode }: { readonly roomCode: string }) {
+function InviteChip({
+  roomCode,
+  slim,
+}: {
+  readonly roomCode: string
+  readonly slim: boolean
+}) {
   const link = useInviteLink(roomCode)
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
 
@@ -103,7 +122,8 @@ function InviteChip({ roomCode }: { readonly roomCode: string }) {
       aria-label={`Room ${roomCode}. Copy invite link`}
       title="Copy invite link"
       className={cx(
-        'inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl border-2 border-[#181713] px-2.5 font-mono text-sm font-black tracking-[0.12em] transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5c4cf2]/35 sm:px-3',
+        'inline-flex shrink-0 items-center gap-1.5 rounded-xl border-2 border-[#181713] px-2.5 font-mono text-sm font-black tracking-[0.12em] transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5c4cf2]/35 sm:px-3',
+        slim ? 'min-h-9' : 'min-h-11',
         state === 'copied'
           ? 'bg-[#1f9d72] text-white'
           : 'bg-white hover:bg-[#f8ff80]',

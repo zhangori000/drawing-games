@@ -31,3 +31,14 @@ const WIDE_LAYOUT_QUERY =
 export function useWideLayout(): boolean {
   return useMediaQuery(WIDE_LAYOUT_QUERY)
 }
+
+/**
+ * Phone-sized screens in either orientation: narrower than Tailwind's `sm`
+ * or shorter than a landscape phone. Screens use it to trade decoration for
+ * content (e.g. compact draft rows so all cards fit without scrolling).
+ */
+const COMPACT_SCREEN_QUERY = '(max-width: 639px), (max-height: 559px)'
+
+export function useCompactScreen(): boolean {
+  return useMediaQuery(COMPACT_SCREEN_QUERY)
+}

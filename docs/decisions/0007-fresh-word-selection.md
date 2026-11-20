@@ -17,10 +17,16 @@ resort rather than the only help.
 Draft cards are chosen by a pure, seeded selector in
 `packages/word-bank/src/play` that the deterministic room reducer calls with:
 
-1. **A curated pool.** Fourteen packs of concrete, drawable, family-friendly
+1. **A curated pool.** Fifteen packs of concrete, drawable, family-friendly
    words with honest difficulty labels, a drawer-only one-sentence
    definition, and optional accepted aliases. Hosts toggle packs and may add
-   custom words (mixed in, or "only my words").
+   custom words (mixed in, or "only my words"). A pack is also the guessers'
+   category hint, so a word lives in the pack a guesser would look in:
+   body words moved from Space & Science to a new default-on Body & Health
+   pack (and elevator/escalator to Places & Buildings). Word ids never
+   change meaning: a moved word gets a new id, and its old id resolves to it
+   (`LEGACY_WORD_IDS`, `canonicalWordId`), so memories and histories that
+   hold the old id keep working.
 2. **Balanced slots.** The default `balanced` mix gives one easy, one medium,
    and one hard card, each labelled with its bonus.
 3. **Hard exclusions.** Words already drawn in the room (across rematches),

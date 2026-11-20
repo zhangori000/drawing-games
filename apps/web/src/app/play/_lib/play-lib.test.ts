@@ -9,7 +9,7 @@ import { roomSettingsPatchSchema } from '@drawing-games/protocol'
 import { expect, test } from 'vitest'
 
 import { installMemoryStorage } from '../../../lib/testing/memory-storage'
-import { describePattern, revealState } from './clue'
+import { describePattern, patternWords, revealState } from './clue'
 import {
   CUSTOM_WORD_LIMITS,
   mergeCustomWords,
@@ -340,4 +340,11 @@ test('clue: the reveal vote unlocks from the countdown', () => {
 test('clue: patterns read as letter counts', () => {
   expect(describePattern('_ _ _ _ _')).toBe('5 letters')
   expect(describePattern('_ _ _   _ _ _ _ _')).toBe('8 letters: 3 + 5')
+})
+
+test('clue: compact patterns drop letter spacing but keep words apart', () => {
+  expect(patternWords('_ _ _ _ _')).toEqual(['_____'])
+  expect(patternWords('_ _ A   _ _')).toEqual(['__A', '__'])
+  expect(patternWords('  _ _  ')).toEqual(['__'])
+  expect(patternWords('')).toEqual([])
 })

@@ -4,6 +4,13 @@ import type { StrokeStyle } from '@drawing-games/drawing-model'
 export const RECONNECT_GRACE_MS = 10_000
 /** A disconnected host hands over to a connected human after this long. */
 export const HOST_TRANSFER_MS = 15_000
+/**
+ * A running match with no human connected for this long is abandoned: the
+ * room returns to the lobby and nothing more reaches anyone's account, so
+ * bots never play out (and record) a match for someone who closed the tab.
+ * Long enough to survive a locked phone or a server restart.
+ */
+export const ABANDON_MATCH_MS = 60_000
 
 export const MAX_DISPLAY_NAME_LENGTH = 24
 export const FALLBACK_DISPLAY_NAME = 'Player'

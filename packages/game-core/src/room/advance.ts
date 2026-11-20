@@ -1,12 +1,15 @@
 import { runBotItem } from './bot-runner'
 import { takeNextBotItem } from './bots'
-import { HOST_TRANSFER_MS } from './constants'
+import { ABANDON_MATCH_MS, HOST_TRANSFER_MS } from './constants'
 import type { RoomContext } from './context'
 import { patchState } from './context'
 import { autoPickAndStartDrawing } from './draft'
+import { nextDrawerTakeover, runDrawerTakeover } from './drawer-handoff'
 import { endRound } from './drawing'
 import { activeMembers, chooseHost, findActiveMember } from './members'
 import { continueAfterResults } from './results'
+import { abandonMatch } from './match'
+import { isMatchRunning } from './selectors'
 import { endShowdown } from './showdown'
 import type { RoomState } from './types'
 
@@ -32,21 +35,41 @@ function hostTransferDueAtMs(state: RoomState): number | null {
   return Math.max(host.lastSeenAtMs + HOST_TRANSFER_MS, connectedSince)
 }
 
-type DueKind = 'deadline' | 'host' | 'bot'
+/**
+ * When a running match with no connected human is abandoned: a minute after
+ * the last human dropped, or right away once every human has left.
+ */
+function abandonDueAtMs(state: RoomState): number | null {
+  if (!isMatchRunning(state)) return null
+  const humans = state.members.filter((member) => member.kind === 'human')
+  if (humans.some((member) => member.connected)) return null
+  if (humans.length === 0) return state.match?.startedAtMs ?? null
+  const lastSeen = Math.max(...humans.map((member) => member.lastSeenAtMs))
+  const anyoneMayReturn = humans.some((member) => member.left !== true)
+  return anyoneMayReturn ? lastSeen + ABANDON_MATCH_MS : lastSeen
+}
+
+type DueKind = 'deadline' | 'abandon' | 'host' | 'drawer' | 'bot'
 
 interface DueWork {
   readonly kind: DueKind
   readonly atMs: number
 }
 
-/** Earliest pending work; ties go deadline → host → bot. */
+/** Earliest pending work; ties go deadline → abandon → host → drawer → bot. */
 function nextDueWork(state: RoomState): DueWork | null {
   const candidates: DueWork[] = []
   if (state.phaseDeadlineAtMs !== null) {
     candidates.push({ kind: 'deadline', atMs: state.phaseDeadlineAtMs })
   }
+  const abandonAt = abandonDueAtMs(state)
+  if (abandonAt !== null) candidates.push({ kind: 'abandon', atMs: abandonAt })
   const hostAt = hostTransferDueAtMs(state)
   if (hostAt !== null) candidates.push({ kind: 'host', atMs: hostAt })
+  const takeover = nextDrawerTakeover(state)
+  if (takeover !== null) {
+    candidates.push({ kind: 'drawer', atMs: takeover.atMs })
+  }
   const bot = state.bots.schedule[0]
   if (bot !== undefined) candidates.push({ kind: 'bot', atMs: bot.atMs })
   let best: DueWork | null = null
@@ -88,7 +111,9 @@ function runHostTransfer(ctx: RoomContext): void {
 /**
  * Processes every piece of work due at or before `untilMs` in time order,
  * each at its own scheduled time, so a late alarm never changes outcomes.
- * `floorMs` keeps time from running backwards after a command at that time.
+ * `floorMs` keeps time from running backwards after a command at that time,
+ * and work that only became due through earlier work (whose time may have
+ * passed) runs at the time it was caused, never earlier.
  * Each processed item is one state change (`seq` + 1).
  */
 export function runDueWork(
@@ -96,17 +121,27 @@ export function runDueWork(
   untilMs: number,
   floorMs: number = Number.NEGATIVE_INFINITY,
 ): void {
+  let floor = floorMs
   for (let step = 0; step < MAX_STEPS_PER_ADVANCE; step += 1) {
     const due = nextDueWork(ctx.state)
     if (due === null || due.atMs > untilMs) return
-    ctx.now = Math.max(floorMs, due.atMs)
+    ctx.now = Math.max(floor, due.atMs)
+    floor = ctx.now
     switch (due.kind) {
       case 'deadline':
         runDeadline(ctx)
         break
+      case 'abandon':
+        abandonMatch(ctx)
+        break
       case 'host':
         runHostTransfer(ctx)
         break
+      case 'drawer': {
+        const takeover = nextDrawerTakeover(ctx.state)
+        if (takeover !== null) runDrawerTakeover(ctx, takeover)
+        break
+      }
       case 'bot': {
         const item = takeNextBotItem(ctx)
         if (item !== null) runBotItem(ctx, item)
