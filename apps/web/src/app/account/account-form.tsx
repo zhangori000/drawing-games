@@ -1,18 +1,23 @@
 'use client'
 
-import {
-  MAX_PASSWORD_LENGTH,
-  accountDisplayNameSchema,
-  passwordSchema,
-  usernameSchema,
-} from '@drawing-games/protocol'
+import { MAX_PASSWORD_LENGTH } from '@drawing-games/protocol'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useId, useState, type FormEvent, type ReactNode } from 'react'
+import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
 import { Button, buttonClassName } from '@/components/ui/button'
 import { cx } from '@/components/ui/cx'
 import { useAccount } from '@/lib/account/account-provider'
+import {
+  DISPLAY_NAME_MAX_LENGTH,
+  NEW_PASSWORD_HINT,
+  USERNAME_HINT,
+  USERNAME_MAX_LENGTH,
+  currentPasswordIssue,
+  displayNameIssue,
+  newPasswordIssue,
+  usernameIssue,
+} from '@/lib/account/form-validation'
 
 type Mode = 'signup' | 'login'
 
@@ -21,6 +26,9 @@ interface FieldErrors {
   password?: string
   displayName?: string
 }
+
+/** Field order on the page: a failed submit focuses the first invalid one. */
+const FIELD_ORDER = ['username', 'password', 'displayName'] as const
 
 export interface AccountFormProps {
   readonly next: string | null
@@ -39,24 +47,34 @@ export function AccountForm({ next, initialMode }: AccountFormProps) {
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const destination = next ?? '/me'
+  const usernameRef = useRef<HTMLInputElement>(null)
+  const passwordRef = useRef<HTMLInputElement>(null)
+  const displayNameRef = useRef<HTMLInputElement>(null)
+
+  const passwordIssueFor = (value: string) =>
+    mode === 'signup' ? newPasswordIssue(value) : currentPasswordIssue(value)
 
   const validate = (): FieldErrors => {
     const found: FieldErrors = {}
     const usernameError = usernameIssue(username)
     if (usernameError) found.username = usernameError
+    const passwordError = passwordIssueFor(password)
+    if (passwordError) found.password = passwordError
     if (mode === 'signup') {
-      const passwordError = passwordIssue(password)
-      if (passwordError) found.password = passwordError
-      if (
-        displayName.trim() &&
-        !accountDisplayNameSchema.safeParse(displayName).success
-      ) {
-        found.displayName = 'Up to 24 characters'
-      }
-    } else if (!password) {
-      found.password = 'Enter your password'
+      const displayNameError = displayNameIssue(displayName)
+      if (displayNameError) found.displayName = displayNameError
     }
     return found
+  }
+
+  /** Once a field shows an error, re-check it as the player types. */
+  const recheck = (
+    field: keyof FieldErrors,
+    issue: string | undefined,
+  ): void => {
+    setErrors((current) =>
+      current[field] === undefined ? current : { ...current, [field]: issue },
+    )
   }
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -64,7 +82,19 @@ export function AccountForm({ next, initialMode }: AccountFormProps) {
     const found = validate()
     setErrors(found)
     setFormError(null)
-    if (Object.keys(found).length > 0 || submitting) return
+    const firstInvalid = FIELD_ORDER.find((field) => found[field])
+    if (firstInvalid) {
+      // Screen readers announce the focused field as invalid, with its
+      // error (aria-describedby), instead of staying silent on the button.
+      const input = {
+        username: usernameRef,
+        password: passwordRef,
+        displayName: displayNameRef,
+      }[firstInvalid].current
+      input?.focus()
+      return
+    }
+    if (submitting) return
 
     setSubmitting(true)
     try {
@@ -166,18 +196,18 @@ export function AccountForm({ next, initialMode }: AccountFormProps) {
         <Field
           id={`${baseId}-username`}
           label="Username"
-          hint={
-            mode === 'signup'
-              ? '3–20 letters, numbers, or underscores'
-              : undefined
-          }
+          hint={mode === 'signup' ? USERNAME_HINT : undefined}
           error={errors.username}
         >
           <input
+            ref={usernameRef}
             id={`${baseId}-username`}
             name="username"
             value={username}
-            onChange={(event) => setUsername(event.target.value)}
+            onChange={(event) => {
+              setUsername(event.target.value)
+              recheck('username', usernameIssue(event.target.value))
+            }}
             onBlur={() => {
               if (username) {
                 setErrors((current) => ({
@@ -190,9 +220,13 @@ export function AccountForm({ next, initialMode }: AccountFormProps) {
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
-            maxLength={20}
+            maxLength={USERNAME_MAX_LENGTH}
             aria-invalid={errors.username ? true : undefined}
-            aria-describedby={`${baseId}-username-note`}
+            aria-describedby={describedBy(
+              `${baseId}-username`,
+              errors.username,
+              mode === 'signup',
+            )}
             className={inputClass(Boolean(errors.username))}
           />
         </Field>
@@ -200,25 +234,37 @@ export function AccountForm({ next, initialMode }: AccountFormProps) {
         <Field
           id={`${baseId}-password`}
           label="Password"
-          hint={
-            mode === 'signup'
-              ? 'At least 6 characters. There is no reset by email, so keep it somewhere safe.'
-              : undefined
-          }
+          hint={mode === 'signup' ? NEW_PASSWORD_HINT : undefined}
           error={errors.password}
         >
           <input
+            ref={passwordRef}
             id={`${baseId}-password`}
             name="password"
             type="password"
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={(event) => {
+              setPassword(event.target.value)
+              recheck('password', passwordIssueFor(event.target.value))
+            }}
+            onBlur={() => {
+              if (password && mode === 'signup') {
+                setErrors((current) => ({
+                  ...current,
+                  password: newPasswordIssue(password),
+                }))
+              }
+            }}
             autoComplete={
               mode === 'signup' ? 'new-password' : 'current-password'
             }
             maxLength={MAX_PASSWORD_LENGTH}
             aria-invalid={errors.password ? true : undefined}
-            aria-describedby={`${baseId}-password-note`}
+            aria-describedby={describedBy(
+              `${baseId}-password`,
+              errors.password,
+              mode === 'signup',
+            )}
             className={inputClass(Boolean(errors.password))}
           />
         </Field>
@@ -231,16 +277,24 @@ export function AccountForm({ next, initialMode }: AccountFormProps) {
             error={errors.displayName}
           >
             <input
+              ref={displayNameRef}
               id={`${baseId}-display`}
               name="displayName"
               value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
+              onChange={(event) => {
+                setDisplayName(event.target.value)
+                recheck('displayName', displayNameIssue(event.target.value))
+              }}
               autoComplete="nickname"
               autoCorrect="off"
               spellCheck={false}
-              maxLength={24}
+              maxLength={DISPLAY_NAME_MAX_LENGTH}
               aria-invalid={errors.displayName ? true : undefined}
-              aria-describedby={`${baseId}-display-note`}
+              aria-describedby={describedBy(
+                `${baseId}-display`,
+                errors.displayName,
+                true,
+              )}
               className={inputClass(Boolean(errors.displayName))}
             />
           </Field>
@@ -291,6 +345,11 @@ function Shell({ children }: { readonly children: ReactNode }) {
   )
 }
 
+/**
+ * A labelled input with its error (when there is one) above its hint. The
+ * hint stays visible under an error, so the password field never hides the
+ * "no reset by email" warning while the player is fixing it.
+ */
 function Field({
   id,
   label,
@@ -310,31 +369,32 @@ function Field({
         {label}
       </label>
       {children}
-      <p
-        id={`${id}-note`}
-        className={cx(
-          'text-xs leading-5',
-          error ? 'font-bold text-[#c2361b]' : 'text-black/50',
-        )}
-      >
-        {error ?? hint ?? ' '}
-      </p>
+      {error ? (
+        <p
+          id={`${id}-error`}
+          className="text-xs font-bold leading-5 text-[#c2361b]"
+        >
+          {error}
+        </p>
+      ) : null}
+      {hint ? (
+        <p id={`${id}-hint`} className="text-xs leading-5 text-black/50">
+          {hint}
+        </p>
+      ) : null}
     </div>
   )
 }
 
-function usernameIssue(value: string): string | undefined {
-  const result = usernameSchema.safeParse(value)
-  return result.success
-    ? undefined
-    : (result.error.issues[0]?.message ?? 'Check your username')
-}
-
-function passwordIssue(value: string): string | undefined {
-  const result = passwordSchema.safeParse(value)
-  return result.success
-    ? undefined
-    : (result.error.issues[0]?.message ?? 'Check your password')
+/** The input's description: its error first, then its hint. */
+function describedBy(
+  id: string,
+  error: string | undefined,
+  hasHint: boolean,
+): string | undefined {
+  const ids = [error ? `${id}-error` : null, hasHint ? `${id}-hint` : null]
+  const joined = ids.filter((part) => part !== null).join(' ')
+  return joined || undefined
 }
 
 function inputClass(invalid: boolean): string {

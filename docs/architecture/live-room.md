@@ -768,11 +768,18 @@ Non-members get previews during play and full access in results/stats.
   line's teammate guess and opponent chip. The paper keeps the full height
   (176 x 132 on 844 x 148, 194 x 146 on 863 x 162).
 - Drawer tools on phones are all on screen at once (no hidden sideways
-  scroll): two rows under the canvas in portrait (pen, eraser, size, undo,
-  redo, clear; then 12 colors in a grid), and a narrow panel in the landscape
-  sidebar. Sizes open from a size button. Desktop keeps the single strip.
+  scroll): under the canvas in portrait a tool row (pen, eraser, size, undo,
+  redo, clear) and the 12 colors in two rows of six, and the same in a panel
+  in the landscape sidebar. Every color swatch is at least 40 x 40 px (about
+  50 x 40 on a 320 px phone, 62 x 40 at 390 px). Sizes open from a size
+  button. Desktop keeps the single strip.
+- The drawer's word banner keeps the word on a line of its own ("Draw this
+  · pack" and the difficulty chip share the line above it; the pack name
+  truncates first), so the word is never cut off and a long one wraps.
 - Landscape phones (`wide-short`): nothing floats over the paper. The
-  drawer's sidebar is 13 rem (tools, opponent row, feed). A guesser's
+  drawer's sidebar is 17 rem (tools, opponent row, feed), wide enough for six
+  40 px swatches a row; the paper is height-limited there, so it keeps its
+  size (321 x 241 on 667 x 375). A guesser's
   (opponent row, feed, dock with the compact keys) takes the width the
   height-limited 4:3 paper leaves over:
   `clamp(19rem, 100cqw - (100cqh - 5.5rem) * 4/3 - 1rem, 26rem)`, with the

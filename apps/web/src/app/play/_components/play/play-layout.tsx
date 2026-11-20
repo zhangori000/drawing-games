@@ -127,8 +127,13 @@ const GUESSER_SIDEBAR =
 const TYPING_SIDEBAR =
   'clamp(16rem, calc(100cqw - (100cqh - 1rem) * 4 / 3 - 1rem), 26rem)'
 
-/** The landscape drawer's sidebar: tools, opponent and feed. */
-const DRAWER_SIDEBAR = '13rem'
+/**
+ * The landscape drawer's sidebar: tools, opponent and feed. 17rem holds six
+ * 40 px color swatches per row (with the panel's padding and border). The
+ * paper is limited by height on landscape phones, so this width costs it
+ * nothing: 667 x 375 and 568 x 320 phones keep the same paper size.
+ */
+const DRAWER_SIDEBAR = '17rem'
 
 /**
  * Where each region sits, per layout. The regions are always the same

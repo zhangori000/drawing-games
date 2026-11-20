@@ -16,7 +16,7 @@ import {
 
 /**
  * - `strip`: one row (desktop; wraps when the host allows).
- * - `rows`: portrait phones, two rows under the canvas.
+ * - `rows`: portrait phones, a tool row and two color rows under the canvas.
  * - `panel`: a narrow sidebar (landscape phones).
  */
 export type DrawingToolbarLayout = 'strip' | 'rows' | 'panel'
@@ -211,8 +211,9 @@ export function DrawingToolbar({
 
   if (layout !== 'strip') {
     // Phones: every tool is on screen at once, with no hidden sideways
-    // scroll. Row one holds pen, eraser, size, undo, redo and clear; the
-    // colors share a grid below. Sizes open from a small popover.
+    // scroll. Row one holds pen, eraser, size, undo, redo and clear; the 12
+    // colors fill two rows of six below, each at least 40 px in both
+    // directions. Sizes open from a small popover.
     const panel = layout === 'panel'
     return (
       <div
@@ -260,12 +261,7 @@ export function DrawingToolbar({
             {clearButton}
           </div>
         )}
-        <ColorGrid
-          color={color}
-          tool={tool}
-          onColorChange={onColorChange}
-          className={panel ? 'grid-cols-6' : 'grid-cols-12'}
-        />
+        <ColorGrid color={color} tool={tool} onColorChange={onColorChange} />
         {status}
       </div>
     )
@@ -469,23 +465,26 @@ function SizePicker({
   )
 }
 
-/** Colors as an evenly spread grid (phones), all visible at once. */
+/**
+ * Colors as an evenly spread grid (phones), all visible at once: two rows of
+ * six, so every swatch is a 40 px or larger target. That is about 50 x 40 px
+ * on a 320 px portrait phone and 62 x 40 px at 390 px; the landscape tool
+ * panel is sized for 40 x 40 (`DRAWER_SIDEBAR` in play-layout.tsx).
+ */
 function ColorGrid({
   color,
   tool,
   onColorChange,
-  className,
 }: {
   readonly color: string
   readonly tool: DrawingTool
   readonly onColorChange: (color: string) => void
-  readonly className: string
 }) {
   return (
     <div
       role="group"
       aria-label="Ink color"
-      className={cx('grid gap-0.5', className)}
+      className="grid grid-cols-6 gap-0.5"
     >
       {DRAWING_COLORS.map((swatch, index) => {
         const selected = swatch.value === color && tool === 'pen'
@@ -497,11 +496,11 @@ function ColorGrid({
             aria-label={swatchLabel(swatch.name, index)}
             title={swatch.name}
             onClick={() => onColorChange(swatch.value)}
-            className="grid h-9 min-w-0 place-items-center rounded-full focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5c4cf2]/35"
+            className="grid h-10 min-w-10 place-items-center rounded-full focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5c4cf2]/35"
           >
             <span
               className={cx(
-                'block size-6 rounded-full border-2 border-[#181713]',
+                'block size-7 rounded-full border-2 border-[#181713]',
                 selected &&
                   'ring-2 ring-[#181713] ring-offset-2 ring-offset-[#fffdf7]',
               )}

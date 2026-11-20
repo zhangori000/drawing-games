@@ -347,6 +347,15 @@ test.describe('iPhone-sized screen (390 x 664)', () => {
         toolbar.getByRole('button', { name: 'Stroke size: Huge' }),
       ).toBeVisible()
 
+      // The smallest phones (320 x 568) still get every tool and color at a
+      // tappable size, and the whole word.
+      await page.setViewportSize({ width: 320, height: 568 })
+      await expectAllToolsOnScreen(page, toolbar)
+      await expectWholeWord(page)
+      expect(
+        (await boxOf(page.getByTestId('team-canvas').locator('canvas'))).width,
+      ).toBeGreaterThanOrEqual(270)
+
       // Landscape phone: nothing floats over the paper, so its corners
       // draw, and the tools are still all on screen.
       await page.setViewportSize({ width: 667, height: 375 })
@@ -355,10 +364,11 @@ test.describe('iPhone-sized screen (390 x 664)', () => {
         'wide-short',
       )
       await expectAllToolsOnScreen(page, toolbar)
+      await expectWholeWord(page)
       const paper = await boxOf(
         page.getByTestId('team-canvas').locator('canvas'),
       )
-      expect(paper.height).toBeGreaterThanOrEqual(200)
+      expect(paper.height).toBeGreaterThanOrEqual(230)
       for (const [fx, fy] of [
         [0.95, 0.05],
         [0.05, 0.05],
@@ -571,7 +581,10 @@ async function expectOnScreen(page: Page, locator: Locator) {
   expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1)
 }
 
-/** No hidden sideways scroll: every tool and color is visible at once. */
+/**
+ * No hidden sideways scroll: every tool and color is visible at once, and
+ * each is at least 40 px in its smaller dimension (a thumb-sized target).
+ */
 async function expectAllToolsOnScreen(page: Page, toolbar: Locator) {
   const overflow = await toolbar.evaluate(
     (element) => element.scrollWidth - element.clientWidth,
@@ -592,6 +605,30 @@ async function expectAllToolsOnScreen(page: Page, toolbar: Locator) {
     .getByRole('button')
   expect(await colors.count()).toBe(12)
   for (const color of await colors.all()) await expectOnScreen(page, color)
+  const small = await toolbar.evaluate((element) =>
+    [...element.querySelectorAll('button')]
+      .map((button) => {
+        const box = button.getBoundingClientRect()
+        return {
+          name: button.getAttribute('aria-label') ?? button.textContent,
+          size: Math.min(box.width, box.height),
+        }
+      })
+      .filter((button) => button.size < 40),
+  )
+  expect(small).toEqual([])
+}
+
+/** The drawer's word is never cut off with an ellipsis. */
+async function expectWholeWord(page: Page) {
+  const word = page.getByTestId('drawer-word')
+  await expect(word).toBeVisible()
+  expect(
+    await word.evaluate(
+      (element) => element.scrollWidth <= element.clientWidth + 1,
+    ),
+  ).toBe(true)
+  await expectOnScreen(page, word)
 }
 
 async function join(page: Page, name: string) {

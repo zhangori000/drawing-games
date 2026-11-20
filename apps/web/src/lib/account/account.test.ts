@@ -3,6 +3,7 @@ import { expect, test } from 'vitest'
 
 import { parseProfile } from './profile'
 import {
+  WORD_ROLE_LABELS,
   describeWordResult,
   formatRelativeTime,
   lifetimeStatCards,
@@ -125,6 +126,54 @@ test('word rows describe their outcome and filter by role', () => {
   const relay = { ...drew, points: 10, showdown: true } as const
   expect(wordEventContext(relay)).toBe('Showdown')
   expect(describeWordResult(relay)).toBe('Solved in 12 s · +10')
+})
+
+test('a word a teammate solved reads as theirs, not as the player’s own solve', () => {
+  const missed = {
+    wordId: 'maps/treasure-map',
+    term: 'treasure map',
+    packId: 'adventure',
+    difficulty: 'medium',
+    role: 'missed',
+    solved: true,
+    solveMs: 12_000,
+    points: 87,
+    atMs: 0,
+    roomCode: 'ABCDE',
+  } as const
+  expect(describeWordResult(missed)).toBe('Teammate got it in 12 s · team +87')
+  expect(describeWordResult({ ...missed, solveMs: 1_000 })).toBe(
+    'Teammate got it in 1.0 s · team +87',
+  )
+  expect(describeWordResult({ ...missed, points: null })).toBe(
+    'Teammate got it in 12 s',
+  )
+  // Never the player's own "Solved … +points" wording.
+  expect(describeWordResult(missed)).not.toMatch(/^Solved|· \+/)
+  expect(
+    describeWordResult({
+      ...missed,
+      solved: false,
+      solveMs: null,
+      points: null,
+    }),
+  ).toBe('Nobody got it')
+  expect(
+    describeWordResult({
+      ...missed,
+      role: 'guessed',
+    }),
+  ).toBe('Solved in 12 s · +87')
+  expect(
+    describeWordResult({
+      ...missed,
+      role: 'drew',
+      solved: false,
+      solveMs: null,
+      points: null,
+    }),
+  ).toBe('Not solved')
+  expect(WORD_ROLE_LABELS.missed).toBe('Missed')
 })
 
 test('profiles keep the Showdown tag on relay card words', () => {

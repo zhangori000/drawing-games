@@ -181,6 +181,16 @@ newest 300 of each. A drawer whose turn a teammate
 took over did not draw the word, so it is only "met" for them, as for an
 account.
 
+The quick-account page (/account) checks the form before sending it. Each
+error says what to do ("Enter a username.", "Add 3 more characters:
+passwords need at least 6.") and appears above the field's hint, which stays
+visible, so the password's "There is no reset by email" warning never goes
+away while the player picks one. A field with an error is re-checked as the
+player types and clears once it is fixed. A failed submit moves focus to the
+first field to fix, so screen readers announce it as invalid together with
+its error. The join screen's guest line has separate "Log in" and "sign up"
+links that open the matching tab and come back to the room.
+
 A seat in a room follows the browser's quick-account sign-in. Signing in
 (in any tab, or with "Create a quick account" on the final screen) links the
 open seat at once and credits the match so far; signing out (in any tab, or
@@ -218,7 +228,12 @@ solved and how many different words they have drawn, average solve time as
 drawer, correct guesses, accuracy and average time to correct (both timed
 from the start of drawing), fastest correct, hard words, and Showdown cards.
 In Recent words a Showdown relay card carries a "Showdown" tag, so it is not
-mistaken for the round in which the same word was first drawn. A signed-in
+mistaken for the round in which the same word was first drawn. A word the
+player's team had but someone else on the team solved reads "Missed ·
+Teammate got it in 12 s · team +87", and one nobody solved reads "Missed ·
+Nobody got it", so a teammate's solve and the team's points never look like
+the player's own ("Solved … +points" is kept for Guessed and Drew rows,
+where the player's guess or drawing earned them). A signed-in
 player who leaves a match and rejoins it by code gets one match in their
 stats, with what they did before and after rejoining added together.
 
@@ -375,17 +390,23 @@ Phone choices that follow from this (portrait and landscape):
   zoom are still allowed for players who need them, and then the layout
   keeps its size rather than squeezing into the zoomed area.
 - **Every drawing tool is on screen.** Phones show pen, eraser, size, undo,
-  redo, clear, and all 12 colors without a sideways scroll: two rows under
-  the canvas in portrait, a narrow tool panel beside it in landscape. Nothing
-  floats over the drawer's paper, so every corner can be drawn on.
+  redo, clear, and all 12 colors without a sideways scroll: a tool row and
+  two rows of six colors under the canvas in portrait, a tool panel beside it
+  in landscape. Each color is a 40 px or larger target, so a thumb does not
+  hit the neighbouring one; on the smallest (320 x 568) phones that costs
+  the paper about 6% of its width, and larger phones keep the full-size
+  paper. Nothing floats over the drawer's paper, so every corner can be
+  drawn on. The drawer's word always shows in full on its own line (a long
+  one wraps), with "Draw this · pack" and the difficulty above it.
 - **The whole draft fits.** On phones the three cards are compact rows with
   the difficulty and bonus side by side, so they compare at a glance during
   the 15-second pick; tapping a row picks it and its `?` shows the meaning
   and the "seen it" / "don't know it" swaps. The top bar's countdown is the
   only timer.
 - **Big enough to tap.** Controls are at least 40 px in their smaller
-  dimension (most are 44 px), inline links included ("Log in to save stats",
-  the account page's "Log in" / "Create an account" switch). Compact
+  dimension (most are 44 px), inline links included (the join screen's "Log
+  in" / "sign up" links, the account page's "Log in" / "Create an account"
+  switch). Compact
   keyboard keys are 40 px tall and as wide as ten keys to a row allow, like
   the phone's own keyboard: about 35 px on a 390 px portrait phone. On
   landscape phones the guess sidebar takes the width the drawing does not

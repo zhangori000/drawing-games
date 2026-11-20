@@ -50,22 +50,33 @@ export function WordBanner({
   return (
     <div className={cx(BANNER, 'bg-[#f8ff80]')}>
       <div className="min-w-0 flex-1">
-        <p className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-black/55">
-          Draw this{packName ? ` · ${packName}` : ''}
-        </p>
-        <p className="flex min-w-0 items-center gap-2">
-          <strong
-            data-testid="drawer-word"
-            className="truncate text-xl font-black tracking-[-0.02em] sm:text-2xl"
+        {/* "Draw this · pack" and the difficulty share the first line; the
+            pack name gives way on a narrow banner (it has a tooltip). The
+            word gets a line of its own, so the drawer always reads all of it
+            (a long one wraps) on a 320 px phone or a landscape phone beside
+            the tool panel, and the banner keeps one height for any word. */}
+        <div className="flex min-w-0 items-center gap-2">
+          <p
+            className="min-w-0 truncate font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-black/55"
+            title={packName ?? undefined}
           >
-            {term}
-          </strong>
+            Draw this{packName ? ` · ${packName}` : ''}
+          </p>
+          {/* No vertical padding: the two lines fit the banner's usual
+              height, so the paper below keeps its size. */}
           <DifficultyChip
             difficulty={difficulty}
             unrated={unrated}
             showBonus={showBonus}
+            className="py-0!"
           />
-        </p>
+        </div>
+        <strong
+          data-testid="drawer-word"
+          className="block break-words text-xl font-black leading-7 tracking-[-0.02em] sm:text-2xl"
+        >
+          {term}
+        </strong>
         {note ? (
           <p className="truncate text-xs font-semibold text-black/60">{note}</p>
         ) : null}

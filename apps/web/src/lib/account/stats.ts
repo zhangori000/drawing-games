@@ -177,10 +177,19 @@ export function describeWordResult(event: WordHistoryEvent): string {
   if (event.solved === true) {
     const time =
       event.solveMs === null ? '' : ` in ${formatSeconds(event.solveMs)}`
+    if (event.role === 'missed') {
+      // `missed` + solved: a teammate (or bot teammate) got it first. The
+      // points are the team's, not this player's, so say so.
+      const points = event.points === null ? '' : ` · team +${event.points}`
+      return `Teammate got it${time}${points}`
+    }
     const points = event.points === null ? '' : ` · +${event.points}`
     return `Solved${time}${points}`
   }
-  return event.solved === false ? 'Not solved' : EMPTY
+  if (event.solved === false) {
+    return event.role === 'missed' ? 'Nobody got it' : 'Not solved'
+  }
+  return EMPTY
 }
 
 export function formatRelativeTime(atMs: number, nowMs: number): string {

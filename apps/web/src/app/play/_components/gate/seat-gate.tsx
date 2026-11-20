@@ -162,7 +162,7 @@ function JoinForm({
     }
   }
 
-  const accountHref = `/account?next=${encodeURIComponent(`/play/${roomCode}`)}`
+  const next = encodeURIComponent(`/play/${roomCode}`)
 
   return (
     <StatusScreen roomCode={roomCode} title="Join the room">
@@ -254,7 +254,10 @@ function JoinForm({
           </div>
         </fieldset>
 
-        <AccountLine accountHref={accountHref} />
+        <AccountLine
+          loginHref={`/account?mode=login&next=${next}`}
+          signupHref={`/account?mode=signup&next=${next}`}
+        />
 
         <Button type="submit" size="lg" block loading={busy}>
           {busy ? 'Joining…' : 'Join room'}
@@ -264,7 +267,13 @@ function JoinForm({
   )
 }
 
-function AccountLine({ accountHref }: { readonly accountHref: string }) {
+function AccountLine({
+  loginHref,
+  signupHref,
+}: {
+  readonly loginHref: string
+  readonly signupHref: string
+}) {
   const account = useAccount()
   if (account.status === 'loading' && !account.username) {
     return <p className="h-6 animate-pulse rounded-lg bg-black/5" aria-hidden />
@@ -277,14 +286,23 @@ function AccountLine({ accountHref }: { readonly accountHref: string }) {
     )
   }
   return (
-    <p className="rounded-2xl border-2 border-dashed border-black/25 px-4 py-1 text-sm text-black/65">
-      Playing as a guest ·{' '}
-      <Link
-        href={accountHref}
-        className="inline-flex min-h-11 items-center align-middle font-bold text-[#5c4cf2] underline underline-offset-4"
-      >
-        Log in to save stats
-      </Link>
+    // Flex items wrap whole, so on a phone the text takes one line and the
+    // two links (44 px tall) share the next instead of splitting a sentence.
+    <p className="flex flex-wrap items-center gap-x-1.5 rounded-2xl border-2 border-dashed border-black/25 px-4 py-1 text-sm text-black/65">
+      <span className="py-1">Playing as a guest · Save your stats:</span>
+      {/* Each link opens the matching tab of /account. */}
+      <span className="flex items-center gap-x-1.5">
+        <Link href={loginHref} className={ACCOUNT_LINK_CLASS}>
+          Log in
+        </Link>
+        or
+        <Link href={signupHref} className={ACCOUNT_LINK_CLASS}>
+          sign up
+        </Link>
+      </span>
     </p>
   )
 }
+
+const ACCOUNT_LINK_CLASS =
+  'inline-flex min-h-11 items-center align-middle font-bold text-[#5c4cf2] underline underline-offset-4'

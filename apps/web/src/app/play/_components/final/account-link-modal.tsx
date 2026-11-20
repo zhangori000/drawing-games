@@ -3,7 +3,6 @@
 import {
   accountIdFromToken,
   MAX_PASSWORD_LENGTH,
-  passwordSchema,
   usernameSchema,
 } from '@drawing-games/protocol'
 import { useId, useState, type FormEvent } from 'react'
@@ -12,6 +11,12 @@ import { Button } from '@/components/ui/button'
 import { cx } from '@/components/ui/cx'
 import { Modal } from '@/components/ui/modal'
 import { useAccount } from '@/lib/account/account-provider'
+import {
+  USERNAME_MAX_LENGTH,
+  currentPasswordIssue,
+  newPasswordIssue,
+  usernameIssue,
+} from '@/lib/account/form-validation'
 import { readAccountToken } from '@/lib/account/token-store'
 
 import { useRoomSession } from '../room-session'
@@ -82,17 +87,15 @@ function AccountLinkForm({
     if (busy) return
     const name = usernameSchema.safeParse(username)
     if (!name.success) {
-      setError(`Username: ${name.error.issues[0]?.message ?? 'check it'}`)
+      setError(`Username: ${usernameIssue(username) ?? 'check it.'}`)
       return
     }
-    if (mode === 'signup') {
-      const pass = passwordSchema.safeParse(password)
-      if (!pass.success) {
-        setError(`Password: ${pass.error.issues[0]?.message ?? 'check it'}`)
-        return
-      }
-    } else if (!password) {
-      setError('Enter your password.')
+    const passwordError =
+      mode === 'signup'
+        ? newPasswordIssue(password)
+        : currentPasswordIssue(password)
+    if (passwordError) {
+      setError(`Password: ${passwordError}`)
       return
     }
     setBusy(true)
@@ -165,7 +168,7 @@ function AccountLinkForm({
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}
-          maxLength={20}
+          maxLength={USERNAME_MAX_LENGTH}
           className={input}
         />
       </div>
