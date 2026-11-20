@@ -9,6 +9,7 @@ const me = {
   isHost: true,
   role: 'drawer',
   accountId: null,
+  matchCredit: null,
 }
 const match = { number: 1 }
 
@@ -27,7 +28,7 @@ test('the drawer remembers every card shown plus the chosen word, once per round
     tracker.observe(
       draftView([{ wordId: 'animals/cat' }, { wordId: 'food/pizza' }]),
     ),
-  ).toEqual([])
+  ).toEqual({ avoid: [], soft: [] })
   // A replacement swaps one card.
   tracker.observe(
     draftView([{ wordId: 'animals/cat' }, { wordId: 'nature/volcano' }]),
@@ -57,12 +58,59 @@ test('the drawer remembers every card shown plus the chosen word, once per round
       teams: { A: { term: 'cat' }, B: { term: 'kite' } },
     },
   })
-  expect(tracker.observe(results)).toEqual([
-    'animals/cat',
-    'food/pizza',
-    'nature/volcano',
-  ])
-  expect(tracker.observe(results)).toEqual([])
+  // The word they drew is strict memory; the other cards they saw are soft.
+  expect(tracker.observe(results)).toEqual({
+    avoid: ['animals/cat'],
+    soft: ['food/pizza', 'nature/volcano'],
+  })
+  expect(tracker.observe(results)).toEqual({ avoid: [], soft: [] })
+})
+
+test('the drawer named in the results drew the word; one whose turn was taken over did not', () => {
+  const resultsDrawnBy = (drawerId: string) =>
+    makeView({
+      phase: 'round-results',
+      me,
+      match,
+      results: {
+        roundNumber: 2,
+        teams: {
+          A: { term: 'cat', wordId: 'animals/cat', drawerId },
+          B: { term: 'kite', wordId: 'everyday/kite', drawerId: 'cy' },
+        },
+      },
+    })
+  const picked = () => {
+    const tracker = new SeenWordsTracker()
+    tracker.observe(
+      draftView([{ wordId: 'animals/cat' }, { wordId: 'food/pizza' }]),
+    )
+    tracker.observe(
+      makeView({
+        phase: 'drawing',
+        me,
+        match,
+        round: {
+          number: 2,
+          mine: {
+            amDrawer: true,
+            options: null,
+            word: { wordId: 'animals/cat' },
+          },
+        },
+      }),
+    )
+    return tracker
+  }
+  expect(picked().observe(resultsDrawnBy('m1'))).toEqual({
+    avoid: ['animals/cat'],
+    soft: ['food/pizza', 'everyday/kite'],
+  })
+  // Lost connection after picking; a teammate drew it: only seen.
+  expect(picked().observe(resultsDrawnBy('ben'))).toEqual({
+    avoid: [],
+    soft: ['animals/cat', 'food/pizza', 'everyday/kite'],
+  })
 })
 
 test('a guesser records the team word when the results view carries its id', () => {
@@ -80,7 +128,10 @@ test('a guesser records the team word when the results view carries its id', () 
       },
     },
   })
-  expect(tracker.observe(results)).toEqual(['everyday/kite'])
+  expect(tracker.observe(results)).toEqual({
+    avoid: [],
+    soft: ['everyday/kite'],
+  })
 })
 
 test('the other team’s word, revealed in the results, is remembered last', () => {
@@ -100,11 +151,10 @@ test('the other team’s word, revealed in the results, is remembered last', () 
       },
     },
   })
-  expect(tracker.observe(results)).toEqual([
-    'animals/cat',
-    'food/pizza',
-    'fantasy/mermaid',
-  ])
+  expect(tracker.observe(results)).toEqual({
+    avoid: [],
+    soft: ['animals/cat', 'food/pizza', 'fantasy/mermaid'],
+  })
 })
 
 test('a guesser on the other team remembers both revealed words, own first', () => {
@@ -122,5 +172,8 @@ test('a guesser on the other team remembers both revealed words, own first', () 
       },
     },
   })
-  expect(tracker.observe(results)).toEqual(['places/oasis', 'everyday/kite'])
+  expect(tracker.observe(results)).toEqual({
+    avoid: [],
+    soft: ['places/oasis', 'everyday/kite'],
+  })
 })

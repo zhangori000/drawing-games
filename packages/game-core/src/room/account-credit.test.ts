@@ -268,6 +268,124 @@ describe('crediting a match to an account linked late', () => {
     expect(driver.effects).toEqual([])
   })
 
+  it('tells the final screen where the match went, never claiming a save that did not happen', () => {
+    const driver = setup(null)
+    playMatch(driver, 'never')
+    const credit = () => driver.view('cy').me?.matchCredit
+    // A guest who played: nothing saved yet, so signing up would save it.
+    expect(credit()).toEqual({ played: true, savedTo: null })
+    link(driver)
+    expect(credit()).toEqual({ played: true, savedTo: ACCOUNT })
+
+    // Signed out on /me, then into a different account: the match stays
+    // with the first one, and the view says so.
+    link(driver, null)
+    expect(credit()).toEqual({ played: true, savedTo: ACCOUNT })
+    link(driver, 'other-acct')
+    expect(driver.effects).toEqual([])
+    expect(driver.view('cy').me).toMatchObject({
+      accountId: 'other-acct',
+      matchCredit: { played: true, savedTo: ACCOUNT },
+    })
+    expect(accountEffects(driver.history, 'other-acct')).toEqual({
+      words: [],
+      summaries: [],
+    })
+  })
+
+  it('reports a match saved from the start to the account that had it', () => {
+    const driver = setup(ACCOUNT)
+    expect(driver.view('cy').me?.matchCredit).toBeNull()
+    playMatch(driver, 'never')
+    expect(driver.view('cy').me?.matchCredit).toEqual({
+      played: true,
+      savedTo: ACCOUNT,
+    })
+    // Other seats: guests with nothing saved.
+    expect(driver.view('di').me?.matchCredit).toEqual({
+      played: true,
+      savedTo: null,
+    })
+  })
+
+  it('saves nothing for a player who joins after the match and then links', () => {
+    const driver = setup(null)
+    playMatch(driver, 'never')
+    driver.join('late', 'Latecomer', { team: 'A' })
+    expect(driver.view('late').me?.matchCredit).toEqual({
+      played: false,
+      savedTo: null,
+    })
+    driver.ok({
+      type: 'member.link-account',
+      memberId: 'late',
+      accountId: 'late-acct',
+      memory: EMPTY_WORD_MEMORY,
+    })
+    expect(driver.effects).toEqual([])
+    expect(driver.view('late').me).toMatchObject({
+      accountId: 'late-acct',
+      matchCredit: { played: false, savedTo: null },
+    })
+  })
+
+  it('shows the match as saved to a player back on a new seat after it ended', () => {
+    const driver = setup(ACCOUNT)
+    playMatch(driver, 'never')
+    // Cy's tab is gone; back by code on the final screen as a new seat.
+    driver.ok({ type: 'member.leave', memberId: 'cy' })
+    driver.join('cy2', 'Cy', { team: 'B', accountId: ACCOUNT })
+    expect(driver.effects).toEqual([])
+    expect(driver.view('cy2').me?.matchCredit).toEqual({
+      played: true,
+      savedTo: ACCOUNT,
+    })
+    // A guest who joins now has nothing saved, whatever others' seats have.
+    driver.join('eve', 'Eve', { team: 'A' })
+    expect(driver.view('eve').me?.matchCredit).toEqual({
+      played: false,
+      savedTo: null,
+    })
+    expect(accountEffects(driver.history, ACCOUNT).summaries).toHaveLength(1)
+  })
+
+  it('sends the summary once to a seat that signed out before the end and back in after', () => {
+    const driver = setup(ACCOUNT)
+    // Cy plays round 1 signed in, signs out in round 2, and the match ends.
+    driver.pickWords()
+    driver.solve('B', 'di')
+    driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    link(driver, null)
+    while (driver.state.phase !== 'stats') {
+      if (driver.state.phase === 'word-draft') driver.pickWords()
+      else driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    }
+    expect(accountEffects(driver.history, ACCOUNT).summaries).toEqual([])
+    expect(driver.view('cy').me?.matchCredit).toEqual({
+      played: true,
+      savedTo: null,
+    })
+    const wordsBefore = accountEffects(driver.history, ACCOUNT).words
+
+    // Back in on the final screen: the result arrives, the words do not
+    // arrive twice, and a second sign-in sends nothing more.
+    link(driver)
+    expect(driver.effects.map((effect) => effect.type)).toEqual([
+      'account.match',
+    ])
+    expect(accountEffects(driver.history, ACCOUNT).words).toEqual(wordsBefore)
+    expect(driver.view('cy').me?.matchCredit).toEqual({
+      played: true,
+      savedTo: ACCOUNT,
+    })
+    link(driver, null)
+    link(driver, 'other-acct')
+    link(driver)
+    expect(driver.effects).toEqual([])
+    expect(accountEffects(driver.history, ACCOUNT).summaries).toHaveLength(1)
+  })
+
   it('starts a rematch with every account member already credited', () => {
     const driver = setup(null)
     playMatch(driver, 'stats')
@@ -412,7 +530,15 @@ describe('play nobody was there for', () => {
       words: [],
       summaries: [],
     })
+    expect(driver.view('cy').me?.matchCredit).toEqual({
+      played: false,
+      savedTo: null,
+    })
     // Ana, who played, gets hers as usual.
     expect(accountEffects(driver.history, 'ana-acct').summaries).toHaveLength(1)
+    expect(driver.view('ana').me?.matchCredit).toEqual({
+      played: true,
+      savedTo: 'ana-acct',
+    })
   })
 })

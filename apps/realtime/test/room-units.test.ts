@@ -161,16 +161,25 @@ describe('mapMemberCommand', () => {
 
 describe('startingWordMemory', () => {
 	it('merges guest and account memory, newest kept, stored oldest first', () => {
-		const memory = startingWordMemory({ avoid: ['a/1', 'a/2'], soft: ['s/1', 'g/1'] }, ['g/1', 'g/2']);
+		const memory = startingWordMemory({ avoid: ['a/1', 'a/2'], soft: ['s/1', 'g/1'] }, { soft: ['g/1', 'g/2'] });
 		expect(memory).toEqual({ avoid: ['a/2', 'a/1'], soft: ['s/1', 'g/2', 'g/1'] });
+	});
+
+	it("puts a guest browser's drawn and seen-it words in avoid, the rest in soft", () => {
+		const memory = startingWordMemory(null, { avoid: ['d/2', 'd/1'], soft: ['g/1'] });
+		expect(memory).toEqual({ avoid: ['d/1', 'd/2'], soft: ['g/1'] });
+		// Signed in too: the browser's newest drawn words come first.
+		expect(startingWordMemory({ avoid: ['a/1', 'd/1'], soft: [] }, { avoid: ['d/1', 'd/2'] }).avoid).toEqual(['a/1', 'd/2', 'd/1']);
+		expect(startingWordMemory(null)).toEqual({ avoid: [], soft: [] });
 	});
 
 	it('caps each list to the shared limits', () => {
 		const ids = Array.from({ length: WORD_MEMORY_LIMITS.soft + 50 }, (_, index) => `p/w${index}`);
-		const memory = startingWordMemory(null, ids);
+		const memory = startingWordMemory(null, { soft: ids, avoid: ids });
 		expect(memory.soft).toHaveLength(WORD_MEMORY_LIMITS.soft);
 		expect(memory.soft.at(-1)).toBe('p/w0');
-		expect(memory.avoid).toEqual([]);
+		expect(memory.avoid).toHaveLength(WORD_MEMORY_LIMITS.avoid);
+		expect(memory.avoid.at(-1)).toBe('p/w0');
 	});
 });
 

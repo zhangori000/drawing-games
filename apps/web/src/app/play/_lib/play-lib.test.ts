@@ -70,6 +70,7 @@ function lobbyView(members: MemberView[], meId: string | null): RoomView {
           isHost: me.isHost,
           role: 'idle',
           accountId: null,
+          matchCredit: null,
         }
       : null,
     settings: { ...DEFAULT_ROOM_SETTINGS, customWordCount: 0 },

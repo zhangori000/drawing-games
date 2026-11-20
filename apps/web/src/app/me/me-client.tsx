@@ -6,7 +6,7 @@ import { useSyncExternalStore, type ReactNode } from 'react'
 import { Button, buttonClassName } from '@/components/ui/button'
 import { useAccount } from '@/lib/account/account-provider'
 import { lifetimeStatCards } from '@/lib/account/stats'
-import { getRecentWordIds } from '@/lib/word-history'
+import { countRememberedWords } from '@/lib/word-history'
 
 import { ProfileHeader } from './profile-header'
 import { RecentMatches } from './recent-matches'
@@ -179,7 +179,7 @@ function subscribeToStorage(onChange: () => void): () => void {
 }
 
 function countLocalWords(): number {
-  return getRecentWordIds().length
+  return countRememberedWords()
 }
 
 function zero(): number {

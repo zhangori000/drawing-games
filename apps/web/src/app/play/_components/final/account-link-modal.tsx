@@ -19,17 +19,27 @@ import { useRoomSession } from '../room-session'
 type Mode = 'signup' | 'login'
 
 /**
+ * `this-match`: the seat played and nothing is saved yet, so linking saves
+ * the match just played. `next-matches`: the room would not add this match
+ * (the seat did not play it, or it is already saved to another account).
+ */
+export type LinkPurpose = 'this-match' | 'next-matches'
+
+/**
  * Quick account from the final screen: sign up or log in, then link the
- * account to this seat so the room credits this match and records history
- * from now on. The room client confirms the link in a toast; `onLinked`
- * lets the final screen show where the stats went.
+ * account to this seat so the room records history from now on (and, for
+ * `this-match`, credits the match just played). The room client confirms
+ * the link in a toast; `onLinked` lets the final screen show where the
+ * stats went.
  */
 export function AccountLinkModal({
   open,
+  purpose,
   onClose,
   onLinked,
 }: {
   readonly open: boolean
+  readonly purpose: LinkPurpose
   readonly onClose: () => void
   readonly onLinked: () => void
 }) {
@@ -37,8 +47,14 @@ export function AccountLinkModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Keep your stats"
-      description="A username and password — no email. Your word history and stats follow you to every room from now on."
+      title={
+        purpose === 'this-match' ? 'Keep your stats' : 'Save your next matches'
+      }
+      description={
+        purpose === 'this-match'
+          ? 'A username and password — no email. This match and your word history and stats follow you to every room from now on.'
+          : 'A username and password — no email. Your word history and stats follow you to every room from your next match on.'
+      }
     >
       {open ? <AccountLinkForm onCancel={onClose} onLinked={onLinked} /> : null}
     </Modal>

@@ -134,10 +134,20 @@ from correctness. A report is a personalization signal, not proof that a word
 must be deleted globally.
 
 Personal memory follows a player between rooms. An account's history lives on
-the server; a guest's browser keeps the last 300 words it has seen and sends
-them when joining a room, so they are dealt less often. "Seen" means the
-player's team word, every draft card they were dealt as drawer, and the other
-team's word, because round results reveal both words to everyone.
+the server; a guest's browser keeps the same two kinds of memory locally and
+sends them when joining a room:
+
+- words the guest drew (still the drawer when the round ended) or reported
+  "Seen it" on as drawer. Like an account's, these are never dealt to them as
+  drawer again while the pool has a fresh word for the slot;
+- every other word they met: their team's word as a guesser, the other draft
+  cards they were dealt, "Don't know it" swaps, and the other team's word,
+  because round results reveal both words to everyone. These are dealt less
+  often.
+
+The browser keeps the newest 300 of each. A drawer whose turn a teammate
+took over did not draw the word, so it is only "met" for them, as for an
+account.
 
 A seat in a room follows the browser's quick-account sign-in. Signing in
 (in any tab, or with "Create a quick account" on the final screen) links the
@@ -145,10 +155,30 @@ open seat at once and credits the match so far; signing out (in any tab, or
 when the account's session turns out to be expired) unlinks it, so nothing
 more from that room is recorded to the account. A toast says which happened
 ("Saved to @name: this match is in your stats." / "Signed out: this seat no
-longer saves stats."), the lobby's "Stats saved" tag follows, and the final
-screen shows "Stats saved to @name" with a "See your stats" link (opening
-/me in a new tab, so the seat stays for a rematch) in place of the sign-up
-prompt.
+longer saves stats."), and the lobby's "Stats saved" tag follows.
+
+A match is saved to at most one account, and only for a seat that played
+some of it. The final screen and the toast say only what the room actually
+saved, never just "you are signed in":
+
+- Signed in and this account has the match: "Stats saved to @name · this
+  match is in your history." with a "See your stats" link (opening /me in a
+  new tab, so the seat stays for a rematch).
+- A guest who played and has nothing saved: "Create a quick account to keep
+  your stats". Signing up (or logging in) there saves this match.
+- A seat that did not play (it joined after the last round, or was away for
+  all of it) is not promised this match: "Save your next matches" for a
+  guest, "Signed in as @name · You didn't play in this match…" once signed
+  in, and the toast says "your next matches here will be saved." The winner
+  banner says "You didn't play this one. You're in for the rematch." instead
+  of cheering the team.
+- A match already saved to another account stays there: after signing out,
+  the screen says "This match is saved to @first" and offers to log in for
+  the next matches; signing in to a different account says "This match is
+  saved to @first · You're signed in as @second now…", and the toast adds
+  "This one stays saved to @first."
+- A seat that signed out before the match ended and signs back in on the
+  final screen gets the match result then (once), without its words twice.
 
 /me shows every lifetime total the account keeps: matches and win rate,
 points won (team points from the player's own correct guesses), drawings
@@ -388,7 +418,9 @@ drawing, e.g. "Max left the room. You're picking your team's word now." or
 
 A drawer whose turn was taken over has already seen its cards (and maybe the
 word), so when they come back they watch the rest of that turn instead of
-guessing it, and guess as usual from the next turn. For the same reason a
+guessing it, and guess as usual from the next turn. Their guess box says so
+("You saw this word as the drawer. Guess next round!", or "…Guess the next
+one!" for a Showdown card) while their teammates keep guessing. For the same reason a
 takeover only happens when someone else on the team could still guess: in a
 pair (or one player with one practice bot) the turn waits for the drawer.
 

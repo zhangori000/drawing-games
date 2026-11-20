@@ -45,10 +45,13 @@ Draft cards are chosen by a pure, seeded selector in
 5. **Word families.** Cards in a draft, the two teams' cards, and the last
    drawn words must not share a stem (falls back softly on tiny pools).
 6. **Personal memory sources.** Accounts derive memory from server-side
-   history (ADR 0006). Guests keep the last 300 seen word ids in local storage
-   (their team's word, every draft card they were dealt, and the other team's
-   word once round results reveal it) and send them on join as soft memory. Memory is a personalization signal,
-   not authorization, so a client cannot harm anyone else by sending it.
+   history (ADR 0006). Guests keep the same split in local storage, newest
+   300 of each: words they drew or reported "seen it" on as drawer go to
+   `avoid` (stage 1 excludes them, as for an account), every other word they
+   met (their team's word, other draft cards, "don't know it", the other
+   team's word once round results reveal it) goes to `soft`. Both are sent
+   on join. Memory is a personalization signal, not authorization, so a
+   client cannot harm anyone else by sending it.
 
 Guess matching is forgiving about formatting (case, accents, spacing,
 hyphens, punctuation, leading articles, simple plurals, `-ing` ↔ base verb
@@ -71,7 +74,9 @@ guess that merely contains the answer among other words.
 - Small pools (few packs, short custom lists) exhaust room memory sooner; the
   selector then brings back the least recently drawn words, only for the
   slots that need them, instead of failing, and the lobby says so up front.
-- Soft memory from guests is unverifiable and only ever lowers odds.
+- Guest memory is unverifiable. Its `avoid` list only removes words from
+  that guest's own draft cards (and lowers their teammates' odds, like soft
+  memory), so the worst a client can do is make its own drafts staler.
 
 ## Compliance
 

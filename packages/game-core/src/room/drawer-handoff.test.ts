@@ -320,9 +320,16 @@ describe('a drawer who stays disconnected past the reconnect grace', () => {
     expect(driver.view('ana').round?.mine).toMatchObject({
       amDrawer: false,
       canGuess: false,
+      sittingOut: 'former-drawer',
       word: null,
       options: null,
     })
+    // Her teammates guess as usual; only she sits out.
+    expect(driver.view('eve').round?.mine).toMatchObject({
+      canGuess: true,
+      sittingOut: null,
+    })
+    expect(driver.view('ben').round?.mine?.sittingOut).toBeNull()
     expect(
       driver.fail({
         type: 'guess.submit',
@@ -349,7 +356,10 @@ describe('a drawer who stays disconnected past the reconnect grace', () => {
     driver.advanceTo(driver.state.phaseDeadlineAtMs!)
     expect(driver.drawer('A')).toBe('eve')
     driver.pickWords()
-    expect(driver.view('ana').round?.mine?.canGuess).toBe(true)
+    expect(driver.view('ana').round?.mine).toMatchObject({
+      canGuess: true,
+      sittingOut: null,
+    })
   })
 
   it('waits for the drawer when nobody else could guess', () => {
@@ -397,7 +407,11 @@ describe('a drawer who stays disconnected past the reconnect grace', () => {
     expect(
       driver.fail({ type: 'drawing.ops', actorId: 'ana', ops: STROKE }).code,
     ).toBe('NOT_ALLOWED')
-    expect(driver.view('ana').round?.mine?.canGuess).toBe(false)
+    expect(driver.view('ana').round?.mine).toMatchObject({
+      canGuess: false,
+      sittingOut: 'former-drawer',
+    })
+    expect(driver.view('ana').me?.role).toBe('guesser')
     presence(driver, 'ben', true)
     driver.solve('A', 'ben')
     driver.advanceTo(driver.state.phaseDeadlineAtMs!)
@@ -469,6 +483,7 @@ describe('a drawer who stays disconnected past the reconnect grace', () => {
     expect(driver.view(dropped).showdown?.mine).toMatchObject({
       amDrawer: false,
       canGuess: false,
+      sittingOut: 'former-drawer',
       word: null,
     })
     const guesser = ['ana', 'ben', 'eve'].find(
@@ -484,6 +499,7 @@ describe('a drawer who stays disconnected past the reconnect grace', () => {
     expect(driver.view(dropped).showdown?.mine?.canGuess).toBe(
       teamA().drawerId !== dropped,
     )
+    expect(driver.view(dropped).showdown?.mine?.sittingOut).toBeNull()
   })
 
   it('hands the drawing to a practice bot teammate', () => {

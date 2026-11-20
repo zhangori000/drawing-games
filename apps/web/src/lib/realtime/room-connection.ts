@@ -591,17 +591,15 @@ export class RoomConnection {
 
   private buildJoinCommand(params: JoinParams): JoinCommand {
     const accountToken = this.validAccountToken()
-    const recentWordIds = (this.options.getRecentWordIds?.() ?? [])
-      .filter(isRecordableWordId)
-      .slice(0, 300)
+    const history = this.options.getWordHistory?.()
+    const recentWordIds = joinWordIds(history?.soft)
+    const recentAvoidIds = joinWordIds(history?.avoid)
     const command: JoinCommand = {
       type: 'room.join',
       displayName: normalizeDisplayName(params.displayName),
       ...(accountToken ? { accountToken } : {}),
-      ...(recentWordIds.length > 0 &&
-      recentWordIdsSchema.safeParse(recentWordIds).success
-        ? { recentWordIds }
-        : {}),
+      ...(recentWordIds.length > 0 ? { recentWordIds } : {}),
+      ...(recentAvoidIds.length > 0 ? { recentAvoidIds } : {}),
       ...(params.team ? { team: params.team } : {}),
     }
     return command
@@ -1068,4 +1066,16 @@ function syncFallsBack(error: RoomCommandError): boolean {
     error.code !== 'UNAUTHORIZED' &&
     error.code !== 'ROOM_NOT_FOUND'
   )
+}
+
+/**
+ * A word-history list as `room.join` accepts it: valid ids only, at most
+ * 300, or nothing at all (a list the schema would refuse is left out rather
+ * than failing the join).
+ */
+function joinWordIds(ids: readonly string[] | undefined): string[] {
+  const valid = (ids ?? []).filter(isRecordableWordId).slice(0, 300)
+  return valid.length > 0 && recentWordIdsSchema.safeParse(valid).success
+    ? valid
+    : []
 }

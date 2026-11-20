@@ -109,6 +109,27 @@ describe('room handshake', () => {
 		}
 	});
 
+	it("keeps a guest browser's drawn and seen-it words as strict memory, the rest soft", async () => {
+		const roomCode = await createRoom();
+		const ana = await joinRoom(roomCode, 'Ana', {
+			recentWordIds: ['animals/cat', 'food/pizza'],
+			recentAvoidIds: ['nature/volcano', 'animals/cat'],
+		});
+		try {
+			const members = await runInDurableObject(env.GAME_ROOM.getByName(roomCode), (_instance, state) => {
+				const row = state.storage.sql.exec<{ value: string }>(`SELECT value FROM kv WHERE key = 'state.members'`).one();
+				return JSON.parse(row.value) as { memory: { avoid: string[]; soft: string[] } }[];
+			});
+			// Stored oldest first; the newest id (first sent) is last.
+			expect(members[0]?.memory).toEqual({
+				avoid: ['animals/cat', 'nature/volcano'],
+				soft: ['food/pizza', 'animals/cat'],
+			});
+		} finally {
+			ana.close();
+		}
+	});
+
 	it('requires join or resume before any other command', async () => {
 		const roomCode = await createRoom();
 		const client = await RoomSocket.open(roomCode);

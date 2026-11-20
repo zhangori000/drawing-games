@@ -1,7 +1,10 @@
+import type { MatchCreditView } from '@drawing-games/game-core'
 import { expect, test } from 'vitest'
 
 import { ManualTimers } from '../testing/manual-timers'
 import { FakeSocket, ack, makeView } from '../testing/fake-socket'
+import { installMemoryStorage } from '../testing/memory-storage'
+import { getWordHistory } from '../word-history'
 import type { SeatStore } from './connection-types'
 import {
   RoomClient,
@@ -90,8 +93,18 @@ function seatStore(): SeatStore {
   }
 }
 
-/** A seated member's view as the room sends it (plain JSON). */
-function seatedView(accountId: string | null, phase = 'lobby') {
+/**
+ * A seated member's view as the room sends it (plain JSON). On the final
+ * screen the match is saved to the seat's account unless `matchCredit` says
+ * otherwise.
+ */
+function seatedView(
+  accountId: string | null,
+  phase = 'lobby',
+  matchCredit: MatchCreditView | null = phase === 'stats'
+    ? { played: true, savedTo: accountId }
+    : null,
+) {
   return JSON.parse(
     JSON.stringify(
       makeView({
@@ -102,6 +115,7 @@ function seatedView(accountId: string | null, phase = 'lobby') {
           isHost: true,
           role: 'idle',
           accountId,
+          matchCredit,
         },
       }),
     ),
@@ -228,9 +242,40 @@ test('signing in elsewhere links a guest seat, and the sign-up form shares that 
 
   ctx.socket().receive(ack(links[0]!.commandId, links[0]!.clientSeq))
   await expect(explicit).resolves.toBeUndefined()
+  // The toast waits for the room's view of the linked seat (sent right
+  // after the ack), which says where the match went.
+  expect(ctx.toasts()).toEqual([])
+  ctx.socket().receive({
+    type: 'room.snapshot',
+    state: seatedView('mina_42', 'stats'),
+  })
   expect(ctx.toasts()).toContain(
     'Saved to @mina_42: this match is in your stats.',
   )
+})
+
+test('signing in on the final screen after joining late says only the next matches count', async () => {
+  const ctx = accountClient(null)
+  ctx.client.start()
+  ctx.socket().open()
+  const resume = ctx.socket().lastEnvelope()
+  ctx.socket().receive(ack(resume.commandId, resume.clientSeq))
+  ctx.socket().receive({
+    type: 'room.snapshot',
+    state: seatedView(null, 'stats', { played: false, savedTo: null }),
+  })
+
+  ctx.tokens.set(MINA)
+  const [link] = ctx.links()
+  ctx.socket().receive(ack(link!.commandId, link!.clientSeq))
+  ctx.socket().receive({
+    type: 'room.snapshot',
+    state: seatedView('mina_42', 'stats', { played: false, savedTo: null }),
+  })
+  await flushPromises()
+  expect(ctx.toasts()).toEqual([
+    'Signed in as @mina_42: your next matches here will be saved.',
+  ])
 })
 
 test('a refused link is not retried until the seat or the sign-in changes', async () => {
@@ -287,16 +332,49 @@ test('sign-in changes before the seat is bound wait for the handshake, and stop(
   expect(ctx.tokens.listenerCount).toBe(0)
 })
 
-test('account link notices say what changed for the seat', () => {
-  expect(accountLinkNotice(null, makeView())).toBe(
+test('account link notices say what the room recorded for the seat', () => {
+  const notice = (
+    before: string | null,
+    after: string | null,
+    phase = 'lobby',
+    credit?: MatchCreditView | null,
+  ) =>
+    accountLinkNotice(
+      seatedView(before, phase, credit),
+      seatedView(after, phase, credit),
+    )
+  expect(notice('mina_42', null)).toBe(
     'Signed out: this seat no longer saves stats.',
   )
-  expect(accountLinkNotice(MINA, makeView({ phase: 'lobby' }))).toBe(
+  expect(notice(null, 'mina_42')).toBe(
     'Signed in as @mina_42: your matches here will be saved.',
   )
-  expect(accountLinkNotice(MINA, makeView({ phase: 'round-results' }))).toBe(
+  // Mid-match, linking credits the rounds so far and the rest.
+  expect(notice(null, 'mina_42', 'round-results')).toBe(
     'Saved to @mina_42: this match is in your stats.',
   )
+  expect(
+    notice(null, 'mina_42', 'stats', { played: true, savedTo: 'mina_42' }),
+  ).toBe('Saved to @mina_42: this match is in your stats.')
+  // Joined after the match: nothing to save from it.
+  expect(
+    notice(null, 'mina_42', 'stats', { played: false, savedTo: null }),
+  ).toBe('Signed in as @mina_42: your next matches here will be saved.')
+  // Already saved to the account this seat had before.
+  expect(
+    notice(null, 'otto', 'stats', { played: true, savedTo: 'mina_42' }),
+  ).toBe(
+    'Signed in as @otto: your next matches here will be saved. This one stays saved to @mina_42.',
+  )
+
+  // Only a change to this seat's link is announced.
+  const view = seatedView('mina_42', 'stats')
+  expect(accountLinkNotice(view, view)).toBeNull()
+  expect(accountLinkNotice(null, view)).toBeNull()
+  expect(accountLinkNotice(makeView(), view)).toBeNull()
+  const otherSeat = JSON.parse(JSON.stringify(seatedView(null)))
+  otherSeat.me.memberId = 'm0'
+  expect(accountLinkNotice(otherSeat, seatedView('mina_42'))).toBeNull()
 })
 
 /* ------------------------ drawing batches name a canvas ------------------------ */
@@ -345,4 +423,40 @@ test('drawing batches name their canvas, and a stale refusal is dropped quietly'
       .envelopes()
       .filter((envelope) => envelope.command.type === 'drawing.batch'),
   ).toHaveLength(1)
+})
+
+/* ---------------------- guest word memory follows play ---------------------- */
+
+test('a "seen it" swap the room accepts makes the word strict guest memory', async () => {
+  installMemoryStorage()
+  const ctx = accountClient(null)
+  ctx.bind(null, 'word-draft')
+
+  const refused = ctx.client.actions.replaceWord('food/pizza', 'seen-before')
+  const first = ctx.socket().lastEnvelope()
+  ctx.socket().receive({
+    type: 'protocol.error',
+    code: 'NOT_ALLOWED',
+    message: 'No swaps left.',
+    retryable: false,
+    commandId: first.commandId,
+  })
+  await expect(refused).rejects.toThrow('No swaps left.')
+  expect(getWordHistory()).toEqual({ avoid: [], soft: [] })
+
+  const unknown = ctx.client.actions.replaceWord(
+    'animals/axolotl',
+    'unknown-definition',
+  )
+  const second = ctx.socket().lastEnvelope()
+  ctx.socket().receive(ack(second.commandId, second.clientSeq))
+  await unknown
+
+  const seen = ctx.client.actions.replaceWord('animals/cat', 'seen-before')
+  const third = ctx.socket().lastEnvelope()
+  ctx.socket().receive(ack(third.commandId, third.clientSeq))
+  await seen
+  await flushPromises()
+  // "Don't know it" stays soft (it is a draft card the tracker records).
+  expect(getWordHistory()).toEqual({ avoid: ['animals/cat'], soft: [] })
 })

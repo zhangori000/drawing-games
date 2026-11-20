@@ -62,6 +62,7 @@ export function startMatch(ctx: RoomContext): void {
     withBots: members.some((member) => member.kind === 'bot'),
     guessLimits: {},
     creditedMemberIds: initialCreditedMemberIds(members),
+    summaryAccountIds: {},
   }
   patchState(ctx, { match })
   startRound(ctx)

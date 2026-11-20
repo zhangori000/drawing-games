@@ -8,7 +8,11 @@ import {
 
 import { readAccountToken, subscribeAccountToken } from '../account/token-store'
 import { rememberDisplayName } from '../identity'
-import { getRecentWordIds, recordWordIds } from '../word-history'
+import {
+  getWordHistory,
+  isRecordableWordId,
+  recordWordHistory,
+} from '../word-history'
 import { CanvasStore } from './canvas-store'
 import { RoomCommandError, isRoomCommandError } from './command-error'
 import { GuessPacer } from './guess-pacer'
@@ -106,7 +110,7 @@ const browserAccountTokens: AccountTokenSource = {
 
 export type RoomClientConnectionOptions = Omit<
   RoomConnectionOptions,
-  'roomCode' | 'getAccountToken' | 'getRecentWordIds'
+  'roomCode' | 'getAccountToken' | 'getWordHistory'
 > & {
   readonly accountTokens?: AccountTokenSource
 }
@@ -215,7 +219,7 @@ export class RoomClient {
       ...this.connectionOptions,
       roomCode: this.roomCode,
       getAccountToken: () => this.accountTokens.read(),
-      getRecentWordIds,
+      getWordHistory,
     })
     this.connection = connection
     const offState = connection.subscribe(() => this.syncConnectionState())
@@ -255,11 +259,12 @@ export class RoomClient {
     const previousView = this.snapshot.view
     let handoff: string | null = null
     let autoPick: string | null = null
+    let accountNotice: string | null = null
     if (state.view && state.view !== previousView) {
-      const ids = this.seenWords.observe(state.view)
-      if (ids.length > 0) recordWordIds(ids)
+      recordWordHistory(this.seenWords.observe(state.view))
       handoff = drawerHandoffNotice(previousView, state.view)
       autoPick = autoPickNotice(previousView, state.view)
+      accountNotice = accountLinkNotice(previousView, state.view)
     }
     if (
       state.status === 'open' &&
@@ -278,6 +283,8 @@ export class RoomClient {
     if (handoff) this.pushToast(handoff, 'info')
     // "Time's up! We picked paper shredder (Hard +40) for you."
     if (autoPick) this.pushToast(autoPick, 'info')
+    // "Saved to @mina: this match is in your stats.", once the room says so.
+    if (accountNotice) this.pushToast(accountNotice, 'info')
     this.syncAccountLink()
   }
 
@@ -308,8 +315,10 @@ export class RoomClient {
   /**
    * Sends `account.link`, sharing a request already in flight for the same
    * token (signing up on the final screen both changes the sign-in, which
-   * links automatically, and asks to link). Success is announced in a toast;
-   * failures are left to the caller (the sign-up form shows them inline).
+   * links automatically, and asks to link). The toast comes with the room's
+   * next view of the seat (`accountLinkNotice`), which says where the match
+   * went; failures are left to the caller (the sign-up form shows them
+   * inline).
    */
   private linkAccount(token: string | null): Promise<void> {
     const current = this.accountLink
@@ -323,10 +332,7 @@ export class RoomClient {
     const settle = () => {
       if (this.accountLink === request) this.accountLink = null
     }
-    promise.then(() => {
-      settle()
-      this.pushToast(accountLinkNotice(token, this.snapshot.view), 'info')
-    }, settle)
+    promise.then(settle, settle)
     return promise
   }
 
@@ -455,8 +461,18 @@ export class RoomClient {
         this.run({ type: 'lobby.member.remove', memberId }),
       start: () => this.run({ type: 'match.start' }),
       selectWord: (optionId) => this.run({ type: 'draft.select', optionId }),
-      replaceWord: (optionId, reason) =>
-        this.run({ type: 'draft.replace', optionId, reason }),
+      replaceWord: (optionId, reason) => {
+        const promise = this.run({ type: 'draft.replace', optionId, reason })
+        // "Seen it" as drawer, once the room accepts it: like an account's
+        // report, this browser is not dealt the word as drawer again.
+        if (reason === 'seen-before' && isRecordableWordId(optionId)) {
+          promise.then(
+            () => recordWordHistory({ avoid: [optionId] }),
+            () => {},
+          )
+        }
+        return promise
+      },
       guess: (text) => {
         const promise = this.guessPacer.submit(text)
         promise.catch(() => {})
@@ -477,18 +493,37 @@ export class RoomClient {
 }
 
 /** What changed for the seat once the room accepted an `account.link`. */
+/**
+ * The toast for a change in this seat's account link, read from two
+ * consecutive views of the same seat (null when the link did not change).
+ * It says only what the room recorded: on the final screen, whether this
+ * account got the match (`me.matchCredit`), or that only the next matches
+ * count because the seat did not play it or another account already has it.
+ */
 export function accountLinkNotice(
-  token: string | null,
-  view: RoomView | null,
-): string {
-  const username = token === null ? null : accountIdFromToken(token)
+  previous: RoomView | null,
+  next: RoomView,
+): string | null {
+  const before = previous?.me
+  const after = next.me
+  if (!before || !after || before.memberId !== after.memberId) return null
+  if (before.accountId === after.accountId) return null
+  const username = after.accountId
   if (username === null) {
     return 'Signed out: this seat no longer saves stats.'
   }
-  // Linking during a match (or on its final screen) credits the whole match.
-  return view === null || view.phase === 'lobby'
-    ? `Signed in as @${username}: your matches here will be saved.`
-    : `Saved to @${username}: this match is in your stats.`
+  if (next.phase === 'lobby') {
+    return `Signed in as @${username}: your matches here will be saved.`
+  }
+  // During a match, linking credits the rounds so far and the rest of it.
+  const credit = after.matchCredit ?? null
+  if (credit === null || credit.savedTo === username) {
+    return `Saved to @${username}: this match is in your stats.`
+  }
+  const nextOnly = `Signed in as @${username}: your next matches here will be saved.`
+  return credit.savedTo === null
+    ? nextOnly
+    : `${nextOnly} This one stays saved to @${credit.savedTo}.`
 }
 
 /** The canvas this member may draw on right now, per the room's view. */

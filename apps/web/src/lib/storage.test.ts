@@ -14,9 +14,11 @@ import {
 } from './realtime/rooms-api'
 import { installMemoryStorage } from './testing/memory-storage'
 import {
+  LEGACY_WORD_HISTORY_KEY,
   WORD_HISTORY_KEY,
-  getRecentWordIds,
-  recordWordIds,
+  countRememberedWords,
+  getWordHistory,
+  recordWordHistory,
 } from './word-history'
 
 const TOKEN_A = 'token-aaaaaaaaaaaaaaaaaaaa'
@@ -101,21 +103,60 @@ test('tab session id is opaque, protocol-safe, and stable per tab', () => {
 
 test('word history keeps 300 newest valid ids without duplicates', () => {
   const { local } = installMemoryStorage()
-  recordWordIds(['animals/cat', 'food/pizza'])
-  recordWordIds(['animals/cat', 'Bad Id', 'nature/volcano'])
-  expect(getRecentWordIds()).toEqual([
-    'animals/cat',
-    'nature/volcano',
-    'food/pizza',
-  ])
+  recordWordHistory({ soft: ['animals/cat', 'food/pizza'] })
+  recordWordHistory({ soft: ['animals/cat', 'Bad Id', 'nature/volcano'] })
+  expect(getWordHistory()).toEqual({
+    avoid: [],
+    soft: ['animals/cat', 'nature/volcano', 'food/pizza'],
+  })
 
-  recordWordIds(Array.from({ length: 400 }, (_, index) => `pack/word-${index}`))
-  const ids = getRecentWordIds()
-  expect(ids).toHaveLength(300)
-  expect(ids[0]).toBe('pack/word-0')
+  const many = Array.from({ length: 400 }, (_, index) => `pack/word-${index}`)
+  recordWordHistory({ soft: many, avoid: many })
+  const history = getWordHistory()
+  expect(history.avoid).toHaveLength(300)
+  expect(history.avoid[0]).toBe('pack/word-0')
+  // Soft never repeats an avoided word, and still keeps up to 300.
+  expect(history.soft.some((id) => history.avoid.includes(id))).toBe(false)
+  expect(history.soft[0]).toBe('pack/word-300')
 
   local.setItem(WORD_HISTORY_KEY, '{not json')
-  expect(getRecentWordIds()).toEqual([])
+  expect(getWordHistory()).toEqual({ avoid: [], soft: [] })
+})
+
+test('words a guest drew or reported "seen it" stay strict when met again', () => {
+  installMemoryStorage()
+  recordWordHistory({ soft: ['food/pizza', 'animals/cat'] })
+  // Drew the cat: it moves from soft to avoid.
+  recordWordHistory({ avoid: ['animals/cat'], soft: ['nature/volcano'] })
+  // Seen again later as the other team's word: still avoided.
+  recordWordHistory({ soft: ['animals/cat'] })
+  expect(getWordHistory()).toEqual({
+    avoid: ['animals/cat'],
+    soft: ['nature/volcano', 'food/pizza'],
+  })
+  expect(countRememberedWords()).toBe(3)
+})
+
+test('a v1 history (one soft list) moves into v2 once', () => {
+  const { local } = installMemoryStorage()
+  local.setItem(
+    LEGACY_WORD_HISTORY_KEY,
+    JSON.stringify(['animals/cat', 'BAD', 'food/pizza']),
+  )
+  expect(getWordHistory()).toEqual({
+    avoid: [],
+    soft: ['animals/cat', 'food/pizza'],
+  })
+  expect(local.getItem(LEGACY_WORD_HISTORY_KEY)).toBeNull()
+  expect(JSON.parse(local.getItem(WORD_HISTORY_KEY) ?? 'null')).toEqual({
+    avoid: [],
+    soft: ['animals/cat', 'food/pizza'],
+  })
+  recordWordHistory({ avoid: ['food/pizza'] })
+  expect(getWordHistory()).toEqual({
+    avoid: ['food/pizza'],
+    soft: ['animals/cat'],
+  })
 })
 
 test('room code input is trimmed, uppercased, and stripped of spaces/dashes', () => {

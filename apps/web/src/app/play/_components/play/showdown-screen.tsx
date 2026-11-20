@@ -7,6 +7,7 @@ import { useDrawingTools } from '@/components/drawing/use-drawing-tools'
 import { GuessDock } from '@/components/guess/guess-dock'
 import { cx } from '@/components/ui/cx'
 
+import { showdownGuessClosedReason } from '../../_lib/guess-closed'
 import { useRoomSession } from '../room-session'
 import { DrawerCanvas, ReadOnlyCanvas } from '../shared/room-canvas'
 import { BannerDetail, NoteBanner, WordBanner } from './banners'
@@ -122,13 +123,7 @@ export function ShowdownScreen({
                   status={opponentStatus}
                 />
               }
-              disabledReason={
-                mine.canGuess
-                  ? null
-                  : mine.finished
-                    ? 'Your team is done. Cheer them on!'
-                    : 'Guessing is closed.'
-              }
+              disabledReason={showdownGuessClosedReason(mine)}
             />
           </div>
         )

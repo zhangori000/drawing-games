@@ -296,7 +296,10 @@ export class GameRoom extends DurableObject<Env> {
 				memberId,
 				displayName: command.displayName,
 				accountId: account?.accountId ?? null,
-				memory: startingWordMemory(account?.memory ?? null, command.recentWordIds ?? []),
+				memory: startingWordMemory(account?.memory ?? null, {
+					soft: command.recentWordIds ?? [],
+					avoid: command.recentAvoidIds ?? [],
+				}),
 				...(command.team === undefined ? {} : { preferredTeam: command.team }),
 			},
 			Date.now(),
@@ -355,7 +358,7 @@ export class GameRoom extends DurableObject<Env> {
 				type: 'member.link-account',
 				memberId: member.id,
 				accountId: account.accountId,
-				memory: startingWordMemory(account.memory, []),
+				memory: startingWordMemory(account.memory),
 			});
 		}
 		const { state: next, effects } = applyServerCommands(prev, commands, Date.now());
@@ -404,7 +407,7 @@ export class GameRoom extends DurableObject<Env> {
 				type: 'member.link-account',
 				memberId,
 				accountId: account?.accountId ?? null,
-				memory: account === null ? EMPTY_WORD_MEMORY : startingWordMemory(account.memory, []),
+				memory: account === null ? EMPTY_WORD_MEMORY : startingWordMemory(account.memory),
 			};
 		}
 

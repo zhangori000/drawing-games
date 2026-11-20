@@ -11,6 +11,7 @@ import {
 } from '../scoring'
 import type { TeamId, TeamScores } from '../types'
 import { otherTeam } from '../types'
+import { matchCreditFor } from './account-effects'
 import { lobbyBlockers } from './lobby'
 import {
   activeMembers,
@@ -162,6 +163,7 @@ function meView(viewer: Viewer): MeView | null {
         ? 'guesser'
         : 'idle',
     accountId: member.accountId,
+    matchCredit: matchCreditFor(state, member),
   }
 }
 
@@ -314,6 +316,9 @@ function myTeamRoundView(
   const settings = state.settings
   const teamRound = round.teams[member.team]
   const amDrawer = teamRound.drawerId === member.id
+  // Held this turn before a takeover: saw the cards, so sits this word out.
+  const formerDrawer =
+    !amDrawer && teamRound.formerDrawerIds?.includes(member.id) === true
   const chosen = chosenOption(teamRound)
   const drawing = state.phase === 'drawing'
   // While opponents see the draft cards, guessers get nothing that tells
@@ -375,11 +380,8 @@ function myTeamRoundView(
             breakdown: solution.breakdown,
           },
     hint: hintView(viewer, round, teamRound),
-    canGuess:
-      drawing &&
-      !amDrawer &&
-      solution === null &&
-      teamRound.formerDrawerIds?.includes(member.id) !== true,
+    canGuess: drawing && !amDrawer && solution === null && !formerDrawer,
+    sittingOut: formerDrawer ? 'former-drawer' : null,
     canDraw: drawing && amDrawer,
   }
 }
@@ -512,6 +514,11 @@ function showdownMineView(
   const teamState = showdown.teams[team]
   const finished = teamState.finishedAtMs !== null
   const amDrawer = member !== null && teamState.drawerId === member.id
+  // Held the active card before a takeover, so may not guess it.
+  const formerDrawer =
+    member !== null &&
+    !amDrawer &&
+    teamState.formerDrawerIds?.includes(member.id) === true
   const card = teamState.cards[teamState.cardIndex]
   return {
     team,
@@ -535,10 +542,8 @@ function showdownMineView(
     canvasId: teamState.canvasId,
     guesses: guessViews(viewer, teamState.guesses, amDrawer),
     finished,
-    canGuess:
-      !finished &&
-      !amDrawer &&
-      !(member !== null && teamState.formerDrawerIds?.includes(member.id)),
+    canGuess: !finished && !amDrawer && !formerDrawer,
+    sittingOut: formerDrawer && !finished ? 'former-drawer' : null,
     canDraw: amDrawer && !finished,
   }
 }

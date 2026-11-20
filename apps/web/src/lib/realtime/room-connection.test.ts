@@ -37,6 +37,7 @@ function setup(
     seats?: MemorySeats
     accountToken?: string | null
     recentWordIds?: string[]
+    recentAvoidIds?: string[]
   } = {},
 ) {
   const timers = new ManualTimers()
@@ -54,7 +55,10 @@ function setup(
     random: () => 0.5,
     lifecycle: null,
     getAccountToken: () => options.accountToken ?? null,
-    getRecentWordIds: () => options.recentWordIds ?? [],
+    getWordHistory: () => ({
+      soft: options.recentWordIds ?? [],
+      avoid: options.recentAvoidIds ?? [],
+    }),
     createSocket: (url) => {
       const socket = new FakeSocket(url)
       sockets.push(socket)
@@ -96,6 +100,7 @@ test('without a seat it waits for join, then binds with session.issued + ack', a
   const ctx = setup({
     accountToken: ACCOUNT,
     recentWordIds: ['animals/cat', 'Animals/Not-Lowercase', 'BAD'],
+    recentAvoidIds: ['BAD', 'space-science/conveyor-belt'],
   })
   ctx.connection.connect()
   expect(ctx.socket().url).toBe(
@@ -125,6 +130,7 @@ test('without a seat it waits for join, then binds with session.issued + ack', a
       team: 'B',
       accountToken: ACCOUNT,
       recentWordIds: ['animals/cat'],
+      recentAvoidIds: ['space-science/conveyor-belt'],
     },
   })
   expect(envelope.commandId).toMatch(/^[A-Za-z0-9_-]+$/)

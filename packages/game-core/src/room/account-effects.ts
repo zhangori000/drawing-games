@@ -16,6 +16,7 @@ import type {
 import { chosenOption } from './selectors'
 import type {
   DraftOption,
+  MatchCreditView,
   MatchState,
   RoomMember,
   RoomState,
@@ -296,11 +297,14 @@ export function emitMatchSummaries(ctx: RoomContext, match: MatchState): void {
     if (seats === undefined) seatsByAccount.set(member.accountId, [member])
     else seats.push(member)
   }
+  const sentTo: Record<string, string> = {}
   for (const [accountId, seats] of seatsByAccount) {
     // Members are in join order, so the last summary is the latest seat's.
     const summaries = seats.flatMap((seat) => {
       const summary = matchSummaryFor(ctx, match, seat)
-      return summary === null ? [] : [summary]
+      if (summary === null) return []
+      sentTo[seat.id] = accountId
+      return [summary]
     })
     const latest = summaries.at(-1)
     if (latest === undefined) continue
@@ -313,6 +317,10 @@ export function emitMatchSummaries(ctx: RoomContext, match: MatchState): void {
       summary: { ...latest, stats },
     })
   }
+  updateMatch(ctx, (current) => ({
+    ...current,
+    summaryAccountIds: { ...current.summaryAccountIds, ...sentTo },
+  }))
 }
 
 /**
@@ -372,11 +380,43 @@ export function initialCreditedMemberIds(
 }
 
 /**
+ * The account that received this seat's summary of an ended match, or null.
+ * Matches stored before `summaryAccountIds` existed sent a summary to every
+ * credited seat that took part, to its account at the time.
+ */
+function summaryAccountOf(
+  match: MatchState,
+  member: RoomMember,
+): string | null {
+  const sent = match.summaryAccountIds
+  if (sent !== undefined) return sent[member.id] ?? null
+  return isCredited(match, member.id) && tookPart(match, member)
+    ? member.accountId
+    : null
+}
+
+/**
+ * Whether this seat's summary of an ended match is already settled: sent to
+ * an account, or (in a match stored before `summaryAccountIds`) credited the
+ * old way, which never sent one later.
+ */
+function summarySettled(match: MatchState, member: RoomMember): boolean {
+  if (match.summaryAccountIds === undefined) return isCredited(match, member.id)
+  return match.summaryAccountIds[member.id] !== undefined
+}
+
+/**
  * A member just linked an account. If none of their play in the current (or
  * just-finished, during `stats`) match has reached an account yet, credit it
- * now, once: the word events of every round and showdown card so far and, if
- * the match is over, its summary. Later rounds reach the account as usual.
- * Linking again, or another account later, never re-credits the match.
+ * now, once: the word events of every round and showdown card so far. Later
+ * rounds reach the account as usual. Linking again, or another account
+ * later, never re-credits those words.
+ *
+ * On the final screen, the match summary also goes to the account just
+ * linked if no account has it yet and the seat took part: a guest who signs
+ * up there, or a seat that signed out before the match ended and back in
+ * now. A summary already sent (to this or another account) is never sent
+ * again, and a seat with no play in the match has none to send.
  */
 export function creditLinkedMember(ctx: RoomContext, memberId: string): void {
   const match = ctx.state.match
@@ -384,12 +424,47 @@ export function creditLinkedMember(ctx: RoomContext, memberId: string): void {
   const member = findMember(ctx.state, memberId)
   if (member === undefined || member.kind !== 'human') return
   const accountId = member.accountId
-  if (accountId === null || isCredited(match, memberId)) return
-  markMatchCredited(ctx, memberId)
-
-  const events = memberMatchEvents(ctx.state, match, member)
-  if (events.length > 0) emit(ctx, { type: 'account.words', accountId, events })
-  if (match.endedAtMs === null) return
+  if (accountId === null) return
+  if (!isCredited(match, memberId)) {
+    markMatchCredited(ctx, memberId)
+    const events = memberMatchEvents(ctx.state, match, member)
+    if (events.length > 0) {
+      emit(ctx, { type: 'account.words', accountId, events })
+    }
+  }
+  if (match.endedAtMs === null || summarySettled(match, member)) return
   const summary = matchSummaryFor(ctx, match, member)
-  if (summary !== null) emit(ctx, { type: 'account.match', accountId, summary })
+  if (summary === null) return
+  emit(ctx, { type: 'account.match', accountId, summary })
+  updateMatch(ctx, (current) => ({
+    ...current,
+    summaryAccountIds: { ...current.summaryAccountIds, [memberId]: accountId },
+  }))
+}
+
+/**
+ * What the final screen may say about this seat's finished match (`stats`
+ * only; null in every other phase).
+ */
+export function matchCreditFor(
+  state: RoomState,
+  member: RoomMember,
+): MatchCreditView | null {
+  const match = state.match
+  if (state.phase !== 'stats' || match === null || match.endedAtMs === null) {
+    return null
+  }
+  const own = summaryAccountOf(match, member)
+  if (own !== null) return { played: tookPart(match, member), savedTo: own }
+  // A player who left mid-match and is back on a new seat: their account
+  // has the match through the earlier seat, so this one played it too.
+  const account = member.accountId
+  const viaOtherSeat =
+    account !== null &&
+    Object.entries(match.summaryAccountIds ?? {}).some(
+      ([seatId, sentTo]) => seatId !== member.id && sentTo === account,
+    )
+  return viaOtherSeat
+    ? { played: true, savedTo: account }
+    : { played: tookPart(match, member), savedTo: null }
 }

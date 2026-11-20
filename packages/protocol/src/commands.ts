@@ -87,11 +87,20 @@ export const resumeCommandSchema = z.strictObject({
   accountToken: opaqueTokenSchema.optional(),
 })
 
+/**
+ * `recentWordIds`: word ids this browser met recently (dealt less often to
+ * this player as drawer). `recentAvoidIds`: the stricter subset it drew or
+ * reported as "seen it", newest first, which this player is not dealt again
+ * as drawer while fresh words remain, like an account's history. Both only
+ * shape the joining player's own cards (and their teammates' drafts a
+ * little), so the room can take them on trust.
+ */
 export const joinCommandSchema = z.strictObject({
   type: z.literal('room.join'),
   displayName: z.string().trim().min(1).max(32),
   accountToken: opaqueTokenSchema.optional(),
   recentWordIds: recentWordIdsSchema.optional(),
+  recentAvoidIds: recentWordIdsSchema.optional(),
   team: teamIdSchema.optional(),
 })
 

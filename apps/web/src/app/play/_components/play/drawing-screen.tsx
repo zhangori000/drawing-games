@@ -7,6 +7,7 @@ import { useDrawingTools } from '@/components/drawing/use-drawing-tools'
 import { GuessDock } from '@/components/guess/guess-dock'
 
 import { plural } from '../../_lib/format'
+import { roundGuessClosedReason } from '../../_lib/guess-closed'
 import { useRoomSession } from '../room-session'
 import { DrawerCanvas, ReadOnlyCanvas } from '../shared/room-canvas'
 import { SolvedBanner, WordBanner } from './banners'
@@ -136,13 +137,7 @@ export function DrawingScreen({ round }: { readonly round: RoundView }) {
                   status={opponentStatus}
                 />
               }
-              disabledReason={
-                mine.canGuess
-                  ? null
-                  : mine.solved
-                    ? `Solved! Now watch ${opponentName} scramble.`
-                    : 'Guessing is closed.'
-              }
+              disabledReason={roundGuessClosedReason(mine, opponentName)}
             />
           </div>
         )

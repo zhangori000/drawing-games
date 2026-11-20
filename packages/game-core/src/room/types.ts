@@ -285,6 +285,13 @@ export interface MatchState {
    * their earlier rounds are credited). Linking again never re-credits.
    */
   readonly creditedMemberIds?: readonly string[]
+  /**
+   * Internal. memberId -> the account that received this seat's match
+   * summary (`account.match`): set when the match ends, or when a seat
+   * links an account on the final screen. A seat's summary goes out at most
+   * once. Absent in matches stored before it existed.
+   */
+  readonly summaryAccountIds?: Readonly<Record<string, string>>
 }
 
 /** Internal rate-limit counter; resets whenever `scope` (a canvas id) changes. */
@@ -603,6 +610,28 @@ export interface MeView {
   /** Role in the current round/showdown card; `idle` outside play. */
   readonly role: 'drawer' | 'guesser' | 'idle'
   readonly accountId: string | null
+  /** On the final screen (`stats`) only; null in every other phase. */
+  readonly matchCredit: MatchCreditView | null
+}
+
+/**
+ * Where the finished match went for this seat, so the final screen only
+ * says "saved" when an account really has it.
+ */
+export interface MatchCreditView {
+  /**
+   * The seat played some of the match: was there for a finished round, or
+   * guessed, or drew or solved a Showdown card. A seat that joined after the
+   * last round (or was away for all of it) has nothing to save.
+   */
+  readonly played: boolean
+  /**
+   * The account that has this match (its result and stats), or null when
+   * none does yet. It can differ from `accountId`: a seat whose match was
+   * saved to one account and then signed in to another keeps it on the
+   * first, since a match is never saved twice.
+   */
+  readonly savedTo: string | null
 }
 
 export interface MemberView {
@@ -765,8 +794,17 @@ export interface MyTeamRoundView {
   } | null
   readonly hint: HintView
   readonly canGuess: boolean
+  /**
+   * Why the viewer may not guess this word although teammates can, so the
+   * screen can say so: `former-drawer` held this turn before a takeover and
+   * saw the cards. Null otherwise (including for the drawer).
+   */
+  readonly sittingOut: SitOutReason | null
   readonly canDraw: boolean
 }
+
+/** See `MyTeamRoundView.sittingOut`. */
+export type SitOutReason = 'former-drawer'
 
 export interface OpponentRoundView {
   readonly team: TeamId
@@ -865,6 +903,8 @@ export interface ShowdownMineView {
   readonly guesses: readonly GuessView[]
   readonly finished: boolean
   readonly canGuess: boolean
+  /** Like `MyTeamRoundView.sittingOut`, for the active card. */
+  readonly sittingOut: SitOutReason | null
   readonly canDraw: boolean
 }
 

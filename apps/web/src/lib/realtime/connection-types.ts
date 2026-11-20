@@ -123,8 +123,14 @@ export interface RoomConnectionOptions {
   readonly roomCode: string
   /** Quick-account bearer token to send on join/resume, if signed in. */
   readonly getAccountToken?: () => string | null
-  /** Guest word history sent on join. */
-  readonly getRecentWordIds?: () => readonly string[]
+  /**
+   * This browser's word history sent on join, newest first: `avoid` (words
+   * it drew or reported "seen it") and `soft` (the rest it met).
+   */
+  readonly getWordHistory?: () => {
+    readonly avoid: readonly string[]
+    readonly soft: readonly string[]
+  }
   readonly createSocket?: (url: string) => WebSocketLike
   readonly socketUrl?: (roomCode: string, sessionId: string) => string
   readonly seats?: SeatStore

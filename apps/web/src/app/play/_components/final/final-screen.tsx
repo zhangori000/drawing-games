@@ -10,24 +10,38 @@ import {
 } from '@drawing-games/game-core'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react'
 
 import { Button, buttonClassName } from '@/components/ui/button'
 import { cx } from '@/components/ui/cx'
 import { TEAM_COLORS, TEAM_SYMBOLS } from '@/components/ui/team-badge'
 
+import {
+  finalAccountStatus,
+  playedFinishedMatch,
+  type FinalAccountStatus,
+} from '../../_lib/account-status'
 import { formatSeconds, plural } from '../../_lib/format'
 import { useRoomSession } from '../room-session'
 import { DifficultyChip } from '../shared/difficulty-chip'
 import { Eyebrow, ScrollPane } from '../shared/layout'
 import { CanvasThumb } from '../shared/room-canvas'
-import { AccountLinkModal } from './account-link-modal'
+import { AccountLinkModal, type LinkPurpose } from './account-link-modal'
 import { StatsTable } from './stats-table'
 
 /** Match recap: winner, the numbers behind it, every round, and what next. */
 export function FinalScreen({ final }: { readonly final: FinalView }) {
   const { me } = useRoomSession()
-  const [linking, setLinking] = useState(false)
+  const status = finalAccountStatus(me)
+  // What the dialog offers, fixed when it opens: the status changes as soon
+  // as the link lands, while the dialog is still closing.
+  const [linking, setLinking] = useState<LinkPurpose | null>(null)
   const [justLinked, setJustLinked] = useState(false)
 
   return (
@@ -36,26 +50,15 @@ export function FinalScreen({ final }: { readonly final: FinalView }) {
         <div className="mx-auto grid w-full max-w-5xl gap-5 px-3 py-4 sm:px-5 sm:py-6">
           <WinnerBanner final={final} />
           <Facts final={final} />
-          {me.accountId === null ? (
-            <section
-              data-testid="account-prompt"
-              className="grid gap-3 rounded-3xl border-2 border-[#181713] bg-[#ded9ff] p-4 sm:flex sm:items-center"
-            >
-              <p className="min-w-0 flex-1 text-sm leading-6">
-                <strong className="block text-base font-black">
-                  Create a quick account to keep your stats
-                </strong>
-                Username and password only — no email. From then on your word
-                history and match stats follow you, and you won’t be offered
-                words you’ve already drawn.
-              </p>
-              <Button variant="primary" onClick={() => setLinking(true)}>
-                Create a quick account
-              </Button>
-            </section>
-          ) : (
-            <StatsSaved username={me.accountId} focusLink={justLinked} />
-          )}
+          <AccountStatusPanel
+            status={status}
+            focusAfterLink={justLinked}
+            onLink={() =>
+              setLinking(
+                status.kind === 'can-save' ? 'this-match' : 'next-matches',
+              )
+            }
+          />
           <section aria-labelledby="stats-heading" className="grid gap-2">
             <h3
               id="stats-heading"
@@ -74,10 +77,11 @@ export function FinalScreen({ final }: { readonly final: FinalView }) {
       </ScrollPane>
       <FinalActions final={final} />
       <AccountLinkModal
-        open={linking}
-        onClose={() => setLinking(false)}
+        open={linking !== null}
+        purpose={linking ?? 'this-match'}
+        onClose={() => setLinking(null)}
         onLinked={() => {
-          setLinking(false)
+          setLinking(null)
           setJustLinked(true)
         }}
       />
@@ -86,9 +90,150 @@ export function FinalScreen({ final }: { readonly final: FinalView }) {
 }
 
 /**
- * Confirms where this match went once the seat has an account: right after
- * signing up here, or for a player who was signed in all along. /me opens in
- * a new tab so the player keeps their seat for a rematch.
+ * Moves focus to `ref` once the sign-up dialog has closed (and stopped
+ * making the page inert), so keyboard and screen-reader users land on the
+ * result of linking.
+ */
+function useFocusAfterLink(
+  ref: RefObject<HTMLElement | null>,
+  focusAfterLink: boolean,
+): void {
+  useEffect(() => {
+    if (!focusAfterLink) return
+    const id = window.setTimeout(
+      () => ref.current?.focus({ preventScroll: true }),
+      0,
+    )
+    return () => window.clearTimeout(id)
+  }, [focusAfterLink, ref])
+}
+
+const PANEL =
+  'rounded-3xl border-2 border-[#181713] bg-[#ded9ff] p-4 outline-none focus-visible:ring-4 focus-visible:ring-[#5c4cf2]/40'
+
+/**
+ * Says what happened to this match for this seat's account, only as the
+ * room recorded it: saved here, saved to an account the seat had earlier,
+ * or nothing to save (the seat joined after it). A guest who played gets
+ * the offer to keep it.
+ */
+function AccountStatusPanel({
+  status,
+  focusAfterLink,
+  onLink,
+}: {
+  readonly status: FinalAccountStatus
+  /** Just linked from the sign-up dialog: move focus here once it closes. */
+  readonly focusAfterLink: boolean
+  readonly onLink: () => void
+}) {
+  const panelRef = useRef<HTMLElement>(null)
+  useFocusAfterLink(panelRef, focusAfterLink && status.kind !== 'saved')
+  switch (status.kind) {
+    case 'saved':
+      return (
+        <StatsSaved username={status.username} focusLink={focusAfterLink} />
+      )
+    case 'can-save':
+      return (
+        <AccountOffer
+          heading="Create a quick account to keep your stats"
+          onLink={onLink}
+        >
+          Username and password only — no email. It saves this match, and from
+          then on your word history and match stats follow you, and you won’t be
+          offered words you’ve already drawn.
+        </AccountOffer>
+      )
+    case 'saved-elsewhere':
+      return status.username === null ? (
+        <AccountOffer
+          heading={`This match is saved to @${status.savedTo}`}
+          buttonLabel="Log in or sign up"
+          onLink={onLink}
+        >
+          This seat is signed out now. Log in again (or create another quick
+          account) to save your next matches here.
+        </AccountOffer>
+      ) : (
+        <section
+          ref={panelRef}
+          tabIndex={-1}
+          data-testid="stats-saved-elsewhere"
+          aria-label="Where this match is saved"
+          className={cx(PANEL, 'py-3 text-sm leading-6')}
+        >
+          <strong className="font-black">
+            This match is saved to @{status.savedTo}
+          </strong>
+          <span className="text-black/65">
+            {' '}
+            · You’re signed in as @{status.username} now, so your next matches
+            here are saved there.
+          </span>
+        </section>
+      )
+    case 'next-only': {
+      const why = status.played
+        ? 'Nothing from this match was saved.'
+        : 'You didn’t play in this match, so there’s nothing from it to save.'
+      return status.username === null ? (
+        <AccountOffer heading="Save your next matches" onLink={onLink}>
+          {why} A quick account — username and password, no email — keeps your
+          word history and match stats from your next match on.
+        </AccountOffer>
+      ) : (
+        <section
+          ref={panelRef}
+          tabIndex={-1}
+          data-testid="stats-next-only"
+          aria-label="Stats from the next match"
+          className={cx(PANEL, 'py-3 text-sm leading-6')}
+        >
+          <strong className="font-black">
+            Signed in as @{status.username}
+          </strong>
+          <span className="text-black/65">
+            {' '}
+            · {why} Your next matches here will be saved.
+          </span>
+        </section>
+      )
+    }
+  }
+}
+
+function AccountOffer({
+  heading,
+  buttonLabel = 'Create a quick account',
+  onLink,
+  children,
+}: {
+  readonly heading: string
+  readonly buttonLabel?: string
+  readonly onLink: () => void
+  readonly children: ReactNode
+}) {
+  return (
+    <section
+      data-testid="account-prompt"
+      className={cx(PANEL, 'grid gap-3 sm:flex sm:items-center')}
+    >
+      <p className="min-w-0 flex-1 text-sm leading-6">
+        <strong className="block text-base font-black">{heading}</strong>
+        {children}
+      </p>
+      <Button variant="primary" onClick={onLink}>
+        {buttonLabel}
+      </Button>
+    </section>
+  )
+}
+
+/**
+ * Confirms where this match went once the seat's account has it: right
+ * after signing up here, or for a player who was signed in all along. /me
+ * opens in a new tab so the player keeps their seat for a rematch.
  */
 function StatsSaved({
   username,
@@ -99,15 +244,7 @@ function StatsSaved({
   readonly focusLink: boolean
 }) {
   const linkRef = useRef<HTMLAnchorElement>(null)
-  useEffect(() => {
-    if (!focusLink) return
-    // After the dialog has closed (and stopped making the page inert).
-    const id = window.setTimeout(
-      () => linkRef.current?.focus({ preventScroll: true }),
-      0,
-    )
-    return () => window.clearTimeout(id)
-  }, [focusLink])
+  useFocusAfterLink(linkRef, focusLink)
   return (
     <section
       data-testid="stats-saved"
@@ -149,9 +286,11 @@ function WinnerBanner({ final }: { readonly final: FinalView }) {
       ? `${TEAM_NAMES[loser]} surrendered.`
       : winner === null
         ? 'Dead level after every round. Rematch?'
-        : winner === me.team
-          ? 'Your team took it. Nicely drawn.'
-          : 'So close. Run it back?'
+        : !playedFinishedMatch(me)
+          ? 'You didn’t play this one. You’re in for the rematch.'
+          : winner === me.team
+            ? 'Your team took it. Nicely drawn.'
+            : 'So close. Run it back?'
   return (
     <section
       aria-labelledby="final-heading"

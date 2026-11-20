@@ -184,7 +184,9 @@ continues the same cards and swaps, or the same word and canvas, for the
 remaining time; a showdown takeover counts as a card drawn, as for a leave.
 A drawer back within the grace keeps the turn; one back later is recorded in
 `formerDrawerIds` and sits the turn out (no guesses or hint votes on a word
-they saw), guessing again from the next turn; the rotation continues after
+they saw; their views carry `sittingOut: 'former-drawer'` on
+`round.mine` / `showdown.mine` so the guess box can say why), guessing again
+from the next turn; the rotation continues after
 the teammate who took over. In a pair (or one human with one bot) nobody
 would be left to guess, so the turn waits for the drawer. With nobody
 connected the turn stays put, and the first teammate to connect (or join)
@@ -400,6 +402,24 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   or linking a different account never credits the match twice; in the lobby
   nothing is credited. Unlinking (`accountId: null`, what a sign-out sends)
   stops the seat's later rounds and the match summary reaching the account.
+- **Where the summary went.** `match.summaryAccountIds` (internal, memberId
+  → account) records every seat whose `account.match` was sent: at match end
+  (each seat that took part, to the account it had then), or on the final
+  screen when a seat links and no account has its summary yet (a guest who
+  played, or a seat that signed out before the end and back in, which gets
+  the summary but not its words twice). A seat's summary is sent at most
+  once; a seat that did not take part (`tookPart`: there for a finished
+  round, guessed, or drew or solved a Showdown card) has none. Matches
+  stored before the field keep the old rule (credited = settled).
+- **`me.matchCredit`** (final screen only, null in every other phase) is
+  `{ played, savedTo }`: whether the seat took part, and the account that
+  has its summary (`summaryAccountIds`), which may differ from
+  `me.accountId` after a sign-out or an account switch. A player back on a
+  new seat after the match counts as having played it when their account
+  got the summary through an earlier seat. The final screen and
+  the link toast read it, so neither says "saved" for a seat the server
+  credited nothing to (a late joiner) or for an account that does not have
+  the match (a switch after it was saved elsewhere).
 
 ### Practice bots
 
@@ -668,7 +688,17 @@ Non-members get previews during play and full access in results/stats.
 - Per-room `{memberId, resumeToken}` in localStorage; a per-tab marker in
   sessionStorage. A new tab with a saved seat asks "Continue as X" or "Join as
   someone new", which also makes multi-tab local testing easy.
-- Guests keep the last 300 seen word ids locally and send them on join.
+- Guests keep word history locally (`dd.wordHistory.v2`, newest first, 300
+  ids per list; a v1 single list is moved into `soft` once) and send it on
+  join: `recentAvoidIds` = words this browser drew (it was still the drawer
+  named in the round results) or reported "seen it" on (recorded when the
+  room acks the swap), `recentWordIds` = every other word it met. The room
+  puts them in the joining member's `avoid` and `soft` memory, exactly like
+  an account's `drew`/`seen-report` and other roles, so a guest is not dealt
+  their own drawn words again either. Both lists only shape that player's
+  own cards (and their teammates' drafts a little), so they are taken on
+  trust. The realtime server must be deployed before a web build that sends
+  `recentAvoidIds` (the join schema is strict).
 - The account token lives in localStorage and is sent on join/resume. A
   bound `RoomClient` also watches the token store (this tab and, through
   `storage` events, every other tab) and reconciles the seat with it: when
@@ -680,7 +710,10 @@ Non-members get previews during play and full access in results/stats.
   retried until the seat or the token changes), and a request for the same
   token already in flight is shared, so the final screen's sign-up form and
   the automatic link send one command. A seat on another device is not
-  unlinked by signing out here.
+  unlinked by signing out here. The link toast comes from the room's next
+  view of the seat (`me.accountId` changed), not from the ack, so on the
+  final screen it can say what `me.matchCredit` reports: saved here, only the
+  next matches (did not play), or kept by the account that already had it.
 
 ## Tests that must exist
 

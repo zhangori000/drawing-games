@@ -70,6 +70,27 @@ describe('commandEnvelopeV1Schema', () => {
     )
   })
 
+  it("accepts a guest browser's soft and strict word memory on join, capped", () => {
+    const join: ClientCommand = {
+      type: 'room.join',
+      displayName: 'Orien',
+      recentWordIds: ['animals/cat'],
+      recentAvoidIds: ['space-science/conveyor-belt'],
+    }
+    expect(parseCommandEnvelopeV1(envelopeFor(join)).command).toEqual(join)
+    const tooMany = Array.from({ length: 301 }, (_, index) => `p/w${index}`)
+    expect(
+      commandEnvelopeV1Schema.safeParse(
+        envelopeFor({ ...join, recentAvoidIds: tooMany }),
+      ).success,
+    ).toBe(false)
+    expect(
+      commandEnvelopeV1Schema.safeParse(
+        envelopeFor({ ...join, recentAvoidIds: ['Not An Id'] }),
+      ).success,
+    ).toBe(false)
+  })
+
   it('rejects unknown versions, extra fields, and zero client sequence numbers', () => {
     expect(
       commandEnvelopeV1Schema.safeParse({

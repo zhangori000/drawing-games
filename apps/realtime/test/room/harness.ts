@@ -263,6 +263,7 @@ export interface JoinOptions {
 	readonly team?: TeamId;
 	readonly accountToken?: string;
 	readonly recentWordIds?: readonly string[];
+	readonly recentAvoidIds?: readonly string[];
 }
 
 /** Opens a socket and joins; resolves once the seat is issued and acknowledged. */
@@ -274,6 +275,7 @@ export async function joinRoom(roomCode: string, displayName: string, options: J
 		...(options.team === undefined ? {} : { team: options.team }),
 		...(options.accountToken === undefined ? {} : { accountToken: options.accountToken }),
 		...(options.recentWordIds === undefined ? {} : { recentWordIds: [...options.recentWordIds] }),
+		...(options.recentAvoidIds === undefined ? {} : { recentAvoidIds: [...options.recentAvoidIds] }),
 	});
 	const session = await client.domain('session.issued');
 	await client.ack(commandId);
