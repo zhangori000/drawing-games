@@ -26,14 +26,9 @@ import {
 } from './context'
 import { findActiveMember, rememberWords } from './members'
 import { effectiveWordLengthMode } from './settings'
-import {
-  chosenOption,
-  countVotes,
-  majorityNeeded,
-  requireChosen,
-  teamElectorate,
-} from './selectors'
+import { chosenOption, extendLargestLead, requireChosen } from './selectors'
 import type { InkTail, RoomCommand, RoundState } from './types'
+import { hintUnlocksAtMs, hintVotePasses } from './votes'
 import { recordChosenWords, roomPool } from './words'
 
 type Command<T extends RoomCommand['type']> = Extract<RoomCommand, { type: T }>
@@ -250,9 +245,7 @@ export function handleHintVote(
   if (teamRound.hint.revealed) {
     reject('NOT_ALLOWED', 'The length is already revealed.')
   }
-  const unlocksAt =
-    (round.drawingStartedAtMs ?? ctx.now) +
-    ctx.state.settings.hintUnlockSeconds * 1000
+  const unlocksAt = hintUnlocksAtMs(ctx.state) ?? ctx.now
   if (ctx.now < unlocksAt) {
     reject('NOT_ALLOWED', 'The hint vote has not opened yet.')
   }
@@ -261,15 +254,9 @@ export function handleHintVote(
   }
 
   const votes = { ...teamRound.hint.votes, [actor.id]: command.approve }
-  const electorate = teamElectorate(
-    ctx.state,
-    actor.team,
-    teamRound.drawerId,
-    ctx.now,
-    teamRound.formerDrawerIds,
-  )
-  const revealed =
-    countVotes(votes, electorate) >= majorityNeeded(electorate.length)
+  // Votes that pass later, once the electorate shrinks (a teammate leaves
+  // or drops past grace), are revealed as due work (see `votes.ts`).
+  const revealed = hintVotePasses(ctx.state, teamRound, votes, ctx.now)
   updateTeamRound(ctx, actor.team, (current) => ({
     ...current,
     hint: {
@@ -380,10 +367,7 @@ export function endRound(ctx: RoomContext): void {
     A: match.scores.A + points.A + (winner === 'A' ? shutdownBonus : 0),
     B: match.scores.B + points.B + (winner === 'B' ? shutdownBonus : 0),
   }
-  const largestLead = {
-    A: Math.max(match.largestLead.A, scores.A - scores.B),
-    B: Math.max(match.largestLead.B, scores.B - scores.A),
-  }
+  const largestLead = extendLargestLead(match.largestLead, scores)
 
   updateMatch(ctx, (current) => ({
     ...current,

@@ -64,6 +64,11 @@ changes; the game starts only when every connected player marks ready.
 
 ## Teams, rotation, and word choice
 
+Player names must show something: invisible characters (zero-width spaces,
+right-to-left overrides and similar) are stripped, a name left blank becomes
+"Player" in a room, and an account display name that is blank this way is
+refused with "Display names need at least one visible character."
+
 Drawer rotation is independent and round-robin within each team, skipping
 players only after their reconnect grace expires. The turn always passes to
 the next teammate (in join order) after whoever drew last, so a teammate who
@@ -122,6 +127,12 @@ current competitive design.
 The server avoids recently used room words and records seen reports separately
 from correctness. A report is a personalization signal, not proof that a word
 must be deleted globally.
+
+Personal memory follows a player between rooms. An account's history lives on
+the server; a guest's browser keeps the last 300 words it has seen and sends
+them when joining a room, so they are dealt less often. "Seen" means the
+player's team word, every draft card they were dealt as drawer, and the other
+team's word, because round results reveal both words to everyone.
 
 ### Custom words and repeats
 
@@ -187,6 +198,13 @@ Acceptance is behavioral: on supported iPhone and Android sizes, a player can
 focus, type, submit a wrong guess, and type again while the same meaningful
 portion of the drawing remains visible.
 
+Fast guessing never loses a guess. The input clears as soon as a guess is
+sent, so the next one can be typed and sent at once; the game queues them and
+delivers each in order (the room takes one guess per player every 400 ms). A
+guess that still fails to send comes back into an empty input, selected so
+Enter resends it and typing replaces it; if the player is already typing the
+next guess, the status line names the one that did not send.
+
 Phone choices that follow from this (portrait and landscape):
 
 - **The drawing stays the main element while typing.** Touch phones default
@@ -199,7 +217,9 @@ Phone choices that follow from this (portrait and landscape):
   width with the phone keyboard open. A keyboard button next to the input
   switches between the compact and the phone keyboard; a "hide keyboard" key
   tucks the compact keys away to see the drawing larger, and tapping the
-  input brings them back.
+  input brings them back. Nothing covers the keys: the `next dev` route
+  indicator, which sat on Backspace when the owner played from a phone on
+  `pnpm dev`, is turned off.
 - **No zoom on the game surface.** Pinch and double-tap never zoom any play
   screen (join, lobby, draft, drawing, results). Browser and accessibility
   zoom are still allowed for players who need them, and then the layout
@@ -221,6 +241,10 @@ their own word length. More than half of that team's eligible guessers must
 approve; drawers do not vote, ties fail, and each guesser gets one vote. A
 recently disconnected guesser remains in the electorate until the reconnect
 grace expires, preventing a momentary Safari suspension from changing quorum.
+The votes already cast count against whoever is eligible right now: if a
+teammate leaves, drops past the grace, or takes over the drawing, and the yes
+votes already cast are now a majority, the reveal happens at that moment
+without anyone voting again.
 
 A successful reveal displays blanks only to that team and deducts 10 points if
 the team later solves the prompt. The other team's hint state and score are
@@ -304,6 +328,10 @@ a Showdown card hands the turn over the same way, at once (to a teammate
 within their own grace if there is one). The team keeps playing instead of
 waiting out the clock; the other team is unaffected.
 
+Either way the new drawer is told why their screen switched from guessing to
+drawing, e.g. "Max left the room. You're picking your team's word now." or
+"Max lost connection. You're drawing now: same word, same canvas."
+
 A drawer whose turn was taken over has already seen its cards (and maybe the
 word), so when they come back they watch the rest of that turn instead of
 guessing it, and guess as usual from the next turn. For the same reason a
@@ -324,9 +352,11 @@ tab. A minute is meant to survive a locked phone or a brief server restart.
 Surrender is available only during the between-round results phase, after three
 completed rounds, and only to a team trailing by at least 100 points. It requires
 two thirds of that team's eligible voters. A disconnected player remains in the
-electorate during reconnect grace and is excluded only after grace expires. A
-successful surrender ends the match and records the opponent as winner without
-inventing extra points.
+electorate during reconnect grace and is excluded only after grace expires. As
+with the hint vote, yes votes already cast count against the current
+electorate, so a teammate leaving or dropping past the grace can complete a
+surrender without a new vote. A successful surrender ends the match and
+records the opponent as winner without inventing extra points.
 
 The postgame screen offers:
 
@@ -356,7 +386,8 @@ where players can compare the original and relay drawings.
 
 The final page should make different kinds of contribution visible:
 
-- team score, rounds won, comeback points, and largest lead;
+- team score, rounds won, comeback points, and largest lead (the biggest
+  margin a team held after any round or showdown card);
 - successful drawings, median team solve time while drawing, and hard-word
   successes;
 - correct guesses, guess accuracy, median time to correct, and close attempts;

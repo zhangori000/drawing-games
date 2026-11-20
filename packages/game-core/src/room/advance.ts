@@ -12,6 +12,7 @@ import { abandonMatch } from './match'
 import { isMatchRunning } from './selectors'
 import { endShowdown } from './showdown'
 import type { RoomState } from './types'
+import { nextVoteResolution, runVoteResolution } from './votes'
 
 /** Safety valve: a settled room needs far fewer steps than this. */
 const MAX_STEPS_PER_ADVANCE = 100_000
@@ -49,14 +50,17 @@ function abandonDueAtMs(state: RoomState): number | null {
   return anyoneMayReturn ? lastSeen + ABANDON_MATCH_MS : lastSeen
 }
 
-type DueKind = 'deadline' | 'abandon' | 'host' | 'drawer' | 'bot'
+type DueKind = 'deadline' | 'abandon' | 'host' | 'drawer' | 'votes' | 'bot'
 
 interface DueWork {
   readonly kind: DueKind
   readonly atMs: number
 }
 
-/** Earliest pending work; ties go deadline → abandon → host → drawer → bot. */
+/**
+ * Earliest pending work; ties go deadline → abandon → host → drawer →
+ * votes → bot.
+ */
 function nextDueWork(state: RoomState): DueWork | null {
   const candidates: DueWork[] = []
   if (state.phaseDeadlineAtMs !== null) {
@@ -70,6 +74,8 @@ function nextDueWork(state: RoomState): DueWork | null {
   if (takeover !== null) {
     candidates.push({ kind: 'drawer', atMs: takeover.atMs })
   }
+  const vote = nextVoteResolution(state)
+  if (vote !== null) candidates.push({ kind: 'votes', atMs: vote.atMs })
   const bot = state.bots.schedule[0]
   if (bot !== undefined) candidates.push({ kind: 'bot', atMs: bot.atMs })
   let best: DueWork | null = null
@@ -114,7 +120,7 @@ function runHostTransfer(ctx: RoomContext): void {
  * `floorMs` keeps time from running backwards after a command at that time,
  * and work that only became due through earlier work (whose time may have
  * passed) runs at the time it was caused, never earlier.
- * Each processed item is one state change (`seq` + 1).
+ * Each processed item is one state change (`seq` + 1, `changedAtMs`).
  */
 export function runDueWork(
   ctx: RoomContext,
@@ -142,13 +148,18 @@ export function runDueWork(
         if (takeover !== null) runDrawerTakeover(ctx, takeover)
         break
       }
+      case 'votes': {
+        const vote = nextVoteResolution(ctx.state)
+        if (vote !== null) runVoteResolution(ctx, vote)
+        break
+      }
       case 'bot': {
         const item = takeNextBotItem(ctx)
         if (item !== null) runBotItem(ctx, item)
         break
       }
     }
-    patchState(ctx, { seq: ctx.state.seq + 1 })
+    patchState(ctx, { seq: ctx.state.seq + 1, changedAtMs: ctx.now })
   }
   throw new Error('advanceRoom did not settle')
 }

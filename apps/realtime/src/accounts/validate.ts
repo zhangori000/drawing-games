@@ -1,4 +1,5 @@
 import {
+	cleanDisplayName,
 	EMPTY_MEMBER_MATCH_STATS,
 	TEAM_IDS,
 	WORD_DIFFICULTIES,
@@ -103,15 +104,12 @@ export function sanitizeMatchSummary(value: unknown): MatchSummaryRecord | null 
 }
 
 /**
- * Trims, collapses whitespace, strips control characters, and caps length,
- * matching how room member names are cleaned. Returns null when nothing
- * printable is left.
+ * Turns control characters into spaces, then cleans like a room member name
+ * (`cleanDisplayName`: zero-width, bidi and other invisible format
+ * characters stripped, whitespace collapsed, length capped). Returns null
+ * when nothing visible is left, so a name cannot be blank on /me or in a
+ * room.
  */
 export function sanitizeDisplayName(value: string): string | null {
-	const cleaned = value
-		.replace(/\p{Cc}/gu, ' ')
-		.replace(/\s+/g, ' ')
-		.trim();
-	const capped = Array.from(cleaned).slice(0, ACCOUNT_LIMITS.maxDisplayNameLength).join('').trim();
-	return capped.length > 0 ? capped : null;
+	return cleanDisplayName(value.replace(/\p{Cc}/gu, ' '), ACCOUNT_LIMITS.maxDisplayNameLength);
 }

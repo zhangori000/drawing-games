@@ -46,7 +46,8 @@ Draft cards are chosen by a pure, seeded selector in
    drawn words must not share a stem (falls back softly on tiny pools).
 6. **Personal memory sources.** Accounts derive memory from server-side
    history (ADR 0006). Guests keep the last 300 seen word ids in local storage
-   and send them on join as soft memory. Memory is a personalization signal,
+   (their team's word, every draft card they were dealt, and the other team's
+   word once round results reveal it) and send them on join as soft memory. Memory is a personalization signal,
    not authorization, so a client cannot harm anyone else by sending it.
 
 Guess matching is forgiving about formatting (case, accents, spacing,

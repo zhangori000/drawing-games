@@ -103,3 +103,43 @@ test('?next= after signing up never leaves this site', async ({ page }) => {
     '/play/ABCD',
   )
 })
+
+test.describe('phone-sized /me', () => {
+  test.use({ viewport: { width: 390, height: 664 } })
+
+  test('renaming keeps the name field wide and long names wrap', async ({
+    page,
+  }) => {
+    const username = `e2e_rn${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`
+    await page.goto('/account')
+    await page.getByLabel('Username').fill(username)
+    await page.getByLabel('Password').fill('correct-horse-42')
+    await page.getByLabel('Display name (optional)').fill('Renamé Ünicode Long')
+    await page.getByRole('button', { name: 'Create account' }).click()
+    await expect(page).toHaveURL(/\/me$/)
+
+    // The whole name shows (wrapping), never cut off with an ellipsis.
+    const heading = page.getByRole('heading', { name: 'Renamé Ünicode Long' })
+    await expect(heading).toBeVisible()
+    expect(
+      await heading.evaluate((el) => el.scrollWidth <= el.clientWidth),
+    ).toBe(true)
+
+    await page.getByRole('button', { name: 'Edit name' }).click()
+    const field = page.getByLabel('Display name')
+    await expect(field).toBeFocused()
+    const card = await page.locator('section').first().boundingBox()
+    const input = await field.boundingBox()
+    expect(card).not.toBeNull()
+    expect(input).not.toBeNull()
+    // Spans the card (minus its padding), not squeezed beside the buttons.
+    expect(input?.width ?? 0).toBeGreaterThanOrEqual((card?.width ?? 0) - 60)
+
+    await field.fill('Phone Painter')
+    await page.getByRole('button', { name: 'Save' }).click()
+    await expect(
+      page.getByRole('heading', { name: 'Phone Painter' }),
+    ).toBeVisible()
+    await expect(field).toBeHidden()
+  })
+})

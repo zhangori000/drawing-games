@@ -1,8 +1,18 @@
 import { FALLBACK_DISPLAY_NAME, MAX_DISPLAY_NAME_LENGTH } from './constants'
 
-/** C0/C1 controls plus zero-width and bidi-override characters. */
-const INVISIBLE_CHARACTERS =
-  /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g
+/**
+ * Characters that are never shown: C0/C1 controls, format characters (zero
+ * width spaces and joiners, bidi embeddings, overrides and isolates, soft
+ * hyphens, word joiners, tags, the BOM), and line/paragraph separators.
+ */
+const INVISIBLE_CHARACTERS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu
+
+/**
+ * Characters that draw nothing on their own: whitespace, combining marks
+ * (accents, variation selectors), and the blank filler letters (Hangul
+ * fillers, braille blank) that look like empty space.
+ */
+const BLANK_CHARACTERS = /[\s\p{M}\u115f\u1160\u3164\uffa0\u2800]/gu
 
 /** Strips control/invisible characters, collapses whitespace, and trims. */
 export function cleanText(raw: string): string {
@@ -23,10 +33,28 @@ function truncateCodePoints(text: string, max: number): string {
   return points.length <= max ? text : points.slice(0, max).join('').trimEnd()
 }
 
-export function sanitizeDisplayName(raw: unknown): string {
+/** Whether `text` has at least one character that draws something. */
+export function hasVisibleCharacter(text: string): boolean {
+  return text.replace(BLANK_CHARACTERS, '').length > 0
+}
+
+/**
+ * A display name cleaned like any room text and capped at `maxLength` code
+ * points, or null when nothing visible is left (only whitespace, invisible
+ * format characters, marks, or blank fillers). Rooms and accounts share it.
+ */
+export function cleanDisplayName(
+  raw: unknown,
+  maxLength: number = MAX_DISPLAY_NAME_LENGTH,
+): string | null {
   const cleaned = typeof raw === 'string' ? cleanText(raw) : ''
-  const name = truncateCodePoints(cleaned, MAX_DISPLAY_NAME_LENGTH)
-  return name.length > 0 ? name : FALLBACK_DISPLAY_NAME
+  const name = truncateCodePoints(cleaned, maxLength)
+  return hasVisibleCharacter(name) ? name : null
+}
+
+/** A room member name: `cleanDisplayName`, else "Player". */
+export function sanitizeDisplayName(raw: unknown): string {
+  return cleanDisplayName(raw) ?? FALLBACK_DISPLAY_NAME
 }
 
 /**

@@ -695,6 +695,29 @@ describe('showdown relay', () => {
     expect(driver.state.match?.showdownPoints).toEqual({ A: 0, B: 10 })
     expect(driver.state.match?.winner).toBe('B')
   })
+
+  it('counts showdown points toward the largest lead', () => {
+    const driver = startHumanRoom({
+      settings: { rounds: 2, showdownSeconds: 120 },
+    })
+    for (let round = 0; round < 2; round += 1) {
+      driver.pickWords()
+      driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+      driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    }
+    expect(driver.state.phase).toBe('showdown')
+    expect(driver.state.match?.largestLead).toEqual({ A: 0, B: 0 })
+    driver.solve('A')
+    expect(driver.state.match?.largestLead).toEqual({ A: 10, B: 0 })
+    driver.solve('A')
+    driver.advanceTo(driver.state.match!.showdown!.deadlineAtMs)
+    expect(driver.state.phase).toBe('stats')
+    // Two cards (+10 each) and the first-clear bonus (+20).
+    expect(driver.view('ana').final).toMatchObject({
+      scores: { A: 40, B: 0 },
+      largestLead: { A: 40, B: 0 },
+    })
+  })
 })
 
 describe('rematch and membership mid-match', () => {

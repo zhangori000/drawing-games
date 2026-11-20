@@ -44,6 +44,10 @@ export class AccountActor extends DurableObject<Env> {
 		if (!this.isNamedFor(username)) return accountFailure('INVALID_INPUT', 'That username does not belong to this account.');
 		if (this.account() !== null) return accountFailure('USERNAME_TAKEN', ACCOUNT_MESSAGES.usernameTaken);
 
+		// An explicit name must show something; an omitted one is the username.
+		const displayName = sanitizeDisplayName(parsed.data.displayName ?? username);
+		if (displayName === null) return accountFailure('INVALID_INPUT', ACCOUNT_MESSAGES.invalidDisplayName);
+
 		const storedPassword = await hashPassword(password);
 		const token = createSessionToken(username);
 		const tokenHash = await hashSessionToken(token);
@@ -53,7 +57,7 @@ export class AccountActor extends DurableObject<Env> {
 		const nowMs = Date.now();
 		const record: AccountRecord = {
 			username,
-			displayName: sanitizeDisplayName(parsed.data.displayName ?? username) ?? username,
+			displayName,
 			password: storedPassword,
 			createdAtMs: nowMs,
 			stats: EMPTY_ACCOUNT_STATS,

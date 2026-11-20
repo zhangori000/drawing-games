@@ -7,7 +7,7 @@ import {
 } from '@drawing-games/protocol';
 
 import type { Env } from '../env';
-import { bearerToken, CORS_HEADERS, jsonResponse, methodNotAllowed, preflightResponse, readJsonBody } from '../http';
+import { bearerToken, CORS_HEADERS, jsonResponse, methodNotAllowed, preflightResponse, readJsonBody, type JsonBodyResult } from '../http';
 import { accountActor } from './actor-name';
 import { describeError } from './log';
 import { ACCOUNT_MESSAGES, type AccountErrorCode, type AccountFailure } from './results';
@@ -56,14 +56,18 @@ async function route(request: Request, env: Env, path: string): Promise<Response
 }
 
 async function signup(request: Request, env: Env): Promise<Response> {
-	const parsed = signupRequestSchema.safeParse(await readJsonBody(request));
+	const body = await readJsonBody(request);
+	if (!body.ok) return unreadableBody(body);
+	const parsed = signupRequestSchema.safeParse(body.value);
 	if (!parsed.success) return invalidInput(parsed.error.issues);
 	const result = await accountActor(env, parsed.data.username).signup(parsed.data);
 	return result.ok ? jsonResponse({ token: result.token, profile: result.profile }, 201) : failureResponse(result);
 }
 
 async function login(request: Request, env: Env): Promise<Response> {
-	const parsed = loginRequestSchema.safeParse(await readJsonBody(request));
+	const body = await readJsonBody(request);
+	if (!body.ok) return unreadableBody(body);
+	const parsed = loginRequestSchema.safeParse(body.value);
 	if (!parsed.success) return invalidInput(parsed.error.issues);
 	const result = await accountActor(env, parsed.data.username).login(parsed.data);
 	return result.ok ? jsonResponse({ token: result.token, profile: result.profile }, 200) : failureResponse(result);
@@ -86,7 +90,9 @@ async function getMe(request: Request, env: Env): Promise<Response> {
 async function updateMe(request: Request, env: Env): Promise<Response> {
 	const session = sessionFrom(request);
 	if (session === null) return unauthorized();
-	const parsed = updateProfileRequestSchema.safeParse(await readJsonBody(request));
+	const body = await readJsonBody(request);
+	if (!body.ok) return unreadableBody(body);
+	const parsed = updateProfileRequestSchema.safeParse(body.value);
 	if (!parsed.success) return invalidInput(parsed.error.issues);
 	const result = await accountActor(env, session.accountId).updateDisplayName(session.token, parsed.data.displayName);
 	return result.ok ? jsonResponse(result.profile, 200) : failureResponse(result);
@@ -107,9 +113,9 @@ function normalizePath(pathname: string): string {
 	return pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
 }
 
-function accountError(code: AccountErrorCode, error: string, headers?: HeadersInit): Response {
+function accountError(code: AccountErrorCode, error: string, headers?: HeadersInit, status = STATUS_BY_CODE[code]): Response {
 	const body: AccountErrorBody = { error, code };
-	return jsonResponse(body, STATUS_BY_CODE[code], headers);
+	return jsonResponse(body, status, headers);
 }
 
 function failureResponse(failure: AccountFailure): Response {
@@ -125,6 +131,16 @@ function unauthorized(): Response {
 interface ValidationIssue {
 	readonly path: readonly PropertyKey[];
 	readonly message: string;
+}
+
+/**
+ * 413 for a body over the cap (refused before it is buffered), else 400. The
+ * code stays INVALID_INPUT, which every client already knows.
+ */
+function unreadableBody(body: Extract<JsonBodyResult, { ok: false }>): Response {
+	return body.reason === 'too-large'
+		? accountError('INVALID_INPUT', ACCOUNT_MESSAGES.bodyTooLarge, undefined, 413)
+		: accountError('INVALID_INPUT', ACCOUNT_MESSAGES.bodyNotObject);
 }
 
 /** Names the first problem field; zod messages never include submitted values. */

@@ -82,3 +82,45 @@ test('a guesser records the team word when the results view carries its id', () 
   })
   expect(tracker.observe(results)).toEqual(['everyday/kite'])
 })
+
+test('the other team’s word, revealed in the results, is remembered last', () => {
+  const tracker = new SeenWordsTracker()
+  tracker.observe(
+    draftView([{ wordId: 'animals/cat' }, { wordId: 'food/pizza' }]),
+  )
+  const results = makeView({
+    phase: 'round-results',
+    me,
+    match,
+    results: {
+      roundNumber: 2,
+      teams: {
+        A: { term: 'cat', wordId: 'animals/cat' },
+        B: { term: 'mermaid', wordId: 'fantasy/mermaid' },
+      },
+    },
+  })
+  expect(tracker.observe(results)).toEqual([
+    'animals/cat',
+    'food/pizza',
+    'fantasy/mermaid',
+  ])
+})
+
+test('a guesser on the other team remembers both revealed words, own first', () => {
+  const tracker = new SeenWordsTracker()
+  const moonGuesser = { ...me, team: 'B', role: 'guesser' }
+  const results = makeView({
+    phase: 'round-results',
+    me: moonGuesser,
+    match,
+    results: {
+      roundNumber: 1,
+      teams: {
+        A: { term: 'kite', wordId: 'everyday/kite' },
+        B: { term: 'oasis', wordId: 'places/oasis' },
+      },
+    },
+  })
+  expect(tracker.observe(results)).toEqual(['places/oasis', 'everyday/kite'])
+})

@@ -37,7 +37,11 @@ export const GUESS_PRIVACY_NOTE =
 export const MAX_GUESS_LENGTH = 60
 
 export interface GuessDockProps {
-  /** Resolve when the room accepted the guess; reject to keep the text. */
+  /**
+   * Resolve when the room accepted the guess; reject to keep the text. May be
+   * called again before an earlier guess settles (the room client queues
+   * guesses and paces them to the room's rate limit).
+   */
   readonly onGuess: (text: string) => Promise<void>
   /** When set, guessing is off and this explains why (e.g. "You're drawing"). */
   readonly disabledReason?: string | null
@@ -65,12 +69,14 @@ const TONE_CLASSES: Readonly<Record<FeedbackTone, string>> = {
 
 /**
  * The guess composer. It never scrolls or navigates: submitting keeps focus
- * in the input (with `preventScroll`), clears it on success, and keeps the
- * text when sending fails. With the compact keyboard on, the input uses
- * `inputMode="none"` so the phone keyboard never opens; the keys can be
- * tucked away and come back when the input is tapped. While the keys show,
- * the dock tells the surrounding `GameViewport` (`useInAppKeyboard`) so the
- * play layout tightens around the drawing just as for a device keyboard.
+ * in the input (with `preventScroll`) and clears it at once, so the next
+ * guess can be typed and sent while earlier ones are still queued; a guess
+ * that fails to send comes back (or is named in the status line). With the
+ * compact keyboard on, the input uses `inputMode="none"` so the phone
+ * keyboard never opens; the keys can be tucked away and come back when the
+ * input is tapped. While the keys show, the dock tells the surrounding
+ * `GameViewport` (`useInAppKeyboard`) so the play layout tightens around the
+ * drawing just as for a device keyboard.
  */
 export function GuessDock({
   onGuess,
@@ -84,9 +90,10 @@ export function GuessDock({
 }: GuessDockProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const caretRef = useRef<number | null>(null)
+  // Set when a failed guess is put back: the next keystroke replaces it.
+  const selectRestoredRef = useRef(false)
   const [value, setValue] = useState('')
   const [lastGuess, setLastGuess] = useState<string | null>(null)
-  const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<{
     message: string
     afterFeedbackId: number | null
@@ -102,40 +109,59 @@ export function GuessDock({
 
   const focusInput = () => inputRef.current?.focus({ preventScroll: true })
 
-  // Restore the caret after programmatic edits (compact keys, ↑ recall).
+  // A send error shows until newer feedback arrives. Guesses are queued, so
+  // feedback for an earlier guess can land while a later one is in flight:
+  // compare against the newest feedback, not the one seen at submit time.
+  const latestFeedbackIdRef = useRef<number | null>(feedback?.id ?? null)
+  useLayoutEffect(() => {
+    latestFeedbackIdRef.current = feedback?.id ?? null
+  }, [feedback])
+
+  // Restore the caret after programmatic edits (compact keys, ↑ recall), or
+  // select a guess that was put back after failing to send.
   useLayoutEffect(() => {
     const caret = caretRef.current
+    const selectAll = selectRestoredRef.current
     const input = inputRef.current
-    if (caret === null || !input) return
     caretRef.current = null
-    if (document.activeElement === input) input.setSelectionRange(caret, caret)
+    selectRestoredRef.current = false
+    if (!input || document.activeElement !== input) return
+    if (selectAll) input.setSelectionRange(0, input.value.length)
+    else if (caret !== null) input.setSelectionRange(caret, caret)
   }, [value])
 
   const submit = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault()
     focusInput()
     const text = value.trim()
-    if (!text || disabled || sending) return
+    if (!text || disabled) return
 
-    // Clear right away so the next guess can be typed while this one flies;
-    // put the text back if the room did not take it.
+    // Clear right away so the next guess can be typed (and sent: the room
+    // client queues it) while this one flies.
     setValue('')
     setLastGuess(text)
-    setSending(true)
     setSendError(null)
     try {
       await onGuess(text)
     } catch (error) {
-      setValue((current) => (current === '' ? text : current))
+      const reason =
+        error instanceof Error && error.message
+          ? error.message
+          : 'That guess did not send. Try again.'
+      // Never drop a guess silently. Put it back, selected, when the input
+      // is empty, so Enter resends it and typing replaces it; otherwise the
+      // player is already typing the next one, so name it in the status.
+      // The DOM input holds the latest typed text even mid-render.
+      const restored = (inputRef.current?.value ?? '') === ''
+      if (restored) {
+        selectRestoredRef.current = true
+        setValue(text)
+      }
       setSendError({
-        message:
-          error instanceof Error && error.message
-            ? error.message
-            : 'That guess did not send. Try again.',
-        afterFeedbackId: feedback?.id ?? null,
+        message: restored ? reason : `“${text}” didn’t send. ${reason}`,
+        afterFeedbackId: latestFeedbackIdRef.current,
       })
     } finally {
-      setSending(false)
       focusInput()
     }
   }

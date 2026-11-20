@@ -1,10 +1,15 @@
-import type { RoomView, RoundResultTeamView } from '@drawing-games/game-core'
+import {
+  TEAM_IDS,
+  type RoomView,
+  type RoundResultTeamView,
+} from '@drawing-games/game-core'
 
 /**
  * Decides which word ids a guest should remember after each round: their
- * team's word and, for the drawer, every draft card they were shown (the
+ * team's word, for the drawer every draft card they were shown (the
  * round-results view no longer carries draft cards, so they are collected
- * while the draft is visible).
+ * while the draft is visible), and last the other team's word, which the
+ * results screen reveals to everyone.
  */
 export class SeenWordsTracker {
   private roundKey: string | null = null
@@ -40,6 +45,13 @@ export class SeenWordsTracker {
     if (this.roundKey === key) {
       if (this.chosenId) ids.push(this.chosenId)
       ids.push(...this.draftIds)
+    }
+    // Revealed on the results screen too, so it is "seen" (lowest priority:
+    // the stored history keeps the newest ids first and drops the oldest).
+    for (const other of TEAM_IDS) {
+      if (other === team) continue
+      const otherWordId = resultWordId(results.teams[other])
+      if (otherWordId) ids.push(otherWordId)
     }
     return [...new Set(ids)]
   }

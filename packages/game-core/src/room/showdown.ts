@@ -20,7 +20,7 @@ import {
 } from './context'
 import { endMatch } from './match'
 import { findMember, nextRotationDrawer } from './members'
-import { chosenOption } from './selectors'
+import { chosenOption, extendLargestLead } from './selectors'
 import type {
   DraftOption,
   ShowdownCardResult,
@@ -131,14 +131,18 @@ function addShowdownPoints(
   team: TeamId,
   points: number,
 ): void {
-  updateMatch(ctx, (match) => ({
-    ...match,
-    showdownPoints: {
-      ...match.showdownPoints,
-      [team]: match.showdownPoints[team] + points,
-    },
-    scores: { ...match.scores, [team]: match.scores[team] + points },
-  }))
+  updateMatch(ctx, (match) => {
+    const scores = { ...match.scores, [team]: match.scores[team] + points }
+    return {
+      ...match,
+      showdownPoints: {
+        ...match.showdownPoints,
+        [team]: match.showdownPoints[team] + points,
+      },
+      scores,
+      largestLead: extendLargestLead(match.largestLead, scores),
+    }
+  })
 }
 
 /**

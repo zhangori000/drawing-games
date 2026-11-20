@@ -53,6 +53,7 @@ export function createRoomState(input: CreateRoomInput): RoomState {
     },
     bots: { schedule: [], strokesDrawn: {} },
     lastActivityAtMs: input.nowMs,
+    changedAtMs: input.nowMs,
   }
 }
 
@@ -84,7 +85,12 @@ export function applyRoomCommand(
   if (next === advanced.state) {
     return { ok: true, state: next, effects: advanced.effects }
   }
-  next = { ...next, seq: next.seq + 1, lastActivityAtMs: nowMs }
+  next = {
+    ...next,
+    seq: next.seq + 1,
+    lastActivityAtMs: nowMs,
+    changedAtMs: nowMs,
+  }
   // A command can make work due immediately (e.g. a human reconnecting lets
   // a long-gone host hand over); settle it at the same instant.
   const settle = createContext(next, nowMs)

@@ -1,4 +1,4 @@
-import type { TeamId, WordDifficulty } from '../types'
+import type { TeamId, TeamScores, WordDifficulty } from '../types'
 import { isWithinGrace, teamRoster } from './members'
 import type {
   DraftOption,
@@ -149,4 +149,18 @@ export function twoThirdsNeeded(electorateSize: number): number {
 
 export function roundsWon(match: MatchState, team: TeamId): number {
   return match.history.filter((round) => round.winner === team).length
+}
+
+/**
+ * The largest lead each team has held, extended by `scores` (after a round
+ * or a showdown card; every score change goes through here).
+ */
+export function extendLargestLead(
+  largestLead: TeamScores,
+  scores: TeamScores,
+): TeamScores {
+  return {
+    A: Math.max(largestLead.A, scores.A - scores.B),
+    B: Math.max(largestLead.B, scores.B - scores.A),
+  }
 }

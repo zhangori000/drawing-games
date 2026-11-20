@@ -77,10 +77,17 @@ test('two players on one team: the guesser solves the drawer’s word', async ({
     await expect.poll(() => inkedPixels(mina)).toBeGreaterThan(0)
     const input = mina.getByLabel('Your guess')
     await expect(input).toBeEnabled({ timeout: PHASE_TIMEOUT })
-    await input.fill(term)
-    await input.press('Enter')
+    // Guesses sent faster than the room's 400 ms rate limit are queued and
+    // delivered in order, never rejected and lost.
+    for (const guess of ['zqxone', 'zqxtwo', term]) {
+      await input.fill(guess)
+      await input.press('Enter')
+      await expect(input).toHaveValue('')
+    }
 
     await expect(mina.getByTestId('solved-banner')).toContainText('You got it!')
+    await expect(ari.getByTestId('guess-feed')).toContainText('zqxone')
+    await expect(ari.getByTestId('guess-feed')).toContainText('zqxtwo')
     await expect(ari.getByTestId('solved-banner')).toContainText(
       'Mina guessed it!',
     )
@@ -146,6 +153,45 @@ test('the host’s custom words stay hidden from everyone else', async ({
   } finally {
     await ari.context().close()
     await mina.context().close()
+  }
+})
+
+test('a drawer who leaves mid-draft hands the pick over, and the teammate is told why', async ({
+  browser,
+}) => {
+  const max = await newPlayer(browser)
+  const ben = await newPlayer(browser)
+  try {
+    const code = await createRoomFromHome(max, 'Create a room')
+    await joinRoom(max, 'Max', 'Sun')
+    await ben.goto(`/play/${code}`)
+    await joinRoom(ben, 'Ben', 'Sun')
+    await addBots(max, 'Moon', 2)
+    await ben.getByTestId('lobby-ready').click()
+    await expect(max.getByTestId('lobby-start')).toBeEnabled({
+      timeout: 15_000,
+    })
+    await max.getByTestId('lobby-start').click()
+
+    // Max joined first, so Max drafts for Sun; then Max leaves.
+    await expect(max.getByTestId('draft-card').first()).toBeVisible({
+      timeout: PHASE_TIMEOUT,
+    })
+    await expect(ben.getByText(/Max is picking your word/)).toBeVisible()
+    await max.getByRole('button', { name: 'Leave room' }).first().click()
+    await max
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Leave room' })
+      .click()
+
+    // Ben gets the same draft, with a notice explaining the switch.
+    await expect(ben.getByTestId('draft-card').first()).toBeVisible()
+    await expect(
+      ben.getByRole('status').filter({ hasText: 'Max left the room.' }),
+    ).toContainText('You’re picking your team’s word now.')
+  } finally {
+    await max.context().close()
+    await ben.context().close()
   }
 })
 

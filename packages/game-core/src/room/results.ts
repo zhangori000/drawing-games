@@ -1,15 +1,17 @@
-import { getSurrenderEligibility } from '../state-machine'
-import type { TeamId } from '../types'
 import { TEAM_IDS } from '../types'
-import { SURRENDER_RULES } from './constants'
 import type { RoomContext } from './context'
-import { reject, requireMatch, updateMatch } from './context'
+import { reject, updateMatch } from './context'
 import { endMatch } from './match'
-import { findActiveMember, isWithinGrace, teamRoster } from './members'
+import { findActiveMember } from './members'
 import { startRound } from './round-start'
 import { startShowdown } from './showdown'
-import { countVotes, twoThirdsNeeded } from './selectors'
-import type { RoomCommand, RoomMember, RoomState } from './types'
+import type { RoomCommand, RoomState } from './types'
+import {
+  currentSurrenderVotes,
+  surrenderEligible,
+  surrenderRoundNumber,
+  surrenderVotePasses,
+} from './votes'
 
 type Command<T extends RoomCommand['type']> = Extract<RoomCommand, { type: T }>
 
@@ -56,29 +58,6 @@ export function handleRoundContinue(
 /* Surrender                                                                */
 /* ------------------------------------------------------------------------ */
 
-export function surrenderEligible(state: RoomState, team: TeamId): boolean {
-  const match = state.match
-  if (match === null) return false
-  return getSurrenderEligibility({
-    team,
-    scores: match.scores,
-    completedRounds: match.completedRounds,
-    phase: state.phase === 'round-results' ? 'round-results' : 'drawing',
-    settings: SURRENDER_RULES,
-  }).eligible
-}
-
-/** Every human on the team, within reconnect grace, may vote. */
-export function surrenderElectorate(
-  state: RoomState,
-  team: TeamId,
-  now: number,
-): RoomMember[] {
-  return teamRoster(state, team).filter(
-    (member) => member.kind === 'human' && isWithinGrace(member, now),
-  )
-}
-
 export function handleSurrenderVote(
   ctx: RoomContext,
   command: Command<'surrender.vote'>,
@@ -99,23 +78,18 @@ export function handleSurrenderVote(
   if (typeof command.approve !== 'boolean') {
     reject('BAD_COMMAND', 'Vote yes or no.')
   }
-  const match = requireMatch(ctx.state)
-  const roundNumber = match.round?.number ?? match.completedRounds
-  const current = match.surrender
-  const previous =
-    current !== null &&
-    current.team === actor.team &&
-    current.roundNumber === roundNumber
-      ? current.votes
-      : {}
-  const votes = { ...previous, [actor.id]: command.approve }
+  const roundNumber = surrenderRoundNumber(ctx.state)
+  const votes = {
+    ...currentSurrenderVotes(ctx.state, actor.team),
+    [actor.id]: command.approve,
+  }
   updateMatch(ctx, (state) => ({
     ...state,
     surrender: { team: actor.team, roundNumber, votes },
   }))
-
-  const electorate = surrenderElectorate(ctx.state, actor.team, ctx.now)
-  if (countVotes(votes, electorate) >= twoThirdsNeeded(electorate.length)) {
+  // Votes that pass later, once the electorate shrinks (a teammate leaves
+  // or drops past grace), end the match as due work (see `votes.ts`).
+  if (surrenderVotePasses(ctx.state, actor.team, votes, ctx.now)) {
     endMatch(ctx, 'surrender', actor.team)
   }
 }

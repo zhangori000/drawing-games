@@ -37,15 +37,59 @@ export function isWebSocketUpgrade(request: Request): boolean {
 	return request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
 }
 
-/** Reads a JSON body with a size cap; returns undefined on any failure. */
-export async function readJsonBody(request: Request, maxBytes = 16 * 1024): Promise<unknown> {
-	const text = await request.text().catch(() => '');
-	if (text.length === 0 || new TextEncoder().encode(text).byteLength > maxBytes) return undefined;
+/** Largest JSON request body the API reads (account forms are tiny). */
+export const MAX_JSON_BODY_BYTES = 16 * 1024;
+
+export type JsonBodyResult =
+	| { readonly ok: true; readonly value: Readonly<Record<string, unknown>> }
+	/** `too-large`: over the cap (answer 413); `invalid`: empty, not UTF-8 JSON, or not an object. */
+	| { readonly ok: false; readonly reason: 'too-large' | 'invalid' };
+
+/**
+ * Reads a JSON object body of at most `maxBytes`, so an oversized body is
+ * never buffered. A declared Content-Length over the cap is refused without
+ * touching the body (the runtime discards it; cancelling it here made
+ * `wrangler dev` answer 503 instead of the 413). A body without a length is
+ * read only until it passes the cap, then cancelled.
+ */
+export async function readJsonBody(request: Request, maxBytes = MAX_JSON_BODY_BYTES): Promise<JsonBodyResult> {
+	const declared = Number(request.headers.get('Content-Length') ?? Number.NaN);
+	if (Number.isFinite(declared) && declared > maxBytes) return { ok: false, reason: 'too-large' };
+	const bytes = request.body === null ? new Uint8Array() : await readAtMost(request.body, maxBytes);
+	if (bytes === null) return { ok: false, reason: 'too-large' };
+	let value: unknown;
 	try {
-		return JSON.parse(text) as unknown;
+		value = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes));
 	} catch {
-		return undefined;
+		return { ok: false, reason: 'invalid' };
 	}
+	return typeof value === 'object' && value !== null && !Array.isArray(value)
+		? { ok: true, value: value as Readonly<Record<string, unknown>> }
+		: { ok: false, reason: 'invalid' };
+}
+
+/** The whole stream, or null (after cancelling it) once it passes `maxBytes`. */
+async function readAtMost(stream: ReadableStream<Uint8Array>, maxBytes: number): Promise<Uint8Array | null> {
+	const reader = stream.getReader();
+	const chunks: Uint8Array[] = [];
+	let size = 0;
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		size += value.byteLength;
+		if (size > maxBytes) {
+			await reader.cancel().catch(() => undefined);
+			return null;
+		}
+		chunks.push(value);
+	}
+	const bytes = new Uint8Array(size);
+	let offset = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return bytes;
 }
 
 export function bearerToken(request: Request): string | null {

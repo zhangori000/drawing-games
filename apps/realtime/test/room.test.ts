@@ -50,6 +50,18 @@ describe('room routes', () => {
 		const client = await RoomSocket.open('NOPE7');
 		expect(await client.error()).toMatchObject({ code: 'ROOM_NOT_FOUND', retryable: false });
 		expect((await client.closed).code).toBe(4404);
+
+		// The refused socket is the runtime's (hibernatable, no attachment), so
+		// it never counts as a member and the code stays free to create.
+		const stub = env.GAME_ROOM.getByName('NOPE7');
+		const tables = await runInDurableObject(stub, (_instance, state) =>
+			state.storage.sql
+				.exec<{ name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\'`)
+				.toArray(),
+		);
+		expect(tables).toEqual([]);
+		expect(await stub.create('NOPE7')).toBe(true);
+		expect(await stub.info()).toEqual({ exists: true, phase: 'lobby', memberCount: 0 });
 	});
 });
 

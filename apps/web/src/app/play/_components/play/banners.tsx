@@ -22,6 +22,11 @@ export interface WordBannerProps {
   readonly packName?: string | null
   /** Extra line, e.g. showdown card progress. */
   readonly note?: ReactNode
+  /**
+   * Show the difficulty solve bonus ("+20 pts"). Off for Showdown cards,
+   * which score a flat amount whatever their difficulty.
+   */
+  readonly showBonus?: boolean
 }
 
 /**
@@ -34,6 +39,7 @@ export function WordBanner({
   definition,
   packName,
   note,
+  showBonus = true,
 }: WordBannerProps) {
   const [open, setOpen] = useState(false)
   return (
@@ -49,7 +55,7 @@ export function WordBanner({
           >
             {term}
           </strong>
-          <DifficultyChip difficulty={difficulty} showBonus />
+          <DifficultyChip difficulty={difficulty} showBonus={showBonus} />
         </p>
         {note ? (
           <p className="truncate text-xs font-semibold text-black/60">{note}</p>

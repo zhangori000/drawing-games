@@ -10,6 +10,8 @@ import { rememberDisplayName } from '../identity'
 import { getRecentWordIds, recordWordIds } from '../word-history'
 import { CanvasStore } from './canvas-store'
 import { RoomCommandError, isRoomCommandError } from './command-error'
+import { GuessPacer } from './guess-pacer'
+import { drawerHandoffNotice } from './handoff-notice'
 import { RoomConnection } from './room-connection'
 import type {
   JoinParams,
@@ -64,6 +66,10 @@ export interface RoomActions {
   start(): Promise<void>
   selectWord(optionId: string): Promise<void>
   replaceWord(optionId: string, reason: DraftReplacementReason): Promise<void>
+  /**
+   * Queued and sent in order, spaced to the room's guess rate limit; a guess
+   * the room refuses only for its speed is resent, never dropped.
+   */
   guess(text: string): Promise<void>
   voteHint(approve: boolean): Promise<void>
   voteSurrender(approve: boolean): Promise<void>
@@ -100,6 +106,7 @@ export class RoomClient {
   private snapshot: RoomClientSnapshot
   private readonly listeners = new Set<() => void>()
   private readonly seenWords = new SeenWordsTracker()
+  private readonly guessPacer: GuessPacer
   private nextToastId = 1
   private nextFeedbackId = 1
   private readonly connectionOptions: RoomClientConnectionOptions
@@ -144,6 +151,13 @@ export class RoomClient {
         )
       },
     })
+    // Guesses go out one at a time, spaced to the room's rate limit, so a
+    // quick typist's guesses are queued instead of rejected and lost.
+    this.guessPacer = new GuessPacer({
+      send: (text) => this.run({ type: 'guess.submit', text }, false),
+      timers: connectionOptions.timers,
+      now: connectionOptions.now,
+    })
     this.actions = this.createActions()
   }
 
@@ -184,6 +198,9 @@ export class RoomClient {
     if (!connection) return
     this.detach()
     this.connection = null
+    this.guessPacer.cancel(
+      new RoomCommandError('CLOSED', 'Not connected to the room.'),
+    )
     this.canvasStore.dispose()
     connection.dispose()
   }
@@ -194,9 +211,12 @@ export class RoomClient {
     const connection = this.connection
     if (!connection) return
     const state = connection.getState()
-    if (state.view && state.view !== this.snapshot.view) {
+    const previousView = this.snapshot.view
+    let handoff: string | null = null
+    if (state.view && state.view !== previousView) {
       const ids = this.seenWords.observe(state.view)
       if (ids.length > 0) recordWordIds(ids)
+      handoff = drawerHandoffNotice(previousView, state.view)
     }
     if (
       state.status === 'open' &&
@@ -211,6 +231,8 @@ export class RoomClient {
       memberId: state.memberId,
       savedSeat: state.savedSeat,
     })
+    // e.g. "Max left the room. You're drawing now…", with the new screen.
+    if (handoff) this.pushToast(handoff, 'info')
   }
 
   private handleEvent(event: RoomConnectionEvent): void {
@@ -338,7 +360,11 @@ export class RoomClient {
       selectWord: (optionId) => this.run({ type: 'draft.select', optionId }),
       replaceWord: (optionId, reason) =>
         this.run({ type: 'draft.replace', optionId, reason }),
-      guess: (text) => this.run({ type: 'guess.submit', text }, false),
+      guess: (text) => {
+        const promise = this.guessPacer.submit(text)
+        promise.catch(() => {})
+        return promise
+      },
       voteHint: (approve) =>
         this.run({ type: 'hint.vote', hint: 'word-length', approve }),
       voteSurrender: (approve) => this.run({ type: 'surrender.vote', approve }),

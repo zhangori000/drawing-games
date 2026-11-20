@@ -344,7 +344,14 @@ export interface RoomState {
   readonly match: MatchState | null
   readonly wordMemory: RoomWordMemory
   readonly bots: BotRuntimeState
+  /** Server time of the latest accepted command (idle-room cleanup). */
   readonly lastActivityAtMs: number
+  /**
+   * Server time of the latest state change, by a command or by due work
+   * (`lastActivityAtMs` counts commands only). Vote resolution never looks
+   * earlier than this. Absent in rooms stored before it existed.
+   */
+  readonly changedAtMs?: number
 }
 
 /* -------------------------------------------------------------------------- */
@@ -600,7 +607,10 @@ export interface LobbyView {
   readonly blockers: readonly string[]
   /** Words in the enabled pool. */
   readonly poolSize: number
-  /** Pool words none of the current members has drawn or seen recently. */
+  /**
+   * Distinct pool words that neither this room nor any current member has
+   * drawn or seen recently, matched by id or answer key as the draft does.
+   */
   readonly freshWordCount: number
   /** Pool words never drawn in this room (room memory survives rematches). */
   readonly unusedWordCount: number

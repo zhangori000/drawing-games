@@ -411,6 +411,31 @@ describe('lobby controls', () => {
     expect(driver.view('host').lobby?.freshWordCount).toBe(8)
   })
 
+  it('counts a custom word as seen when its curated twin was remembered', () => {
+    const driver = lobbyWithHost()
+    const words = [...customWordList(12), 'chair', 'Treasure Chest']
+    driver.settings('host', {
+      customWordsMode: 'only',
+      customWords: words,
+      packIds: [],
+    })
+    expect(driver.view('host').lobby).toMatchObject({
+      poolSize: 14,
+      freshWordCount: 14,
+    })
+    // The same answer under a curated id, as account history stores it.
+    driver.join('p2', 'P2', {
+      memory: {
+        avoid: ['everyday/chair'],
+        soft: ['fantasy/treasure-chest', `custom/${words[0]}`],
+      },
+    })
+    expect(driver.view('host').lobby).toMatchObject({
+      poolSize: 14,
+      freshWordCount: 11,
+    })
+  })
+
   it('rejects lobby-only commands outside the lobby', () => {
     const driver = lobbyWithHost()
     driver.join('p2', 'P2')

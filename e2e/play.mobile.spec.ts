@@ -97,17 +97,8 @@ test('phone guesser: typing and submitting keeps the canvas anchored', async ({
 test.describe('iPhone-sized screen (390 x 664)', () => {
   test.use({ viewport: { width: 390, height: 664 } })
 
-  // `next dev` draws its indicator over the bottom-left corner, which on a
-  // phone is the compact keyboard's first key; production builds have none.
-  test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => {
-      document.addEventListener('DOMContentLoaded', () => {
-        const style = document.createElement('style')
-        style.textContent = 'nextjs-portal { display: none !important; }'
-        document.head.append(style)
-      })
-    })
-  })
+  // These run against `next dev`, as the owner does when playing from a
+  // phone. Nothing (such as the Next dev indicator) may cover the keys.
 
   test('guesser: the drawing stays large while the compact keyboard is up', async ({
     page,
@@ -140,6 +131,28 @@ test.describe('iPhone-sized screen (390 x 664)', () => {
         await page.getByRole('button', { name: key, exact: true }).tap()
       }
       await expect(input).toHaveValue('zqx')
+
+      // Backspace sits in the bottom-left corner, where `next dev` used to
+      // pin its indicator: a tap at its centre must reach the key.
+      const backspace = keyboard.getByRole('button', { name: 'Backspace' })
+      const centre = await boxOf(backspace)
+      const hit = await page.evaluate(
+        ([x, y]) =>
+          document
+            .elementFromPoint(x, y)
+            ?.closest('button')
+            ?.getAttribute('aria-label') ?? null,
+        [centre.x + centre.width / 2, centre.y + centre.height / 2],
+      )
+      expect(hit).toBe('Backspace')
+      await page.touchscreen.tap(
+        centre.x + centre.width / 2,
+        centre.y + centre.height / 2,
+      )
+      await expect(input).toHaveValue('zq')
+      await page.getByRole('button', { name: 'x', exact: true }).tap()
+      await expect(input).toHaveValue('zqx')
+
       await page.getByRole('button', { name: 'Send', exact: true }).tap()
       await expect(
         page.getByTestId('guess-dock').getByRole('status'),

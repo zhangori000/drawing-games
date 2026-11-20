@@ -32,6 +32,8 @@ export const ACCOUNT_MESSAGES = Object.freeze({
 	invalidCredentials: 'That username and password don’t match.',
 	unauthorized: 'You’ve been signed out. Sign in again.',
 	invalidDisplayName: 'Display names need at least one visible character.',
+	bodyTooLarge: 'Payload too large.',
+	bodyNotObject: 'Body must be a JSON object.',
 	internal: 'The account server had a problem. Try again in a moment.',
 });
 

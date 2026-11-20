@@ -1,4 +1,8 @@
-import { letterCount, wordPattern } from '@drawing-games/word-bank'
+import {
+  countFreshWords,
+  letterCount,
+  wordPattern,
+} from '@drawing-games/word-bank'
 
 import {
   DIFFICULTY_BONUSES,
@@ -23,11 +27,7 @@ import {
   ownWordCluesAllowed,
   TEAM_NAMES,
 } from './settings'
-import {
-  nextPhaseAfterResults,
-  surrenderElectorate,
-  surrenderEligible,
-} from './results'
+import { nextPhaseAfterResults } from './results'
 import {
   chosenOption,
   countVotes,
@@ -35,7 +35,6 @@ import {
   majorityNeeded,
   requireChosen,
   roundsWon,
-  teamElectorate,
   twoThirdsNeeded,
 } from './selectors'
 import type {
@@ -77,6 +76,12 @@ import {
   roomUsedKeys,
   unusedWordCount,
 } from './words'
+import {
+  currentSurrenderVotes,
+  hintElectorate,
+  surrenderElectorate,
+  surrenderEligible,
+} from './votes'
 
 /** Everything a projection needs about who is looking. */
 interface Viewer {
@@ -208,7 +213,9 @@ function lobbyView(state: RoomState): LobbyView {
     canStart: blockers.length === 0,
     blockers,
     poolSize: pool.length,
-    freshWordCount: pool.filter((word) => !remembered.has(word.id)).length,
+    // Same id-or-answer-key rule as the draft, so a custom "chair" is not
+    // fresh for someone who drew the curated one.
+    freshWordCount: countFreshWords(pool, remembered),
     unusedWordCount: unused,
     repeatsFromRound: firstRepeatRound(state.settings, unused),
     minPerTeam: MIN_MEMBERS_PER_TEAM,
@@ -274,13 +281,7 @@ function hintView(
     voting && round.drawingStartedAtMs !== null
       ? round.drawingStartedAtMs + settings.hintUnlockSeconds * 1000
       : null
-  const electorate = teamElectorate(
-    state,
-    teamRound.team,
-    teamRound.drawerId,
-    now,
-    teamRound.formerDrawerIds,
-  )
+  const electorate = hintElectorate(state, teamRound, now)
   const isElector =
     member !== null && electorate.some((entry) => entry.id === member.id)
   return {
@@ -642,19 +643,12 @@ function finalView(viewer: Viewer, match: MatchState): FinalView {
 
 function surrenderView(
   viewer: Viewer & { readonly member: RoomMember },
-  match: MatchState,
 ): SurrenderView {
   const { state, member, now } = viewer
   const team = member.team
   const eligible = surrenderEligible(state, team)
   const electorate = surrenderElectorate(state, team, now)
-  const vote = match.surrender
-  const votes =
-    vote !== null &&
-    vote.team === team &&
-    vote.roundNumber === (match.round?.number ?? -1)
-      ? vote.votes
-      : {}
+  const votes = currentSurrenderVotes(state, team)
   return {
     team,
     eligible,
@@ -706,7 +700,7 @@ export function projectView(
       phase === 'stats' && match !== null ? finalView(viewer, match) : null,
     surrender:
       phase === 'round-results' && match !== null && viewer.member !== null
-        ? surrenderView({ ...viewer, member: viewer.member }, match)
+        ? surrenderView({ ...viewer, member: viewer.member })
         : null,
   }
 }

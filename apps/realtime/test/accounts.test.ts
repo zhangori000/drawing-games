@@ -10,6 +10,7 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import { recordAccountMatch, recordAccountWords, verifyAccountToken } from '../src/accounts/client';
+import { MAX_JSON_BODY_BYTES, readJsonBody } from '../src/http';
 import { ACCOUNT_LIMITS } from '../src/accounts/limits';
 import { deriveWordMemory, foldMatchIntoStats, parseStoredStats } from '../src/accounts/stats';
 import { sanitizeDisplayName, sanitizeMatchSummary, sanitizeWordEvent } from '../src/accounts/validate';
@@ -149,6 +150,48 @@ describe('quick account HTTP lifecycle', () => {
 		await expectError(await call('PATCH', '/accounts/me', { token, body: { displayName: '' } }), 400, 'INVALID_INPUT');
 		await expectError(await call('PATCH', '/accounts/me', { token, body: { displayName: 'ok', extra: true } }), 400, 'INVALID_INPUT');
 		await expectError(await call('PATCH', '/accounts/me', { token, body: { displayName: '\u0007\u0008' } }), 400, 'INVALID_INPUT');
+	});
+
+	it('refuses oversized bodies with 413 before reading them, and non-object bodies with 400', async () => {
+		const username = uniqueUsername('big');
+		const oversized = JSON.stringify({ username, password: PASSWORD, displayName: 'x'.repeat(20_000) });
+		const declared = await expectError(await call('POST', '/accounts', { rawBody: oversized }), 413, 'INVALID_INPUT');
+		expect(declared.error).toBe('Payload too large.');
+
+		for (const rawBody of ['', '{not json', '[]', '"text"', 'null', '\uFFFD{}']) {
+			const error = await expectError(await call('POST', '/accounts', { rawBody }), 400, 'INVALID_INPUT');
+			expect(error.error).toBe('Body must be a JSON object.');
+		}
+		const { token } = await signup(username);
+		await expectError(await call('PATCH', '/accounts/me', { token, rawBody: oversized }), 413, 'INVALID_INPUT');
+		await expectError(await call('POST', '/accounts/session', { rawBody: oversized }), 413, 'INVALID_INPUT');
+		expect((await getMe(token)).displayName).toBe(username);
+	});
+
+	it('rejects display names with no visible character', async () => {
+		const invisible = ['\u200b\u200b', '\u202e', ' \u2066\u200d\u2069 ', '\u00ad', '\u3164'];
+		for (const displayName of invisible) {
+			const username = uniqueUsername('zw');
+			const error = await expectError(
+				await call('POST', '/accounts', { body: { username, password: PASSWORD, displayName } }),
+				400,
+				'INVALID_INPUT',
+			);
+			expect(error.error).toBe('Display names need at least one visible character.');
+			expect(await tableNames(username)).toEqual([]);
+		}
+
+		const username = uniqueUsername('zw');
+		const { token } = await signup(username, PASSWORD, 'Visible');
+		for (const displayName of invisible) {
+			const error = await expectError(await call('PATCH', '/accounts/me', { token, body: { displayName } }), 400, 'INVALID_INPUT');
+			expect(error.error).toBe('Display names need at least one visible character.');
+		}
+		expect((await getMe(token)).displayName).toBe('Visible');
+
+		const response = await call('PATCH', '/accounts/me', { token, body: { displayName: '\u202eInk\u200b Master' } });
+		expect(response.status).toBe(200);
+		expect((await readJson<AccountProfileView>(response)).displayName).toBe('Ink Master');
 	});
 
 	it('answers 401 for wrong passwords, then 429 for the rest of the lockout window', async () => {
@@ -435,6 +478,46 @@ describe('account history recorded by rooms', () => {
 	});
 });
 
+describe('readJsonBody', () => {
+	const post = (body: BodyInit | null, headers: HeadersInit = {}) =>
+		new Request('https://example.com/x', { method: 'POST', headers, body });
+
+	it('accepts a JSON object up to the cap and nothing larger', async () => {
+		const pad = (bytes: number) => JSON.stringify({ a: 'x'.repeat(bytes - 8) });
+		expect(new TextEncoder().encode(pad(MAX_JSON_BODY_BYTES)).byteLength).toBe(MAX_JSON_BODY_BYTES);
+		expect(await readJsonBody(post(pad(MAX_JSON_BODY_BYTES)))).toMatchObject({ ok: true });
+		expect(await readJsonBody(post(pad(MAX_JSON_BODY_BYTES + 1)))).toEqual({ ok: false, reason: 'too-large' });
+		expect(await readJsonBody(post('{"a":1}'), 4)).toEqual({ ok: false, reason: 'too-large' });
+		expect(await readJsonBody(post('{"a":1}'))).toEqual({ ok: true, value: { a: 1 } });
+	});
+
+	it('stops reading a body without a length once it passes the cap', async () => {
+		let pulled = 0;
+		let cancelled = false;
+		const chunk = new TextEncoder().encode('x'.repeat(4096));
+		const endless = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				pulled += 1;
+				controller.enqueue(chunk);
+			},
+			cancel() {
+				cancelled = true;
+			},
+		});
+		const request = post(null);
+		Object.defineProperty(request, 'body', { value: endless });
+		expect(await readJsonBody(request)).toEqual({ ok: false, reason: 'too-large' });
+		expect(pulled).toBeLessThanOrEqual(MAX_JSON_BODY_BYTES / chunk.byteLength + 2);
+		expect(cancelled).toBe(true);
+	});
+
+	it('calls empty, malformed, non-UTF-8, and non-object bodies invalid', async () => {
+		for (const body of [null, '', ' ', '{', '[1]', '1', 'null', new Uint8Array([0x7b, 0xff, 0x7d])]) {
+			expect(await readJsonBody(post(body))).toEqual({ ok: false, reason: 'invalid' });
+		}
+	});
+});
+
 describe('account pure helpers', () => {
 	it('takes the minimum fastest guess and keeps null when nothing is known', () => {
 		const base = { ...EMPTY_ACCOUNT_STATS, fastestCorrectMs: 5_000 };
@@ -463,6 +546,9 @@ describe('account pure helpers', () => {
 	it('cleans display names and validates room records', () => {
 		expect(sanitizeDisplayName('  a\u0000b   c ')).toBe('a b c');
 		expect(sanitizeDisplayName('\u0001')).toBeNull();
+		expect(sanitizeDisplayName('\u200b\u200b')).toBeNull();
+		expect(sanitizeDisplayName('\u202e')).toBeNull();
+		expect(sanitizeDisplayName('\u202eBo\u200bb')).toBe('Bob');
 		expect(sanitizeDisplayName('x'.repeat(40))).toHaveLength(ACCOUNT_LIMITS.maxDisplayNameLength);
 		expect(sanitizeWordEvent({ ...wordEvent({ wordId: 'w-a', role: 'drew', atMs: 1 }), extra: 'dropped' })).not.toHaveProperty('extra');
 		expect(sanitizeMatchSummary({ ...matchSummary({ matchNumber: 1 }), stats: { ...EMPTY_MEMBER_MATCH_STATS, pointsWon: -1 } })).toBeNull();

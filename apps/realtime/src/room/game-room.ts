@@ -136,7 +136,14 @@ export class GameRoom extends DurableObject<Env> {
 		const pair = new WebSocketPair();
 		const [client, server] = [pair[0], pair[1]];
 		if (this.state === null || this.state.roomCode !== roomCode.data) {
-			server.accept();
+			// One ROOM_NOT_FOUND error, then close 4404, which clients treat as
+			// final (a refused upgrade looks like a network failure and would be
+			// retried). Accepted through the hibernation API like every room
+			// socket, but without an attachment, so it never counts as a member:
+			// a request-bound socket (`server.accept()`) closed during this
+			// fetch raised an uncaught "Network connection lost" once the client
+			// went away.
+			this.ctx.acceptWebSocket(server);
 			sendRoomNotFound(server, roomCode.data);
 		} else {
 			this.sockets.accept(server, sessionId.data);

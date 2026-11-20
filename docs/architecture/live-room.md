@@ -66,7 +66,11 @@ phone on the same Wi-Fi can open `http://<laptop-ip>:3000` and play.
 than `localhost`, and the page then never hydrates, so `apps/web/next.config.ts`
 sets `allowedDevOrigins` to this machine's own addresses and host names
 (`src/lib/dev-origins.ts`). They are read when `next dev` starts: restart it
-after joining a different network.
+after joining a different network. The config also turns off the `next dev`
+route indicator (`devIndicators: false`): it is pinned to a screen corner,
+and on a phone every corner holds a game control (the compact keyboard's
+Backspace, Back, the scores). Build and runtime errors still show in the dev
+overlay.
 
 ## Room rules (game-core reducer)
 
@@ -114,6 +118,11 @@ names and meanings in `types.ts` must hold.
   `unusedWordCount − 2·(r − 1) < 2·(wordChoiceCount + replacementsPerDrawer)`
   (`roundWordDemand`), or null. The lobby shows a warning instead of
   "words never come back" when it is set; it does not block Start.
+  `freshWordCount` counts distinct pool words that neither the room nor any
+  current member has drawn or recently seen (`memory.avoid` and `.soft`);
+  like `unusedWordCount` it matches by id or answer key (`countFreshWords`,
+  the draft's rule), so a custom "chair" is not fresh for someone whose
+  history holds `everyday/chair`.
 - `lobby.add-bot` (host, lobby): ids `bot_<n>`; names cycle through
   `Pixel Pete, Doodlebot, Sketchy, Inkling, Scribbles, Smudge, Squiggles,
 Blotto`. Bots are always connected and ready and never have accounts.
@@ -243,7 +252,11 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   else are rejected. Canvas content itself lives in the realtime layer.
 - `guess.submit`: a member of a team that has not solved, who is not that
   team's drawer. Text is trimmed and must be 1–60 chars. Rate limit: one
-  guess per 400 ms per member, at most 50 per member per round.
+  guess per 400 ms per member, at most 50 per member per round. The web
+  client never makes a quick typist hit that limit: it queues guesses and
+  sends them one at a time, in order, 450 ms after the previous one was
+  answered, and resends a guess rejected only as too fast
+  (`apps/web/src/lib/realtime/guess-pacer.ts`).
   `matchGuess(text, { term, aliases, otherWords: roomPool })` decides the
   verdict. Besides formatting, plurals, and aliases it accepts `-ing` ↔ base
   verb forms of the last word (`juggle`/`juggling`, `run`/`running`,
@@ -266,7 +279,9 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   human guessers on a team vote; more than half of that team's human
   guessers approving reveals the pattern to that team only and costs
   `hintCost` if they later solve. `shown` reveals from the start for free;
-  `hidden` never reveals.
+  `hidden` never reveals. The electorate (non-drawers, not earlier drawers
+  of the turn, within reconnect grace) is evaluated at the time of each
+  check, so it can shrink with nobody voting; see "Vote resolution" below.
 - `categoryHint` shows guessers the pack name of their own word, so every
   curated word sits in the pack a guesser would look in (body words are in
   Body & Health, not Space & Science). A word that moves packs gets a new id;
@@ -290,14 +305,28 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
 - Results last `roundResultsSeconds`; the host may `round.continue` early.
 - `surrender.vote` during results: eligibility via `getSurrenderEligibility`
   (≥3 completed rounds, ≥100 behind). Two thirds (rounded up) of the team's
-  human members must approve. Success ends the match for the opponent.
+  human members within reconnect grace must approve. Success ends the match
+  for the opponent.
+- Vote resolution (`votes.ts`): a vote is checked when it is cast, and
+  `advanceRoom` also has due work (`nextVoteResolution`, part of
+  `getNextWakeAtMs`) at the earliest moment the yes votes already cast meet
+  the threshold of the electorate as it is then. The electorate shrinks
+  without a vote when a teammate leaves or a drawer turn is handed over
+  (settled at that command or takeover) or when a disconnected teammate's
+  grace runs out (`lastSeenAtMs + 10 s + 1 ms`, so a late alarm still
+  applies it at that time). A passing hint vote reveals the pattern
+  (`revealedAtMs` = that moment); a passing surrender ends the match.
+  Resolution never looks earlier than `RoomState.changedAtMs`, the time of
+  the latest change by a command or due work.
 - Showdown (if enabled and both teams have at least one card): each team
   redraws its own previously chosen words, shuffled, relay style. A correct
   guess clears the card (+10), advances to the next card and the next relay
   drawer, and resets that team's canvas (`m<match>-sd-<team>-<index>`). The
   first team to clear everything gets +20. Ends when both finish or at the
   deadline. No difficulty, hint, or shutdown modifiers.
-- Final (`stats` phase, untimed): winner by total score; `account.match`
+- Final (`stats` phase, untimed): winner by total score; `largestLead` is
+  the biggest margin each team held after any round end or showdown score
+  change (`extendLargestLead`); `account.match`
   effects for account members. Host chooses `match.rematch`:
   `same-settings` starts a fresh match immediately (falls back to the lobby
   with blockers if teams are invalid); `change-settings` returns to the lobby
@@ -406,8 +435,12 @@ Non-members get previews during play and full access in results/stats.
 - `POST /rooms` creates a room with a random 5-character code from
   `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (retrying on collision via the DO's
   `create` RPC). `GET /rooms/:code` returns `{ exists, phase, memberCount }`.
-  Connecting to a room that was never created sends `ROOM_NOT_FOUND` and
-  closes with code 4404.
+  Connecting to a room that was never created upgrades (a refused upgrade
+  would look like a network failure that clients retry), sends
+  `ROOM_NOT_FOUND`, and closes with code 4404, which clients treat as final.
+  That socket is accepted through the hibernation API without an attachment
+  (never a member, nothing stored); a request-bound `accept()` closed during
+  the fetch raised an uncaught "Network connection lost".
 - Handshake: the first command on a socket must be `room.join` or
   `room.resume`. Join generates a member id and a 32-byte resume token, stores
   only `SHA-256(token)`, sends `session.issued` privately, then a snapshot and
@@ -438,6 +471,20 @@ Non-members get previews during play and full access in results/stats.
   credentials; `429` after 8 failures in 10 minutes). `DELETE
 /accounts/session` logs out the bearer token. `GET /accounts/me` returns
   `AccountProfileView`. `PATCH /accounts/me {displayName}`.
+- Request bodies are JSON objects of at most 16 KiB (`readJsonBody`). A
+  declared `Content-Length` over the cap is refused without reading the
+  body, and a body without one is read only until it passes the cap: both
+  answer `413` "Payload too large." (code `INVALID_INPUT`, which clients
+  already handle). An empty, malformed, non-UTF-8, or non-object body is
+  `400` "Body must be a JSON object."; schema problems name the field.
+- Display names (signup and `PATCH`) are cleaned like room member names
+  (game-core `cleanDisplayName`: control, zero-width, bidi and other
+  invisible format characters stripped, whitespace collapsed, at most 24
+  code points). A name with no visible character left (only invisible
+  characters, combining marks, or blank fillers) is `400 INVALID_INPUT`
+  "Display names need at least one visible character."; an omitted signup
+  name defaults to the username. In a room the same rule falls back to
+  "Player".
 - One actor per username (`idFromName('user:' + username)`): uniqueness for
   free, no global index. Passwords use PBKDF2-SHA-256 (100,000 iterations,
   16-byte salt) and constant-time comparison. Tokens are
