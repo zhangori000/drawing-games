@@ -63,8 +63,16 @@ export function DrawingScreen({ round }: { readonly round: RoundView }) {
     <WordBanner
       term={mine.word.term}
       difficulty={mine.word.difficulty}
+      unrated={mine.word.unrated}
       definition={mine.word.definition}
       packName={mine.word.packName}
+      note={
+        mine.word.autoPicked ? (
+          <span data-testid="auto-picked-note">
+            Time ran out, so we picked this card for you.
+          </span>
+        ) : undefined
+      }
     />
   ) : (
     <ClueBanner

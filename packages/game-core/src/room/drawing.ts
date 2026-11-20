@@ -194,7 +194,13 @@ export function handleDrawingOps(
     if (teamState.drawerId === actor.id && teamState.finishedAtMs === null) {
       canvasId = teamState.canvasId
     }
-  } else if (ctx.state.phase === 'word-draft') {
+  }
+  // Ink sent for a canvas that has since ended (a round or showdown card
+  // changed while it was in flight) is dropped, never moved to the next one.
+  if (command.canvasId !== undefined && command.canvasId !== canvasId) {
+    reject('STALE_CLIENT', 'That drawing was for a canvas that has ended.')
+  }
+  if (ctx.state.phase === 'word-draft') {
     reject('NOT_ALLOWED', 'Drawing starts once both words are picked.')
   }
   if (canvasId === null) reject('NOT_ALLOWED', 'Only the drawer can draw.')

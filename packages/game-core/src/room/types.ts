@@ -57,10 +57,18 @@ export interface DraftOption {
   readonly difficulty: WordDifficulty
   readonly packId: string
   readonly packName: string
-  /** Drawer-only helper text. Never projected to guessers or opponents. */
-  readonly definition: string
+  /**
+   * Drawer-only helper text. Never projected to guessers or opponents.
+   * Null for host custom words, which have none.
+   */
+  readonly definition: string | null
   /** Extra accepted answers (normalized by the matcher). */
   readonly aliases: readonly string[]
+  /**
+   * A host custom word with no difficulty tag: scored as `difficulty`
+   * (medium), labelled "Custom" for the drawer and in results.
+   */
+  readonly unrated?: boolean
 }
 
 export interface DraftReplacement {
@@ -227,6 +235,13 @@ export interface SurrenderVoteState {
   readonly team: TeamId
   readonly roundNumber: number
   readonly votes: Readonly<Record<string, boolean>>
+  /**
+   * Set by the first yes vote of this results phase: the results deadline
+   * became at least this time (`SURRENDER_VOTE_WINDOW_MS` after that vote),
+   * once, so teammates have a fair window to answer. Optional so stored
+   * rooms from before the field still load.
+   */
+  readonly windowEndsAtMs?: number
 }
 
 export interface MatchState {
@@ -426,6 +441,12 @@ export type RoomCommand =
   | {
       readonly type: 'drawing.ops'
       readonly actorId: string
+      /**
+       * The canvas the ops were drawn on. When given, the batch is refused
+       * (`STALE_CLIENT`) unless it is still the sender's drawable canvas.
+       * Omitted by older clients: the ops then go to the current canvas.
+       */
+      readonly canvasId?: string
       readonly ops: readonly DrawingAction[]
     }
   | {
@@ -490,7 +511,13 @@ export type RoomEffect =
       readonly summary: MatchSummaryRecord
     }
 
-export type RoomErrorCode = 'NOT_ALLOWED' | 'BAD_COMMAND' | 'ROOM_FULL'
+/**
+ * `STALE_CLIENT`: the command was meant for a moment that has passed (a
+ * drawing batch for a canvas that is no longer the sender's). Clients drop
+ * it silently; resending can never succeed.
+ */
+export type RoomErrorCode =
+  'NOT_ALLOWED' | 'BAD_COMMAND' | 'ROOM_FULL' | 'STALE_CLIENT'
 
 export interface RoomError {
   readonly code: RoomErrorCode
@@ -640,7 +667,13 @@ export interface DraftOptionView {
   readonly difficulty: WordDifficulty
   readonly packId: string
   readonly packName: string
-  readonly definition: string
+  /** Null for host custom words: the UI then offers no "What's this?". */
+  readonly definition: string | null
+  /**
+   * A host custom word without a difficulty tag: it scores as `difficulty`
+   * (medium), but is shown as "Custom", not as a rated difficulty.
+   */
+  readonly unrated: boolean
   /** Difficulty bonus added on a solve: easy 0, medium 20, hard 40. */
   readonly bonus: number
   /**
@@ -692,8 +725,16 @@ export interface MyTeamRoundView {
     readonly wordId: string
     readonly term: string
     readonly difficulty: WordDifficulty
-    readonly definition: string
+    /** Null for host custom words. */
+    readonly definition: string | null
+    /** See `DraftOptionView.unrated`. */
+    readonly unrated: boolean
     readonly packName: string
+    /**
+     * The draft clock ran out before the drawer picked, so the room chose
+     * this card for them (`chosenBy: 'auto'`). Drawer only, like the word.
+     */
+    readonly autoPicked: boolean
   } | null
   /**
    * The stake, for the whole team once chosen. Guessers get null while
@@ -772,6 +813,8 @@ export interface RoundResultTeamView {
   readonly wordId: string
   readonly term: string
   readonly difficulty: WordDifficulty
+  /** See `DraftOptionView.unrated` (results reveal both words anyway). */
+  readonly unrated: boolean
   readonly packName: string
   readonly solved: boolean
   readonly solverId: string | null
@@ -790,8 +833,17 @@ export interface RoundResultsView {
   readonly shutdownBonus: number
   readonly scores: TeamScores
   readonly nextPhase: 'word-draft' | 'showdown' | 'stats'
-  /** Host may skip the remaining results countdown. */
+  /**
+   * Host may skip the remaining results countdown: false for everyone else,
+   * and for the host while `continueHeldBy` is set.
+   */
   readonly canContinue: boolean
+  /**
+   * A team whose surrender vote is still open (some eligible teammate has
+   * not voted and it could still pass). Skipping ahead waits for it, so the
+   * trailing team always gets the whole results window to decide.
+   */
+  readonly continueHeldBy: TeamId | null
 }
 
 export interface ShowdownMineView {
@@ -806,6 +858,8 @@ export interface ShowdownMineView {
   readonly word: {
     readonly term: string
     readonly difficulty: WordDifficulty
+    /** See `DraftOptionView.unrated`. */
+    readonly unrated: boolean
   } | null
   readonly canvasId: string
   readonly guesses: readonly GuessView[]

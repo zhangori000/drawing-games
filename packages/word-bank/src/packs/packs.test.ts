@@ -154,6 +154,8 @@ function spellingProblem(
 
 function definitionProblem(word: PlayableWord): string | null {
   const definition = word.definition
+  // Only host custom words go without one.
+  if (definition === null) return 'missing definition'
   const length = Array.from(definition).length
   if (length < MIN_DEFINITION_LENGTH || length > MAX_DEFINITION_LENGTH) {
     return `length ${length} outside ${MIN_DEFINITION_LENGTH}-${MAX_DEFINITION_LENGTH}`
@@ -350,7 +352,7 @@ describe('blocklist', () => {
       const texts = [
         entry.word.term,
         ...entry.word.aliases,
-        entry.word.definition,
+        entry.word.definition ?? '',
       ]
       for (const text of texts) {
         const hit = containsBlocked(text)

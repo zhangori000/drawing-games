@@ -1,6 +1,7 @@
 'use client'
 
 import {
+  SURRENDER_VOTE_WINDOW_MS,
   TEAM_IDS,
   TEAM_NAMES,
   otherTeam,
@@ -63,6 +64,11 @@ export function ResultsScreen({
             ) : null}
           </header>
 
+          {/* First, so the trailing team sees it without scrolling. */}
+          {view.surrender?.eligible ? (
+            <SurrenderPrompt surrender={view.surrender} />
+          ) : null}
+
           <div className="grid gap-4 md:grid-cols-2">
             {TEAM_IDS.map((team) => (
               <TeamResult
@@ -97,10 +103,6 @@ export function ResultsScreen({
               </div>
             ))}
           </section>
-
-          {view.surrender?.eligible ? (
-            <SurrenderPrompt surrender={view.surrender} />
-          ) : null}
         </div>
       </ScrollPane>
 
@@ -122,6 +124,15 @@ export function ResultsScreen({
             >
               {next.button}
             </Button>
+          ) : results.continueHeldBy !== null ? (
+            <p
+              className="text-sm font-semibold text-black/65"
+              data-testid="surrender-hold"
+            >
+              {results.continueHeldBy === me.team
+                ? 'Your team can still vote to surrender.'
+                : `${TEAM_NAMES[results.continueHeldBy]} can still vote to surrender.`}
+            </p>
           ) : (
             <p className="text-sm text-black/55">The host can skip ahead.</p>
           )}
@@ -181,7 +192,11 @@ function TeamResult({
             >
               {result.term}
             </strong>
-            <DifficultyChip difficulty={result.difficulty} showBonus />
+            <DifficultyChip
+              difficulty={result.difficulty}
+              unrated={result.unrated}
+              showBonus
+            />
             <span className="text-xs font-semibold text-black/50">
               {result.packName}
             </span>
@@ -201,16 +216,18 @@ function TeamResult({
                 : ''}
             </p>
             <dl className="grid gap-1 rounded-2xl bg-black/[0.04] p-3 text-sm">
-              {breakdownParts(result.breakdown, result.difficulty).map(
-                (part) => (
-                  <div key={part.label} className="flex justify-between gap-2">
-                    <dt className="text-black/65">{part.label}</dt>
-                    <dd className="font-mono font-black tabular-nums">
-                      {signedPoints(part.points)}
-                    </dd>
-                  </div>
-                ),
-              )}
+              {breakdownParts(
+                result.breakdown,
+                result.difficulty,
+                result.unrated,
+              ).map((part) => (
+                <div key={part.label} className="flex justify-between gap-2">
+                  <dt className="text-black/65">{part.label}</dt>
+                  <dd className="font-mono font-black tabular-nums">
+                    {signedPoints(part.points)}
+                  </dd>
+                </div>
+              ))}
               {shutdown > 0 ? (
                 <div className="flex justify-between gap-2">
                   <dt className="text-black/65">Shutdown bonus</dt>
@@ -243,15 +260,21 @@ function SurrenderPrompt({ surrender }: { readonly surrender: SurrenderView }) {
   return (
     <section
       aria-labelledby="surrender-heading"
-      className="rounded-3xl border-2 border-[#181713] bg-[#ffd9cf] p-4"
+      className="rounded-3xl border-2 border-[#181713] bg-[#ffd9cf] p-4 shadow-[3px_3px_0_#181713]"
+      data-testid="surrender-prompt"
     >
       <h3 id="surrender-heading" className="text-lg font-black">
         Call it here?
       </h3>
-      <p className="mt-1 text-sm leading-6 text-black/70">
+      <p className="mt-1 text-sm leading-6 text-black/70" aria-live="polite">
         {TEAM_NAMES[surrender.team]} is far behind. If enough of your team
-        agrees, the match ends now and the other team wins. Votes:{' '}
-        {surrender.votesFor}/{surrender.votesNeeded}.
+        agrees, the match ends now and the other team wins. The first yes gives
+        everyone at least {SURRENDER_VOTE_WINDOW_MS / 1000} seconds to answer.
+        Votes:{' '}
+        <span className="font-mono font-black tabular-nums">
+          {surrender.votesFor}/{surrender.votesNeeded}
+        </span>
+        .
       </p>
       {surrender.canVote ? (
         <div className="mt-3 flex flex-wrap gap-2">

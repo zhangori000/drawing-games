@@ -1,3 +1,4 @@
+export * from './custom-entry'
 export * from './inflection'
 export * from './matching'
 export * from './pool'

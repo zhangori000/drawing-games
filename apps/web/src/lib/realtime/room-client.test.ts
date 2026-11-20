@@ -269,3 +269,51 @@ test('account link notices say what changed for the seat', () => {
     'Saved to @mina_42: this match is in your stats.',
   )
 })
+
+/* ------------------------ drawing batches name a canvas ------------------------ */
+
+test('drawing batches name their canvas, and a stale refusal is dropped quietly', async () => {
+  const ctx = accountClient(null)
+  ctx.client.start()
+  ctx.socket().open()
+  const resume = ctx.socket().lastEnvelope()
+  ctx.socket().receive(ack(resume.commandId, resume.clientSeq))
+  const drawing = seatedView(null, 'drawing')
+  drawing.me.role = 'drawer'
+  drawing.round = { number: 1, mine: { canvasId: 'm1-r1-A', canDraw: true } }
+  ctx.socket().receive({ type: 'room.snapshot', state: drawing })
+
+  ctx.client.actions.sendDrawing('m1-r1-A', [
+    {
+      type: 'stroke.begin',
+      strokeId: 's1',
+      point: { x: 0.2, y: 0.2 },
+      style: { color: '#181713', width: 0.01, opacity: 1 },
+    },
+  ])
+  ctx.client.canvasStore.flush()
+  const batch = ctx.socket().lastEnvelope()
+  expect(batch.command).toMatchObject({
+    type: 'drawing.batch',
+    canvasId: 'm1-r1-A',
+  })
+
+  // The round ended while the batch was in flight: the room refuses it.
+  ctx.socket().receive({
+    type: 'protocol.error',
+    code: 'STALE_CLIENT',
+    message: 'That drawing was for a canvas that has ended.',
+    retryable: false,
+    commandId: batch.commandId,
+  })
+  await flushPromises()
+  expect(ctx.client.canvasStore.hasUnsentOps()).toBe(false)
+  expect(ctx.toasts()).toEqual([])
+  // Never resent.
+  expect(
+    ctx
+      .socket()
+      .envelopes()
+      .filter((envelope) => envelope.command.type === 'drawing.batch'),
+  ).toHaveLength(1)
+})

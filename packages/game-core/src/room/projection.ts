@@ -77,6 +77,7 @@ import {
   unusedWordCount,
 } from './words'
 import {
+  continueHeldBy,
   currentSurrenderVotes,
   hintElectorate,
   surrenderElectorate,
@@ -252,6 +253,7 @@ function optionView(
     packId: option.packId,
     packName: option.packName,
     definition: option.definition,
+    unrated: option.unrated === true,
     bonus: DIFFICULTY_BONUSES[option.difficulty],
     drawnBefore: drawnInRoom(usedKeys, option),
   }
@@ -345,7 +347,9 @@ function myTeamRoundView(
             term: chosen.term,
             difficulty: chosen.difficulty,
             definition: chosen.definition,
+            unrated: chosen.unrated === true,
             packName: chosen.packName,
+            autoPicked: teamRound.chosenBy === 'auto',
           }
         : null,
     difficulty:
@@ -456,6 +460,7 @@ function resultTeamView(
     wordId: word.wordId,
     term: word.term,
     difficulty: word.difficulty,
+    unrated: word.unrated === true,
     packName: word.packName,
     solved: solution !== null,
     solverId: solution?.guesserId ?? null,
@@ -478,6 +483,7 @@ function resultsView(
   round: RoundState,
 ): RoundResultsView {
   const { state } = viewer
+  const heldBy = continueHeldBy(state, viewer.now)
   return {
     roundNumber: round.number,
     teams: {
@@ -488,7 +494,11 @@ function resultsView(
     shutdownBonus: round.shutdownBonus,
     scores: match.scores,
     nextPhase: nextPhaseAfterResults(state),
-    canContinue: viewer.member !== null && state.hostId === viewer.member.id,
+    canContinue:
+      heldBy === null &&
+      viewer.member !== null &&
+      state.hostId === viewer.member.id,
+    continueHeldBy: heldBy,
   }
 }
 
@@ -515,7 +525,11 @@ function showdownMineView(
     amDrawer,
     word:
       amDrawer && !finished && card !== undefined
-        ? { term: card.term, difficulty: card.difficulty }
+        ? {
+            term: card.term,
+            difficulty: card.difficulty,
+            unrated: card.unrated === true,
+          }
         : null,
     canvasId: teamState.canvasId,
     guesses: guessViews(viewer, teamState.guesses, amDrawer),

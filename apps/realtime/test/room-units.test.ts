@@ -152,6 +152,10 @@ describe('mapMemberCommand', () => {
 			kind: 'room',
 			command: { type: 'drawing.ops', actorId: 'm_1', ops: [begin('a')] },
 		});
+		expect(mapMemberCommand({ type: 'drawing.batch', canvasId: 'm1-r2-A', operations: [begin('a')] }, 'm_1')).toEqual({
+			kind: 'room',
+			command: { type: 'drawing.ops', actorId: 'm_1', canvasId: 'm1-r2-A', ops: [begin('a')] },
+		});
 	});
 });
 

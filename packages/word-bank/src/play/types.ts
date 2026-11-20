@@ -8,10 +8,18 @@ export interface PlayableWord {
   readonly term: string
   readonly difficulty: WordDifficulty
   readonly packId: string
-  /** One plain sentence (≤140 chars) shown only to the drawer on request. */
-  readonly definition: string
+  /**
+   * One plain sentence (≤140 chars) shown only to the drawer on request.
+   * Null for host custom words, which have none.
+   */
+  readonly definition: string | null
   /** Extra accepted answers, e.g. `bike` for `bicycle`. */
   readonly aliases: readonly string[]
+  /**
+   * A host custom word without a difficulty tag: scored as `difficulty`
+   * (medium) but labelled "Custom" for the drawer, not as a rated word.
+   */
+  readonly unrated?: true
 }
 
 /** Authoring shape for a curated pack file. */

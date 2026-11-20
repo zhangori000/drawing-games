@@ -122,6 +122,25 @@ describe('live drawing', () => {
 		}
 	});
 
+	it("drops a batch for a canvas that is no longer the sender's, without retry", async () => {
+		const { roomCode, ana, ben, cy, anaView } = await startDrawingRoom();
+		try {
+			const canvasId = requireRound(anaView).mine?.canvasId ?? '';
+			// Ink drawn on an earlier canvas that arrives late.
+			const commandId = ana.send({ type: 'drawing.batch', canvasId: 'm1-r0-A', operations: stroke('late') });
+			expect(await ana.error(commandId)).toMatchObject({ code: 'STALE_CLIENT', retryable: false });
+			await run(ana, { type: 'drawing.batch', canvasId, operations: stroke('now') });
+			expect(await ben.domain('canvas.ops', (payload) => payload.canvasId === canvasId)).toMatchObject({ ops: stroke('now') });
+
+			const stored = await runInDurableObject(env.GAME_ROOM.getByName(roomCode), (_instance, state) =>
+				state.storage.sql.exec<{ document: string }>('SELECT document FROM canvases WHERE canvas_id = ?', canvasId).one(),
+			);
+			expect(JSON.parse(stored.document)).toMatchObject({ strokeOrder: ['now'] });
+		} finally {
+			closeAll(ana, ben, cy);
+		}
+	});
+
 	it('hands the drawing to a teammate when the drawer leaves mid-round', async () => {
 		const { ana, ben, cy, anaView } = await startDrawingRoom();
 		try {

@@ -51,5 +51,11 @@ export const SURRENDER_RULES = Object.freeze({
   minimumPointDeficit: 100,
 })
 
+/**
+ * The first yes surrender vote of a results phase leaves at least this long
+ * on the results clock (extended once), so teammates can answer it.
+ */
+export const SURRENDER_VOTE_WINDOW_MS = 15_000
+
 /** Showdown cards have no per-card deadline; bots pace guesses on this. */
 export const SHOWDOWN_BOT_CARD_BUDGET_MS = 30_000

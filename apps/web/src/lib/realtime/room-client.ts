@@ -12,6 +12,7 @@ import { getRecentWordIds, recordWordIds } from '../word-history'
 import { CanvasStore } from './canvas-store'
 import { RoomCommandError, isRoomCommandError } from './command-error'
 import { GuessPacer } from './guess-pacer'
+import { autoPickNotice } from './auto-pick-notice'
 import { drawerHandoffNotice } from './handoff-notice'
 import { RoomConnection } from './room-connection'
 import type {
@@ -170,12 +171,13 @@ export class RoomClient {
           return Promise.reject(new RoomCommandError('CLOSED', 'Offline'))
         }
         // Drawing never times out: held batches are resent after a resume.
-        // `drawing.batch` carries no canvas id (the room draws on the
-        // sender's current canvas), so a batch is only ever written while
-        // its canvas is still this member's to draw on; otherwise ink from
-        // an old round or showdown card could land on a new one.
+        // A batch is only written while its canvas is still this member's
+        // to draw on, and it names that canvas, so the room refuses one
+        // that arrives after the round or showdown card moved on
+        // (`STALE_CLIENT`, dropped by the canvas store) instead of putting
+        // old ink on the new canvas.
         return connection.send(
-          { type: 'drawing.batch', operations: [...ops] },
+          { type: 'drawing.batch', canvasId, operations: [...ops] },
           {
             timeoutMs: null,
             isCurrent: () =>
@@ -252,10 +254,12 @@ export class RoomClient {
     const state = connection.getState()
     const previousView = this.snapshot.view
     let handoff: string | null = null
+    let autoPick: string | null = null
     if (state.view && state.view !== previousView) {
       const ids = this.seenWords.observe(state.view)
       if (ids.length > 0) recordWordIds(ids)
       handoff = drawerHandoffNotice(previousView, state.view)
+      autoPick = autoPickNotice(previousView, state.view)
     }
     if (
       state.status === 'open' &&
@@ -272,6 +276,8 @@ export class RoomClient {
     })
     // e.g. "Max left the room. You're drawing now…", with the new screen.
     if (handoff) this.pushToast(handoff, 'info')
+    // "Time's up! We picked paper shredder (Hard +40) for you."
+    if (autoPick) this.pushToast(autoPick, 'info')
     this.syncAccountLink()
   }
 

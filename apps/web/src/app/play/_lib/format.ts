@@ -15,12 +15,20 @@ export const DIFFICULTY_LABELS: Readonly<Record<WordDifficulty, string>> = {
   hard: 'Hard',
 }
 
-/** "Hard · +40" — the stake, said in words so color is never the only cue. */
-export function difficultyStake(difficulty: WordDifficulty): string {
+/** Label for a host custom word the host gave no difficulty tag. */
+export const UNRATED_LABEL = 'Custom'
+
+/**
+ * "Hard · +40" — the stake, said in words so color is never the only cue.
+ * An unrated custom word reads "Custom · +20" (it scores as medium).
+ */
+export function difficultyStake(
+  difficulty: WordDifficulty,
+  unrated = false,
+): string {
   const bonus = DIFFICULTY_BONUSES[difficulty]
-  return bonus > 0
-    ? `${DIFFICULTY_LABELS[difficulty]} · +${bonus}`
-    : DIFFICULTY_LABELS[difficulty]
+  const label = unrated ? UNRATED_LABEL : DIFFICULTY_LABELS[difficulty]
+  return bonus > 0 ? `${label} · +${bonus}` : label
 }
 
 export function teamName(team: TeamId): string {
@@ -56,6 +64,7 @@ export interface BreakdownPart {
 export function breakdownParts(
   breakdown: GuessScoreBreakdown,
   difficulty: WordDifficulty | null = null,
+  unrated = false,
 ): BreakdownPart[] {
   const parts: BreakdownPart[] = [
     {
@@ -65,9 +74,11 @@ export function breakdownParts(
   ]
   if (breakdown.difficultyBonus > 0) {
     parts.push({
-      label: difficulty
-        ? `${DIFFICULTY_LABELS[difficulty]} bonus`
-        : 'Difficulty bonus',
+      label: unrated
+        ? `${UNRATED_LABEL} word bonus`
+        : difficulty
+          ? `${DIFFICULTY_LABELS[difficulty]} bonus`
+          : 'Difficulty bonus',
       points: breakdown.difficultyBonus,
     })
   }

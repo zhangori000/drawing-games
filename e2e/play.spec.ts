@@ -156,6 +156,64 @@ test('the host’s custom words stay hidden from everyone else', async ({
   }
 })
 
+test('tagged custom words draft like rated cards, and a missed pick is explained', async ({
+  page,
+}) => {
+  await createRoomFromHome(page, 'Practice with bots')
+  await joinRoom(page, 'Ari')
+  const area = page.getByLabel('Custom words')
+  await area.fill(
+    [
+      'kite|easy',
+      'sock|easy',
+      'drum|easy',
+      'submarine | HARD',
+      'telescope|hard',
+      'chandelier|hard',
+      'pizza night',
+      'road trip',
+      'snow day',
+      'typo|huge',
+    ].join('\n'),
+  )
+  await expect(page.getByText('1 entry skipped')).toBeVisible()
+  await area.blur()
+  await page.getByRole('switch', { name: /Use only my words/ }).click()
+  await expect(
+    page.getByRole('switch', { name: /Use only my words/ }),
+  ).toHaveAttribute('aria-checked', 'true')
+  await chooseSetting(page, 'Rounds', '2')
+  await expect(page.getByTestId('lobby-start')).toBeEnabled({ timeout: 15_000 })
+  await page.getByTestId('lobby-start').click()
+
+  // Ari joined before the bots, so Ari drafts for Sun: one easy, one
+  // untagged ("Custom", scored like medium) and one hard card, and no
+  // "What's this?" because the host's words have no definitions.
+  const cards = page.getByTestId('draft-card')
+  await expect(cards).toHaveCount(3, { timeout: PHASE_TIMEOUT })
+  await expect(cards.filter({ hasText: 'Easy' })).toHaveCount(1)
+  await expect(cards.filter({ hasText: '+40 pts' })).toHaveCount(1)
+  await expect(cards.filter({ hasText: '+20 pts' })).toContainText('Custom')
+  await expect(cards.filter({ hasText: 'Medium' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'What’s this?' })).toHaveCount(
+    0,
+  )
+  await expect(
+    page.getByText('These are the host’s own words', { exact: false }),
+  ).toBeVisible()
+
+  // Let the draft clock run out: the room picks, and says so.
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Time’s up! We picked' }),
+  ).toBeVisible({ timeout: PHASE_TIMEOUT })
+  await expect(page.getByTestId('auto-picked-note')).toHaveText(
+    'Time ran out, so we picked this card for you.',
+  )
+  await expect(page.getByRole('button', { name: 'What’s this?' })).toHaveCount(
+    0,
+  )
+})
+
 test('a drawer who leaves mid-draft hands the pick over, and the teammate is told why', async ({
   browser,
 }) => {

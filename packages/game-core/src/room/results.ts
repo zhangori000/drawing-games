@@ -1,13 +1,17 @@
 import { TEAM_IDS } from '../types'
+import { SURRENDER_VOTE_WINDOW_MS } from './constants'
 import type { RoomContext } from './context'
-import { reject, updateMatch } from './context'
+import { patchState, reject, updateMatch } from './context'
 import { endMatch } from './match'
 import { findActiveMember } from './members'
 import { startRound } from './round-start'
+import { TEAM_NAMES } from './settings'
 import { startShowdown } from './showdown'
-import type { RoomCommand, RoomState } from './types'
+import type { RoomCommand, RoomState, SurrenderVoteState } from './types'
 import {
-  currentSurrenderVotes,
+  continueHeldBy,
+  currentSurrenderVote,
+  resultsDeadlineAtMs,
   surrenderEligible,
   surrenderRoundNumber,
   surrenderVotePasses,
@@ -51,6 +55,13 @@ export function handleRoundContinue(
   if (ctx.state.hostId !== command.actorId) {
     reject('NOT_ALLOWED', 'Only the host can skip ahead.')
   }
+  const heldBy = continueHeldBy(ctx.state, ctx.now)
+  if (heldBy !== null) {
+    reject(
+      'NOT_ALLOWED',
+      `${TEAM_NAMES[heldBy]} can still vote to surrender. Results continue when the clock runs out.`,
+    )
+  }
   continueAfterResults(ctx)
 }
 
@@ -79,14 +90,23 @@ export function handleSurrenderVote(
     reject('BAD_COMMAND', 'Vote yes or no.')
   }
   const roundNumber = surrenderRoundNumber(ctx.state)
-  const votes = {
-    ...currentSurrenderVotes(ctx.state, actor.team),
-    [actor.id]: command.approve,
+  const current = currentSurrenderVote(ctx.state, actor.team)
+  const votes = { ...current?.votes, [actor.id]: command.approve }
+  // The first yes vote leaves teammates a fair window to answer, once.
+  const windowEndsAtMs =
+    current?.windowEndsAtMs ??
+    (command.approve ? ctx.now + SURRENDER_VOTE_WINDOW_MS : undefined)
+  const surrender: SurrenderVoteState =
+    windowEndsAtMs === undefined
+      ? { team: actor.team, roundNumber, votes }
+      : { team: actor.team, roundNumber, votes, windowEndsAtMs }
+  updateMatch(ctx, (state) => ({ ...state, surrender }))
+  const deadline = ctx.state.phaseDeadlineAtMs
+  if (deadline !== null) {
+    patchState(ctx, {
+      phaseDeadlineAtMs: resultsDeadlineAtMs(deadline, surrender),
+    })
   }
-  updateMatch(ctx, (state) => ({
-    ...state,
-    surrender: { team: actor.team, roundNumber, votes },
-  }))
   // Votes that pass later, once the electorate shrinks (a teammate leaves
   // or drops past grace), end the match as due work (see `votes.ts`).
   if (surrenderVotePasses(ctx.state, actor.team, votes, ctx.now)) {

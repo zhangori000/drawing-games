@@ -13,7 +13,12 @@ import {
   twoThirdsNeeded,
 } from './selectors'
 import { effectiveWordLengthMode } from './settings'
-import type { RoomMember, RoomState, TeamRoundState } from './types'
+import type {
+  RoomMember,
+  RoomState,
+  SurrenderVoteState,
+  TeamRoundState,
+} from './types'
 
 /*
  * Team votes (the length hint and surrender) pass the moment the yes votes
@@ -108,14 +113,66 @@ export function surrenderRoundNumber(state: RoomState): number {
   return match?.round?.number ?? match?.completedRounds ?? 0
 }
 
-/** `team`'s surrender votes for the current results phase ({} if none). */
-export function currentSurrenderVotes(state: RoomState, team: TeamId): Votes {
+/** `team`'s surrender vote for the current results phase, if any. */
+export function currentSurrenderVote(
+  state: RoomState,
+  team: TeamId,
+): SurrenderVoteState | null {
   const vote = state.match?.surrender ?? null
   return vote !== null &&
     vote.team === team &&
     vote.roundNumber === surrenderRoundNumber(state)
-    ? vote.votes
-    : {}
+    ? vote
+    : null
+}
+
+/** `team`'s surrender votes for the current results phase ({} if none). */
+export function currentSurrenderVotes(state: RoomState, team: TeamId): Votes {
+  return currentSurrenderVote(state, team)?.votes ?? {}
+}
+
+/**
+ * `team`'s surrender vote is still open: the team may surrender, some voter
+ * in its electorate has not voted yet, and enough of them could still say
+ * yes for it to pass. Skipping the results waits while this holds.
+ */
+export function surrenderVoteOpen(
+  state: RoomState,
+  team: TeamId,
+  now: number,
+): boolean {
+  if (state.phase !== 'round-results') return false
+  if (!surrenderEligible(state, team)) return false
+  const electorate = surrenderElectorate(state, team, now)
+  if (electorate.length === 0) return false
+  const votes = currentSurrenderVotes(state, team)
+  const undecided = electorate.filter(
+    (member) => votes[member.id] === undefined,
+  ).length
+  return (
+    undecided > 0 &&
+    countVotes(votes, electorate) + undecided >=
+      twoThirdsNeeded(electorate.length)
+  )
+}
+
+/** The team whose open surrender vote holds `round.continue`, if any. */
+export function continueHeldBy(state: RoomState, now: number): TeamId | null {
+  return TEAM_IDS.find((team) => surrenderVoteOpen(state, team, now)) ?? null
+}
+
+/**
+ * The results deadline with `team`'s surrender window applied: the first
+ * yes vote leaves at least `SURRENDER_VOTE_WINDOW_MS` on the clock.
+ */
+export function resultsDeadlineAtMs(
+  baseDeadlineAtMs: number,
+  vote: SurrenderVoteState | null,
+): number {
+  const windowEndsAt = vote?.windowEndsAtMs
+  return windowEndsAt === undefined
+    ? baseDeadlineAtMs
+    : Math.max(baseDeadlineAtMs, windowEndsAt)
 }
 
 /** Two thirds (rounded up) of the surrender electorate approves `votes`. */

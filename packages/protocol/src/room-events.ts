@@ -5,7 +5,7 @@ import {
   normalizedPointSchema,
   strokeStyleSchema,
 } from './drawing'
-import { strokeIdSchema } from './shared'
+import { canvasIdSchema, strokeIdSchema } from './shared'
 
 /**
  * Payloads carried by `domain.event` envelopes from the room. The full
@@ -19,12 +19,6 @@ export const ROOM_DOMAIN_EVENT_NAMES = Object.freeze({
   canvasPreview: 'canvas.preview',
   guessFeedback: 'guess.feedback',
 } as const)
-
-const canvasIdSchema = z
-  .string()
-  .min(1)
-  .max(64)
-  .regex(/^[A-Za-z0-9_-]+$/)
 
 const teamSchema = z.enum(['A', 'B'])
 

@@ -1,10 +1,9 @@
 import { CURATED_PACKS } from '../packs'
 import { CUSTOM_PACK_ID } from '../packs/meta'
 import type { WordDifficulty } from '../types'
+import { parseCustomWordEntry } from './custom-entry'
 import { foldText, normalizeAnswer } from './text'
 import type { PlayableWord, WordPackData, WordPoolOptions } from './types'
-
-const CUSTOM_DEFINITION = 'A custom word added by the host.'
 
 /** URL/id-safe slug: lowercase ascii letters, digits, and single hyphens. */
 export function slugifyTerm(term: string): string {
@@ -169,17 +168,24 @@ function cleanCustomTerm(raw: string): string {
  * Host custom words become playable words in the `custom` pack with ids
  * `custom/<slug>`, so room memory recognizes repeats. Words that share a slug
  * or an answer key (`ice cream`, `Ice-Cream`, `icecream`) are kept once, in
- * first-seen order; words with no letters or digits are dropped.
+ * first-seen order; words with no letters or digits, and entries with a
+ * malformed difficulty tag, are dropped. A tagged entry (`kite|hard`, see
+ * `parseCustomWordEntry`) gets that difficulty; an untagged one gets
+ * `untaggedDifficulty` and is marked `unrated`. The id comes from the term
+ * alone, so re-tagging a word never makes it look new. Custom words have no
+ * definition.
  */
 export function customPlayableWords(
   customWords: readonly string[],
-  difficulty: WordDifficulty = 'medium',
+  untaggedDifficulty: WordDifficulty = 'medium',
 ): PlayableWord[] {
   const seenSlugs = new Set<string>()
   const seenKeys = new Set<string>()
   const words: PlayableWord[] = []
   for (const raw of customWords) {
-    const term = cleanCustomTerm(raw)
+    const entry = parseCustomWordEntry(raw)
+    if (entry === null) continue
+    const term = cleanCustomTerm(entry.term)
     const answerKey = normalizeAnswer(term)
     if (answerKey.length === 0 || seenKeys.has(answerKey)) continue
     const slug = customSlug(term, answerKey)
@@ -189,10 +195,11 @@ export function customPlayableWords(
     words.push({
       id: `${CUSTOM_PACK_ID}/${slug}`,
       term,
-      difficulty,
+      difficulty: entry.difficulty ?? untaggedDifficulty,
       packId: CUSTOM_PACK_ID,
-      definition: CUSTOM_DEFINITION,
+      definition: null,
       aliases: [],
+      ...(entry.difficulty === null ? { unrated: true as const } : {}),
     })
   }
   return words

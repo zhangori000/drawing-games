@@ -1,4 +1,5 @@
 export * from './bot-font'
+export { SURRENDER_VOTE_WINDOW_MS } from './constants'
 export * from './canvas-preview'
 export * from './engine'
 export * from './records'

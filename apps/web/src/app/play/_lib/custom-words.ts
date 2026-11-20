@@ -1,4 +1,8 @@
 import { ROOM_SETTINGS_LIMITS } from '@drawing-games/game-core'
+import {
+  formatCustomWordEntry,
+  parseCustomWordEntry,
+} from '@drawing-games/word-bank'
 
 /**
  * Client mirror of the room's custom-word rules (game-core
@@ -12,10 +16,15 @@ const INVISIBLE_CHARACTERS =
   /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g
 
 export interface ParsedCustomWords {
-  /** Clean, de-duplicated words, capped at the room's maximum. */
+  /**
+   * Clean, de-duplicated words, capped at the room's maximum. A difficulty
+   * tag is kept in the room's canonical form: `paper shredder|hard`.
+   */
   readonly words: readonly string[]
   /** Entries dropped for being too short or too long. */
   readonly invalid: number
+  /** Entries dropped for a tag other than `|easy`, `|medium` or `|hard`. */
+  readonly badTags: number
   /** Case-insensitive repeats that were dropped. */
   readonly duplicates: number
   /** Valid words beyond the room's maximum that were not kept. */
@@ -45,12 +54,19 @@ export function sanitizeWordList(
   const words: string[] = []
   const seen = new Set<string>()
   let invalid = 0
+  let badTags = 0
   let duplicates = 0
   let overLimit = 0
   for (const entry of entries) {
-    const word = cleanWord(entry)
-    if (word.length === 0) continue
-    const length = codePointLength(word)
+    const cleaned = cleanWord(entry)
+    if (cleaned.length === 0) continue
+    const parsed = parseCustomWordEntry(cleaned)
+    if (parsed === null) {
+      badTags += 1
+      continue
+    }
+    const term = parsed.term
+    const length = codePointLength(term)
     if (
       length < CUSTOM_WORD_LIMITS.minLength ||
       length > CUSTOM_WORD_LIMITS.maxLength
@@ -58,7 +74,7 @@ export function sanitizeWordList(
       invalid += 1
       continue
     }
-    const key = word.toLowerCase()
+    const key = term.toLowerCase()
     if (seen.has(key)) {
       duplicates += 1
       continue
@@ -68,9 +84,9 @@ export function sanitizeWordList(
       overLimit += 1
       continue
     }
-    words.push(word)
+    words.push(formatCustomWordEntry({ term, difficulty: parsed.difficulty }))
   }
-  return { words, invalid, duplicates, overLimit }
+  return { words, invalid, badTags, duplicates, overLimit }
 }
 
 /** One word per line: the textarea's canonical form. */

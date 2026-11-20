@@ -183,6 +183,19 @@ describe('word draft', () => {
     expect(driver.state.phase).toBe('drawing')
     expect(round.teams.A.chosenBy).toBe('drawer')
     expect(round.teams.B.chosenBy).toBe('auto')
+    // Only the drawer is told the room picked for them.
+    expect(driver.view('ana').round?.mine?.word?.autoPicked).toBe(false)
+    const drawerB = round.teams.B.drawerId
+    expect(driver.view(drawerB).round?.mine?.word).toMatchObject({
+      wordId: round.teams.B.chosenWordId,
+      autoPicked: true,
+    })
+    const drawers = [round.teams.A.drawerId, drawerB]
+    for (const id of ['ana', 'ben', 'cy', 'di']) {
+      if (drawers.includes(id)) continue
+      expect(JSON.stringify(driver.view(id))).not.toContain('autoPicked')
+    }
+    expect(JSON.stringify(driver.view(null))).not.toContain('autoPicked')
     expect(round.drawingStartedAtMs).toBe(deadline)
     expect(driver.state.phaseDeadlineAtMs).toBe(deadline + 90_000)
     expect(driver.state.wordMemory.usedWordIds).toEqual([

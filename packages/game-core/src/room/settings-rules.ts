@@ -1,4 +1,8 @@
-import { WORD_PACKS } from '@drawing-games/word-bank'
+import {
+  formatCustomWordEntry,
+  parseCustomWordEntry,
+  WORD_PACKS,
+} from '@drawing-games/word-bank'
 
 import type { OpponentDraftVisibility } from '../settings'
 import { reject } from './context'
@@ -70,7 +74,10 @@ function sanitizePackIds(raw: unknown): string[] {
 
 /**
  * Trims, collapses whitespace, strips control characters, keeps 2–32
- * character words, and de-duplicates case-insensitively (first spelling wins).
+ * character words, and de-duplicates case-insensitively (first spelling
+ * wins). An optional difficulty tag (`kite|hard`, `parseCustomWordEntry`)
+ * is kept in canonical form; entries with a malformed tag are dropped, and
+ * the length limits apply to the word itself.
  */
 function sanitizeCustomWords(raw: unknown): string[] {
   if (!Array.isArray(raw)) {
@@ -81,13 +88,15 @@ function sanitizeCustomWords(raw: unknown): string[] {
   const seen = new Set<string>()
   for (const entry of raw) {
     if (typeof entry !== 'string') continue
-    const word = cleanText(entry)
-    const length = codePointLength(word)
+    const parsed = parseCustomWordEntry(cleanText(entry))
+    if (parsed === null) continue
+    const term = parsed.term
+    const length = codePointLength(term)
     if (length < limits.minLength || length > limits.maxLength) continue
-    const key = word.toLowerCase()
+    const key = term.toLowerCase()
     if (seen.has(key)) continue
     seen.add(key)
-    words.push(word)
+    words.push(formatCustomWordEntry({ term, difficulty: parsed.difficulty }))
   }
   if (words.length > limits.maxCount) {
     return reject(

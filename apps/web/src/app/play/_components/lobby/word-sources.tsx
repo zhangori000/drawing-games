@@ -203,6 +203,11 @@ function CustomWords({
       `${plural(parsed.invalid, 'entry', 'entries')} skipped (${CUSTOM_WORD_LIMITS.minLength}–${CUSTOM_WORD_LIMITS.maxLength} characters)`,
     )
   }
+  if (parsed.badTags > 0) {
+    notes.push(
+      `${plural(parsed.badTags, 'entry', 'entries')} skipped (tag with |easy, |medium or |hard)`,
+    )
+  }
   if (parsed.duplicates > 0)
     notes.push(`${plural(parsed.duplicates, 'repeat')} removed`)
   if (parsed.overLimit > 0) {
@@ -236,12 +241,12 @@ function CustomWords({
         onBlur={() => {
           void draft.flush().finally(() => setText(null))
         }}
-        placeholder="Comma or one per line: grandma’s car, pizza night, Mr. Whiskers"
+        placeholder="Comma or one per line: grandma’s car, pizza night|easy, Mr. Whiskers|hard"
         autoComplete="off"
         autoCorrect="off"
         autoCapitalize="off"
         spellCheck={false}
-        aria-describedby={`${id}-count`}
+        aria-describedby={`${id}-count ${id}-tags`}
         className="min-h-28 w-full resize-y rounded-2xl border-2 border-[#181713] bg-white px-4 py-3 text-base leading-6 outline-none placeholder:text-black/35 focus:ring-4 focus:ring-[#5c4cf2]/25"
       />
       <p
@@ -252,6 +257,13 @@ function CustomWords({
         <strong className="text-[#181713]">{plural(count, 'word')}</strong> · up
         to {CUSTOM_WORD_LIMITS.maxCount}
         {notes.length > 0 ? ` · ${notes.join(' · ')}` : ''}
+      </p>
+      <p id={`${id}-tags`} className="-mt-2 text-xs leading-5 text-black/55">
+        Add <code className="font-mono font-black">|easy</code>,{' '}
+        <code className="font-mono font-black">|medium</code> or{' '}
+        <code className="font-mono font-black">|hard</code> after a word to set
+        its bonus, so drafts mix easy and hard cards. Words without one show as
+        “Custom” and score like medium (+20).
       </p>
       <Toggle
         label="Use only my words"

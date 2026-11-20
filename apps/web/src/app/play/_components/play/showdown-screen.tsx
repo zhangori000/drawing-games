@@ -43,6 +43,7 @@ export function ShowdownScreen({
       <WordBanner
         term={mine.word.term}
         difficulty={mine.word.difficulty}
+        unrated={mine.word.unrated}
         // Showdown cards score a flat +pointsPerCard (stated in the note),
         // never the round's difficulty bonus.
         showBonus={false}

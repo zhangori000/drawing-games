@@ -163,8 +163,12 @@ export class CanvasStore {
     }
     this.options.sendBatch(canvasId, batch).then(settle, (error: unknown) => {
       settle()
-      // Never resent (it would fail the same way). Later batches may refer
-      // to strokes it began, so the room's copy is the only safe truth.
+      // A refused batch is dropped, never resent: it would fail the same
+      // way. That includes `STALE` (its canvas ended before it was written)
+      // and the room's `STALE_CLIENT` (it ended while the batch was in
+      // flight); that canvas is finished, so there is nothing to repair.
+      // Too large: later batches may refer to strokes it began, so the
+      // room's copy is the only safe truth.
       if (isRoomCommandError(error) && error.code === 'TOO_LARGE') {
         this.options.requestResync?.()
       }

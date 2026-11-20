@@ -128,6 +128,7 @@ function OptionCard({
     disabled,
     replacementsLeft,
   )
+  const definition = option.definition
 
   return (
     <li
@@ -146,7 +147,11 @@ function OptionCard({
       >
         <span className="flex w-full items-center justify-between gap-2">
           <span className="flex flex-wrap items-center gap-1.5">
-            <DifficultyChip difficulty={option.difficulty} size="md" />
+            <DifficultyChip
+              difficulty={option.difficulty}
+              unrated={option.unrated}
+              size="md"
+            />
             {option.drawnBefore ? (
               // Only dealt once the room has run out of never-drawn words.
               <span
@@ -182,18 +187,22 @@ function OptionCard({
         </span>
       </button>
       <div className="border-t-2 border-dashed border-black/15 px-3 py-2">
-        <button
-          type="button"
-          aria-expanded={showDefinition}
-          onClick={() => setShowDefinition((value) => !value)}
-          className="min-h-11 w-full rounded-xl px-2 text-left text-sm font-black text-[#5c4cf2] hover:bg-black/5"
-        >
-          {showDefinition ? 'Hide meaning' : 'What’s this?'}
-        </button>
-        {showDefinition ? (
-          <p className="px-2 pb-2 text-sm leading-6 text-black/70">
-            {option.definition}
-          </p>
+        {definition !== null ? (
+          <>
+            <button
+              type="button"
+              aria-expanded={showDefinition}
+              onClick={() => setShowDefinition((value) => !value)}
+              className="min-h-11 w-full rounded-xl px-2 text-left text-sm font-black text-[#5c4cf2] hover:bg-black/5"
+            >
+              {showDefinition ? 'Hide meaning' : 'What’s this?'}
+            </button>
+            {showDefinition ? (
+              <p className="px-2 pb-2 text-sm leading-6 text-black/70">
+                {definition}
+              </p>
+            ) : null}
+          </>
         ) : null}
         <div className="grid grid-cols-2 gap-2 pt-1">
           <SwapButton
@@ -205,15 +214,18 @@ function OptionCard({
           <SwapButton
             disabled={!canReplace}
             onClick={() => {
-              // Definition first: "don't know it" is the last resort.
-              if (!showDefinition) {
+              // Definition first: "don't know it" is the last resort. A
+              // host's own word has none, so it swaps straight away.
+              if (definition !== null && !showDefinition) {
                 setShowDefinition(true)
                 return
               }
               replace('unknown-definition')
             }}
           >
-            {showDefinition ? 'Still don’t know' : 'Don’t know it'}
+            {definition !== null && showDefinition
+              ? 'Still don’t know'
+              : 'Don’t know it'}
           </SwapButton>
         </div>
         <p className="px-1 pt-1 text-[11px] font-semibold text-black/45">
@@ -227,7 +239,7 @@ function OptionCard({
 }
 
 function pickLabel(option: DraftOptionView): string {
-  return `Pick ${option.term}, ${difficultyStake(option.difficulty)}, from ${option.packName}${option.drawnBefore ? ', already drawn in this room' : ''}`
+  return `Pick ${option.term}, ${difficultyStake(option.difficulty, option.unrated)}, from ${option.packName}${option.drawnBefore ? ', already drawn in this room' : ''}`
 }
 
 function bonusLabel(option: DraftOptionView): string {
@@ -297,7 +309,10 @@ function OptionRow({
         >
           <span className="flex min-w-0 flex-1 flex-col gap-1 sm:w-full sm:flex-none">
             <span className="flex min-w-0 items-center gap-1.5">
-              <DifficultyChip difficulty={option.difficulty} />
+              <DifficultyChip
+                difficulty={option.difficulty}
+                unrated={option.unrated}
+              />
               {option.drawnBefore ? (
                 <span
                   data-testid="drawn-before"
@@ -330,7 +345,11 @@ function OptionRow({
           type="button"
           aria-expanded={expanded}
           aria-controls={detailsId}
-          aria-label={`What’s this? Meaning and swaps for ${option.term}`}
+          aria-label={
+            option.definition !== null
+              ? `What’s this? Meaning and swaps for ${option.term}`
+              : `Swaps for ${option.term}`
+          }
           onClick={() => setExpanded((value) => !value)}
           className={cx(
             'grid w-12 shrink-0 place-items-center border-l-2 border-dashed border-black/15 text-base font-black text-[#5c4cf2] transition hover:bg-black/5',
@@ -341,7 +360,8 @@ function OptionRow({
             aria-hidden="true"
             className="grid size-7 place-items-center rounded-full border-2 border-current"
           >
-            {expanded ? '×' : '?'}
+            {/* No meaning to show for a host's own word: swaps only. */}
+            {expanded ? '×' : option.definition !== null ? '?' : '⇄'}
           </span>
         </button>
       </div>
@@ -350,13 +370,15 @@ function OptionRow({
           id={detailsId}
           className="border-t-2 border-dashed border-black/15 px-3 py-2"
         >
-          <p className="text-sm leading-5 text-black/70">
-            <strong className="font-black text-[#181713]">
-              {option.term}:
-            </strong>{' '}
-            {option.definition}
-          </p>
-          <div className="grid grid-cols-2 gap-2 pt-2 sm:grid-cols-1">
+          {option.definition !== null ? (
+            <p className="pb-2 text-sm leading-5 text-black/70">
+              <strong className="font-black text-[#181713]">
+                {option.term}:
+              </strong>{' '}
+              {option.definition}
+            </p>
+          ) : null}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-1">
             <SwapButton
               disabled={!canReplace}
               onClick={() => replace('seen-before')}

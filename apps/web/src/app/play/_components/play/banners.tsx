@@ -18,6 +18,8 @@ const BANNER =
 export interface WordBannerProps {
   readonly term: string
   readonly difficulty: WordDifficulty
+  /** A host custom word with no difficulty tag (chip says "Custom"). */
+  readonly unrated?: boolean
   readonly definition?: string | null
   readonly packName?: string | null
   /** Extra line, e.g. showdown card progress. */
@@ -36,6 +38,7 @@ export interface WordBannerProps {
 export function WordBanner({
   term,
   difficulty,
+  unrated = false,
   definition,
   packName,
   note,
@@ -55,7 +58,11 @@ export function WordBanner({
           >
             {term}
           </strong>
-          <DifficultyChip difficulty={difficulty} showBonus={showBonus} />
+          <DifficultyChip
+            difficulty={difficulty}
+            unrated={unrated}
+            showBonus={showBonus}
+          />
         </p>
         {note ? (
           <p className="truncate text-xs font-semibold text-black/60">{note}</p>

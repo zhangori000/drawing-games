@@ -107,6 +107,7 @@ function DrawerDraft({
           </strong>
           <DifficultyChip
             difficulty={mine.word.difficulty}
+            unrated={mine.word.unrated}
             showBonus
             size="md"
           />
@@ -117,19 +118,37 @@ function DrawerDraft({
       </Card>
     )
   }
+  // A host's own words come without meanings to look up.
+  const anyDefinition = (mine.options ?? []).some(
+    (option) => option.definition !== null,
+  )
   return (
     <div className={cx('grid', compact ? 'gap-2' : 'gap-3')}>
       {compact ? (
         <p className="text-sm leading-5 text-black/65">
           Tap a word to pick it; harder ones earn a bigger bonus. Tap{' '}
-          <span className="font-black text-[#5c4cf2]">?</span> for its meaning
-          or to swap it.
+          {anyDefinition ? (
+            <>
+              <span className="font-black text-[#5c4cf2]">?</span> for its
+              meaning or to swap it.
+            </>
+          ) : (
+            <>
+              <span className="font-black text-[#5c4cf2]">⇄</span> to swap it.
+            </>
+          )}
         </p>
       ) : (
         <p className="text-sm leading-6 text-black/65">
           Tap a card to pick it (or press its number). Harder words score a
-          bigger bonus if your team solves them. Not sure what one means? Tap{' '}
-          <em>What’s this?</em> first.
+          bigger bonus if your team solves them.{' '}
+          {anyDefinition ? (
+            <>
+              Not sure what one means? Tap <em>What’s this?</em> first.
+            </>
+          ) : (
+            'These are the host’s own words, so there are no meanings to look up.'
+          )}
         </p>
       )}
       <DraftCards

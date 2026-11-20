@@ -48,7 +48,12 @@ export function mapMemberCommand(command: MemberCommand, memberId: string): Mapp
 		case 'hint.vote':
 			return room({ type: 'hint.vote', actorId, approve: command.approve });
 		case 'drawing.batch':
-			return room({ type: 'drawing.ops', actorId, ops: command.operations });
+			return room({
+				type: 'drawing.ops',
+				actorId,
+				ops: command.operations,
+				...(command.canvasId === undefined ? {} : { canvasId: command.canvasId }),
+			});
 		case 'surrender.vote':
 			return room({ type: 'surrender.vote', actorId, approve: command.approve });
 		case 'rematch.vote':

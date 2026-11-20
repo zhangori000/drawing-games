@@ -10,6 +10,7 @@ import { MAX_MEMBERS_PER_TEAM, MAX_ROOM_MEMBERS } from './settings'
 import { chosenOption } from './selectors'
 import type { MatchState, RoomState, RoundState } from './types'
 import { ROOM_STATE_VERSION } from './types'
+import { resultsDeadlineAtMs } from './votes'
 import { roomPool, roundWordDemand } from './words'
 
 export class RoomInvariantError extends Error {
@@ -73,9 +74,14 @@ function expectedDeadline(state: RoomState): number | null {
       return match?.round?.drawingDeadlineAtMs ?? Number.NaN
     case 'round-results': {
       const endedAt = match?.round?.endedAtMs
-      return endedAt === null || endedAt === undefined
-        ? Number.NaN
-        : endedAt + state.settings.roundResultsSeconds * 1000
+      if (endedAt === null || endedAt === undefined) return Number.NaN
+      const vote = match?.surrender ?? null
+      return resultsDeadlineAtMs(
+        endedAt + state.settings.roundResultsSeconds * 1000,
+        vote !== null && vote.roundNumber === match?.round?.number
+          ? vote
+          : null,
+      )
     }
     case 'showdown':
       return match?.showdown?.deadlineAtMs ?? Number.NaN

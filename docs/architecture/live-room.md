@@ -107,7 +107,16 @@ names and meanings in `types.ts` must hold.
 - `lobby.update-settings` (host, lobby): validate against
   `ROOM_SETTINGS_LIMITS`; rounds must be even; unknown pack ids are dropped;
   custom words are trimmed, whitespace-collapsed, stripped of control
-  characters, 2–32 chars, case-insensitively de-duplicated, max 300. There
+  characters, 2–32 chars, case-insensitively de-duplicated, max 300. An
+  optional difficulty tag (`term|easy|medium|hard`, word-bank
+  `parseCustomWordEntry`) is stored canonically (`kite|hard`) and does not
+  count toward the length; an entry with any other text after `|` is
+  dropped. In the pool (`customPlayableWords`) a tagged word gets that
+  difficulty; an untagged one scores as medium with `unrated: true`, which
+  `DraftOptionView`, the drawer's `word`, showdown `word` and
+  `RoundResultTeamView` carry so the UI says "Custom" (guessers' own-word
+  `difficulty` stays `medium`). Custom words have `definition: null`. The id
+  is `custom/<slug of the term>`, so re-tagging never makes a word new. There
   must be at least one enabled pack, unless `customWordsMode` is `only` and
   there are at least `2 × wordChoiceCount` custom words. Any accepted change
   clears every human's ready flag.
@@ -240,7 +249,10 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   `unknown-definition` adds it to `memory.soft`. The UI shows the definition
   first, so "don't know it" is a last resort rather than the only help.
 - At the draft deadline each unchosen team gets a random remaining card
-  (`chosenBy: 'auto'`), preferring cards never drawn in this room.
+  (`chosenBy: 'auto'`), preferring cards never drawn in this room. The
+  drawer's `round.mine.word.autoPicked` is then true (it exists only on the
+  drawer's `word`), and the web shows a one-time toast on the switch to
+  drawing plus a note in the word banner.
 
 ### Drawing and guessing
 
@@ -250,6 +262,13 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   showdown card). The reducer counts `stroke.end` ops into `strokeCount`,
   stamps `firstStrokeAtMs`, and emits `canvas.ops` unchanged. Ops from anyone
   else are rejected. Canvas content itself lives in the realtime layer.
+  `drawing.batch` names the canvas it was drawn on (`canvasId`, optional on
+  the wire for older clients; the web always sends it). A batch whose
+  `canvasId` is not the sender's drawable canvas right now (the round ended,
+  or the showdown card moved on, while it was in flight) is refused with
+  `STALE_CLIENT`, `retryable: false`, and the web drops it silently, so old
+  ink never lands on the next canvas. An untagged batch goes to the sender's
+  current canvas, as before.
 - `guess.submit`: a member of a team that has not solved, who is not that
   team's drawer. Text is trimmed and must be 1–60 chars. Rate limit: one
   guess per 400 ms per member, at most 50 per member per round. The web
@@ -302,11 +321,19 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   for account members of each team (`drew`, `guessed`, `missed`, `offered`,
   `seen-report`, `unknown-report`). Every member's in-room `memory.soft`
   gains both words; each drawer's `memory.avoid` gains their own word.
-- Results last `roundResultsSeconds`; the host may `round.continue` early.
+- Results last `roundResultsSeconds`; the host may `round.continue` early,
+  except while a surrender vote is open (`surrenderVoteOpen`: the team is
+  eligible, some voter in its electorate has not voted, and yes votes plus
+  undecided voters still reach the threshold). The projection then sets
+  `results.canContinue` false and `results.continueHeldBy` to that team, and
+  the command is refused with `NOT_ALLOWED`.
 - `surrender.vote` during results: eligibility via `getSurrenderEligibility`
   (≥3 completed rounds, ≥100 behind). Two thirds (rounded up) of the team's
   human members within reconnect grace must approve. Success ends the match
-  for the opponent.
+  for the opponent. The first yes vote of a results phase sets
+  `surrender.windowEndsAtMs` to 15 s later (`SURRENDER_VOTE_WINDOW_MS`),
+  once, and the results deadline becomes the later of the normal deadline
+  and that time (`resultsDeadlineAtMs`, also checked by the invariants).
 - Vote resolution (`votes.ts`): a vote is checked when it is cast, and
   `advanceRoom` also has due work (`nextVoteResolution`, part of
   `getNextWakeAtMs`) at the earliest moment the yes votes already cast meet

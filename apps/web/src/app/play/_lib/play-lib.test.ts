@@ -134,6 +134,25 @@ test('custom words: lengths count characters, and kept words fit the wire schema
   ).toBe(false)
 })
 
+test('custom words: difficulty tags are kept canonical, bad ones skipped', () => {
+  const parsed = parseCustomWords(
+    'paper shredder | HARD, kite|easy\nKite|hard\npizza night\ntypo|huge\n' +
+      `${'y'.repeat(CUSTOM_WORD_LIMITS.maxLength)}|medium`,
+  )
+  expect(parsed.words).toEqual([
+    'paper shredder|hard',
+    'kite|easy',
+    'pizza night',
+    `${'y'.repeat(CUSTOM_WORD_LIMITS.maxLength)}|medium`,
+  ])
+  expect(parsed).toMatchObject({ badTags: 1, duplicates: 1, invalid: 0 })
+  // The tag does not count toward the length, for the room or the wire.
+  expect(
+    roomSettingsPatchSchema.safeParse({ customWords: [...parsed.words] })
+      .success,
+  ).toBe(true)
+})
+
 test('custom words: keep at most the room maximum', () => {
   const many = Array.from(
     { length: CUSTOM_WORD_LIMITS.maxCount + 5 },

@@ -22,6 +22,9 @@ export const strokeIdSchema = z
   .max(128)
   .regex(OPAQUE_ID_PATTERN)
 
+/** A room canvas, e.g. `m1-r3-A` or `m1-sd-B-2` (opaque to clients). */
+export const canvasIdSchema = z.string().min(1).max(64).regex(OPAQUE_ID_PATTERN)
+
 /** Canonical wire form. User input should be trimmed/upcased before encoding. */
 export const roomCodeSchema = z.string().regex(/^[A-Z0-9]{4,8}$/)
 

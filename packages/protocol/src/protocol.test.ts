@@ -138,6 +138,29 @@ describe('commandEnvelopeV1Schema', () => {
     )
   })
 
+  it('carries an optional, well-formed canvas id on drawing batches', () => {
+    const operations = [{ type: 'drawing.clear' as const }]
+    const withCanvas: ClientCommand = {
+      type: 'drawing.batch',
+      canvasId: 'm1-sd-A-2',
+      operations,
+    }
+    expect(parseCommandEnvelopeV1(envelopeFor(withCanvas)).command).toEqual(
+      withCanvas,
+    )
+    // Older clients send no canvas id; the room then uses the current one.
+    const legacy: ClientCommand = { type: 'drawing.batch', operations }
+    expect(parseCommandEnvelopeV1(envelopeFor(legacy)).command).toEqual(legacy)
+    for (const canvasId of ['', 'm1 r1 A', 'x'.repeat(65), 7, null]) {
+      expect(
+        commandEnvelopeV1Schema.safeParse({
+          ...envelopeFor(legacy),
+          command: { type: 'drawing.batch', canvasId, operations },
+        }).success,
+      ).toBe(false)
+    }
+  })
+
   it('requires an explicit supported reason for a word replacement', () => {
     expect(
       commandEnvelopeV1Schema.safeParse({
@@ -166,6 +189,16 @@ describe('commandEnvelopeV1Schema', () => {
     expect(accepts(['🎉'.repeat(MAX_CUSTOM_WORD_LENGTH + 1)])).toBe(false)
     expect(accepts(['y'.repeat(MAX_CUSTOM_WORD_LENGTH + 1)])).toBe(false)
     expect(accepts(['   '])).toBe(false)
+  })
+
+  it('does not count a difficulty tag toward a custom word’s length', () => {
+    const accepts = (customWords: string[]) =>
+      roomSettingsPatchSchema.safeParse({ customWords }).success
+    const longest = 'y'.repeat(MAX_CUSTOM_WORD_LENGTH)
+    expect(accepts([`${longest}|medium`, `${longest} | HARD`])).toBe(true)
+    expect(accepts([`${longest}y|easy`])).toBe(false)
+    // Not a tag: it counts, like any other characters.
+    expect(accepts([`${longest}|huge`])).toBe(false)
   })
 })
 

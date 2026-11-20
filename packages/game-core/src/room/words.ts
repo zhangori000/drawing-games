@@ -59,6 +59,7 @@ export function toDraftOption(word: PlayableWord): DraftOption {
     packName: getWordPackName(word.packId),
     definition: word.definition,
     aliases: [...word.aliases],
+    ...(word.unrated === true ? { unrated: true } : {}),
   }
 }
 

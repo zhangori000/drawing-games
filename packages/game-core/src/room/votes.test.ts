@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { RECONNECT_GRACE_MS } from './constants'
+import { RECONNECT_GRACE_MS, SURRENDER_VOTE_WINDOW_MS } from './constants'
 import { getNextWakeAtMs } from './engine'
 import { RoomDriver } from './test-driver'
 
@@ -234,6 +234,119 @@ describe('surrender vote after the electorate shrinks', () => {
     driver.ok({ type: 'surrender.vote', actorId: 'g1', approve: true })
     driver.ok({ type: 'surrender.vote', actorId: 'g2', approve: true })
     driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    expect(driver.state.phase).toBe('word-draft')
+    expect(driver.state.match?.endedReason).toBeNull()
+  })
+})
+
+describe('surrender window', () => {
+  it('holds the host skip while the trailing team can still vote', () => {
+    const driver = surrenderRoom()
+    // The host leads team A, which trails; B's players cannot skip at all.
+    expect(driver.view('h').results).toMatchObject({
+      canContinue: false,
+      continueHeldBy: 'A',
+    })
+    expect(driver.view('x1').results?.continueHeldBy).toBe('A')
+    expect(driver.fail({ type: 'round.continue', actorId: 'h' })).toEqual({
+      code: 'NOT_ALLOWED',
+      message:
+        'Sun can still vote to surrender. Results continue when the clock runs out.',
+    })
+
+    // Two no votes of four: the 3-vote threshold is out of reach.
+    driver.ok({ type: 'surrender.vote', actorId: 'g1', approve: false })
+    expect(driver.view('h').results?.continueHeldBy).toBe('A')
+    driver.ok({ type: 'surrender.vote', actorId: 'g2', approve: false })
+    expect(driver.view('h').results).toMatchObject({
+      canContinue: true,
+      continueHeldBy: null,
+    })
+    driver.ok({ type: 'round.continue', actorId: 'h' })
+    expect(driver.state.phase).toBe('word-draft')
+  })
+
+  it('stops holding the skip once the trailing team has nobody to vote', () => {
+    const driver = new RoomDriver({ seed: 23 })
+    driver.join('x1', 'X1', { team: 'B' })
+    driver.join('x2', 'X2', { team: 'B' })
+    driver.join('a1', 'A1', { team: 'A' })
+    driver.join('a2', 'A2', { team: 'A' })
+    driver.settings('x1', { roundResultsSeconds: 20, showdown: false })
+    driver.readyAll()
+    driver.ok({ type: 'match.start', actorId: 'x1' })
+    for (let round = 0; round < 3; round += 1) {
+      if (round > 0) driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+      driver.pickWords('hard')
+      driver.solve('B')
+      driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    }
+    expect(driver.state.phase).toBe('round-results')
+    expect(driver.view('x1').results?.continueHeldBy).toBe('A')
+    driver.ok({ type: 'member.presence', memberId: 'a1', connected: false })
+    driver.ok({ type: 'member.presence', memberId: 'a2', connected: false })
+    // Still within reconnect grace: they could come back and vote.
+    driver.now += RECONNECT_GRACE_MS
+    expect(driver.view('x1').results?.canContinue).toBe(false)
+    driver.now += 1
+    expect(driver.view('x1').results).toMatchObject({
+      canContinue: true,
+      continueHeldBy: null,
+    })
+    driver.ok({ type: 'round.continue', actorId: 'x1' })
+    expect(driver.state.phase).toBe('word-draft')
+  })
+
+  it('extends the results clock once, on the first yes vote', () => {
+    const driver = surrenderRoom()
+    const base = driver.state.phaseDeadlineAtMs!
+    // A no vote alone changes nothing.
+    driver.now = base - 2_000
+    driver.ok({ type: 'surrender.vote', actorId: 'g3', approve: false })
+    expect(driver.state.phaseDeadlineAtMs).toBe(base)
+
+    // 2 s left: the first yes vote leaves the whole window.
+    driver.ok({ type: 'surrender.vote', actorId: 'g1', approve: true })
+    const extended = driver.now + SURRENDER_VOTE_WINDOW_MS
+    expect(driver.state.phaseDeadlineAtMs).toBe(extended)
+    expect(driver.view('g2').phaseDeadlineAtMs).toBe(extended)
+    expect(getNextWakeAtMs(driver.state)).toBe(extended)
+
+    // Changing a vote and voting again never extends it a second time.
+    driver.now += 5_000
+    driver.ok({ type: 'surrender.vote', actorId: 'g1', approve: false })
+    driver.ok({ type: 'surrender.vote', actorId: 'g1', approve: true })
+    expect(driver.state.phaseDeadlineAtMs).toBe(extended)
+
+    // The teammates answer inside the window and the match ends.
+    driver.ok({ type: 'surrender.vote', actorId: 'h', approve: true })
+    expect(driver.state.phase).toBe('round-results')
+    driver.ok({ type: 'surrender.vote', actorId: 'g2', approve: true })
+    expect(driver.state.match).toMatchObject({
+      endedReason: 'surrender',
+      winner: 'B',
+    })
+  })
+
+  it('keeps a longer results clock when the window fits inside it', () => {
+    const driver = surrenderRoom()
+    const base = driver.state.phaseDeadlineAtMs!
+    driver.ok({ type: 'surrender.vote', actorId: 'g1', approve: true })
+    expect(base - driver.now).toBeGreaterThan(SURRENDER_VOTE_WINDOW_MS)
+    expect(driver.state.phaseDeadlineAtMs).toBe(base)
+    driver.advanceTo(base)
+    expect(driver.state.phase).toBe('word-draft')
+    expect(driver.state.match?.surrender).toBeNull()
+  })
+
+  it('moves on when the extended window runs out without a quorum', () => {
+    const driver = surrenderRoom()
+    driver.now = driver.state.phaseDeadlineAtMs! - 1_000
+    driver.ok({ type: 'surrender.vote', actorId: 'g1', approve: true })
+    const extended = driver.state.phaseDeadlineAtMs!
+    driver.advanceTo(extended - 1)
+    expect(driver.state.phase).toBe('round-results')
+    driver.advanceTo(extended)
     expect(driver.state.phase).toBe('word-draft')
     expect(driver.state.match?.endedReason).toBeNull()
   })

@@ -6,6 +6,7 @@ import {
 } from './drawing'
 import {
   PROTOCOL_VERSION,
+  canvasIdSchema,
   commandIdSchema,
   roomCodeSchema,
   sequenceSchema,
@@ -29,13 +30,25 @@ const optionIdSchema = z
  */
 export const MAX_CUSTOM_WORD_LENGTH = 32
 
+/**
+ * The optional difficulty tag after a custom word (`kite|hard`), as the room
+ * reads it (word-bank `parseCustomWordEntry`). It does not count toward the
+ * word's length; the room drops entries whose tag is malformed.
+ */
+const CUSTOM_WORD_DIFFICULTY_TAG = /\s*\|\s*(?:easy|medium|hard)\s*$/i
+
 const customWordSchema = z
   .string()
   .trim()
   .min(1)
-  .refine((word) => Array.from(word).length <= MAX_CUSTOM_WORD_LENGTH, {
-    message: `Custom words are at most ${MAX_CUSTOM_WORD_LENGTH} characters.`,
-  })
+  .refine(
+    (word) =>
+      Array.from(word.replace(CUSTOM_WORD_DIFFICULTY_TAG, '')).length <=
+      MAX_CUSTOM_WORD_LENGTH,
+    {
+      message: `Custom words are at most ${MAX_CUSTOM_WORD_LENGTH} characters.`,
+    },
+  )
 
 const opaqueTokenSchema = z
   .string()
@@ -206,6 +219,14 @@ export const hintCommandSchema = z.strictObject({
 
 export const drawingBatchCommandSchema = z.strictObject({
   type: z.literal('drawing.batch'),
+  /**
+   * The canvas these operations were drawn on (the view's round or showdown
+   * `canvasId`). Optional for older clients. When present, the room refuses
+   * the batch with a non-retryable `STALE_CLIENT` error unless it is still
+   * the sender's drawable canvas, so ink in flight when a round or showdown
+   * card ends never lands on the next canvas.
+   */
+  canvasId: canvasIdSchema.optional(),
   operations: z
     .array(drawingOperationSchema)
     .min(1)

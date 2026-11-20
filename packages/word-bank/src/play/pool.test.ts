@@ -35,17 +35,51 @@ describe('slugifyTerm', () => {
 })
 
 describe('customPlayableWords', () => {
-  it('turns host words into medium custom words with custom/<slug> ids', () => {
+  it('turns host words into unrated medium custom words with custom/<slug> ids', () => {
     expect(customPlayableWords(['  Eiffel   Tower ', 'Grandma'])).toEqual([
       {
         id: 'custom/eiffel-tower',
         term: 'Eiffel Tower',
         difficulty: 'medium',
         packId: CUSTOM_PACK_ID,
-        definition: 'A custom word added by the host.',
+        definition: null,
         aliases: [],
+        unrated: true,
       },
       expect.objectContaining({ id: 'custom/grandma', term: 'Grandma' }),
+    ])
+  })
+
+  it('gives tagged words their difficulty, with the id of the bare term', () => {
+    const words = customPlayableWords([
+      'paper shredder|hard',
+      'kite | Easy',
+      'pizza night|medium',
+      'Grandma',
+    ])
+    expect(
+      words.map((word) => [word.id, word.term, word.difficulty, word.unrated]),
+    ).toEqual([
+      ['custom/paper-shredder', 'paper shredder', 'hard', undefined],
+      ['custom/kite', 'kite', 'easy', undefined],
+      ['custom/pizza-night', 'pizza night', 'medium', undefined],
+      ['custom/grandma', 'Grandma', 'medium', true],
+    ])
+    expect(words.every((word) => word.definition === null)).toBe(true)
+    // Re-tagging keeps the id, so no-repeat memory still knows the word.
+    expect(customPlayableWords(['kite'])[0]?.id).toBe('custom/kite')
+  })
+
+  it('drops entries with a malformed tag and keeps the first of a re-tagged word', () => {
+    const words = customPlayableWords([
+      'kite|huge',
+      'kite|',
+      'a|b|hard',
+      'kite|hard',
+      'Kite|easy',
+    ])
+    expect(words.map((word) => [word.term, word.difficulty])).toEqual([
+      ['kite', 'hard'],
     ])
   })
 
@@ -89,8 +123,11 @@ describe('customPlayableWords', () => {
     expect(first[2]?.id.startsWith('custom/cafe--')).toBe(true)
   })
 
-  it('honors an explicit difficulty', () => {
-    expect(customPlayableWords(['kite'], 'hard')[0]?.difficulty).toBe('hard')
+  it('scores untagged words at an explicit default difficulty', () => {
+    expect(customPlayableWords(['kite'], 'hard')[0]).toMatchObject({
+      difficulty: 'hard',
+      unrated: true,
+    })
   })
 })
 

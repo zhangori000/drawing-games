@@ -82,7 +82,12 @@ reasons: **seen before** or **I do not know this word's definition**. Both
 reasons consume the same configured replacement allowance; unfamiliarity does
 not create an unlimited reroll path. At the deadline, the server randomly
 selects one of that drawer's remaining candidates. The two drafts do not block
-each other.
+each other. A drawer whose card was picked this way is told so, never left
+guessing why the screen changed: a one-time toast on the switch to drawing
+("Time's up! We picked paper shredder (Hard +40) for you.") and a short line
+in their word banner for the rest of the round ("Time ran out, so we picked
+this card for you."). Only the drawer learns this; guessers and the other
+team see nothing about it.
 
 Replacement actions retain their reason, actor, and server timestamp for room
 history and moderation. Opponents may observe the action only when the room's
@@ -146,6 +151,20 @@ screen shows "Stats saved to @name" with a "See your stats" link (opening
 prompt.
 
 ### Custom words and repeats
+
+A host can tag a custom word with the difficulty it should score as by adding
+`|easy`, `|medium` or `|hard` after it (`paper shredder|hard`, spaces and
+capitals around the tag are fine). Tagged words are dealt like curated ones,
+so a tagged list gives balanced easy/medium/hard drafts with the usual
+bonuses. An untagged word has no rating: it scores like a medium word (+20),
+and the drawer's card, word banner and the round results label it "Custom ·
++20" instead of inventing a difficulty. Guessers' stake chip still reads
+"Medium +20", because "Custom" would tell them it is one of the host's words
+even with the category hint off. An entry whose tag is not one of the three
+is skipped (the lobby says how many), so a typo never becomes part of an
+answer. Custom words have no definition, so their cards offer no "What's
+this?" and "Don't know it" swaps straight away; the draft's help line says
+these are the host's own words.
 
 The host's custom words are answers, so only the current host ever receives
 the list (it passes to the next host if the host leaves). Everyone else sees
@@ -414,6 +433,19 @@ with the hint vote, yes votes already cast count against the current
 electorate, so a teammate leaving or dropping past the grace can complete a
 surrender without a new vote. A successful surrender ends the match and
 records the opponent as winner without inventing extra points.
+
+The trailing team must get a fair chance to vote, so:
+
+- The "Call it here?" prompt is the first thing on that team's results
+  screen, above both drawings, so nobody has to scroll to find it.
+- The first yes vote of a results screen leaves at least 15 seconds on the
+  results clock (extended once; changing or re-casting votes never extends
+  it again), so teammates can answer.
+- While the vote is still open (someone eligible to vote has not voted and
+  enough yes votes are still possible), the host cannot skip ahead; the
+  bottom bar says which team can still vote. The results continue when the
+  clock runs out, or as soon as the vote can no longer pass (for example,
+  enough of the team voted "No, keep playing").
 
 The postgame screen offers:
 
