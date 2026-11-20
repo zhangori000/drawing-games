@@ -68,9 +68,29 @@ export function WordSources({
         ) : null}
       </div>
       <p className="-mt-3 text-sm leading-6 text-black/60">
-        Fresh means nobody here has drawn, guessed, or skipped it lately. Words
-        never repeat inside this room.
+        Fresh means nobody here has drawn, guessed, or skipped it lately.
+        {lobby && lobby.repeatsFromRound === null
+          ? ' Words drawn in this room never come back.'
+          : null}
       </p>
+      {lobby && lobby.repeatsFromRound !== null ? (
+        <p
+          role="status"
+          data-testid="repeat-warning"
+          className="-mt-2 rounded-2xl border-2 border-[#181713] bg-[#ffd9cf] px-4 py-3 text-sm leading-6"
+        >
+          <strong className="font-black">Words will repeat.</strong> This room
+          has {plural(lobby.unusedWordCount, 'word')} it hasn’t drawn yet, so{' '}
+          {lobby.repeatsFromRound === 1
+            ? 'from the first round'
+            : `from round ${lobby.repeatsFromRound}`}{' '}
+          some cards may be words already drawn here (the drawer sees them
+          marked).{' '}
+          {onlyCustom
+            ? 'Add more custom words, mix them with packs, or play fewer rounds.'
+            : 'Turn on more packs, add custom words, or play fewer rounds.'}
+        </p>
+      ) : null}
 
       <fieldset className={cx('grid gap-2', onlyCustom && 'opacity-60')}>
         <legend className="mb-2 text-sm font-black">
@@ -147,6 +167,7 @@ function CustomWords({
   readonly editable: boolean
 }) {
   const id = useId()
+  const { view } = useRoomSession()
   const settings = draft.settings
   // null while not editing: show the room's list, one word per line.
   const [text, setText] = useState<string | null>(null)
@@ -159,13 +180,15 @@ function CustomWords({
   const onlyCustom = settings.customWordsMode === 'only'
 
   if (!editable) {
+    // The room never sends other players the host's words, only how many.
+    const hidden = view.settings.customWordCount
     return (
       <div className="grid gap-1 rounded-2xl bg-black/[0.04] px-4 py-3 text-sm">
-        <p className="font-black">
-          {count > 0 ? plural(count, 'custom word') : 'No custom words'}
-          {count > 0 && onlyCustom ? ' · only these words are used' : ''}
+        <p className="font-black" data-testid="custom-word-count">
+          {hidden > 0 ? plural(hidden, 'custom word') : 'No custom words'}
+          {hidden > 0 && onlyCustom ? ' · only these words are used' : ''}
         </p>
-        {count > 0 ? (
+        {hidden > 0 ? (
           <p className="text-black/55">
             The host’s words stay hidden so they’re still a surprise.
           </p>

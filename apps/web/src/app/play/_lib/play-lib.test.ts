@@ -72,7 +72,7 @@ function lobbyView(members: MemberView[], meId: string | null): RoomView {
           accountId: null,
         }
       : null,
-    settings: DEFAULT_ROOM_SETTINGS,
+    settings: { ...DEFAULT_ROOM_SETTINGS, customWordCount: 0 },
     members,
     teams: {
       A: team(

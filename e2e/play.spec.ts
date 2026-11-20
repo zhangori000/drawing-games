@@ -93,6 +93,62 @@ test('two players on one team: the guesser solves the drawer’s word', async ({
   }
 })
 
+test('the host’s custom words stay hidden from everyone else', async ({
+  browser,
+}) => {
+  const ari = await newPlayer(browser)
+  const mina = await newPlayer(browser)
+  const words = [
+    'kite',
+    'lighthouse',
+    'snowman',
+    'cactus',
+    'volcano',
+    'pirate ship',
+    'banana',
+    'rocket',
+  ]
+  try {
+    const code = await createRoomFromHome(ari, 'Create a room')
+    await joinRoom(ari, 'Ari', 'Sun')
+    const area = ari.getByLabel('Custom words')
+    await area.fill(words.join(', '))
+    await area.blur()
+    await ari.getByRole('switch', { name: /Use only my words/ }).click()
+    await expect(
+      ari.getByRole('switch', { name: /Use only my words/ }),
+    ).toHaveAttribute('aria-checked', 'true')
+
+    await mina.goto(`/play/${code}`)
+    await joinRoom(mina, 'Mina', 'Moon')
+    // Mina learns how many words there are, never which.
+    await expect(mina.getByTestId('custom-word-count')).toHaveText(
+      /8 custom words/,
+    )
+    const minaText = await mina.locator('body').innerText()
+    for (const word of words) expect(minaText).not.toContain(word)
+
+    // Eight words cannot cover six rounds without repeats: everyone is told.
+    await expect(mina.getByTestId('repeat-warning')).toContainText(
+      'from round 2',
+    )
+    await chooseSetting(ari, 'Rounds', '2')
+    await chooseSetting(ari, 'Swaps per drawer', '0')
+    await expect(mina.getByTestId('repeat-warning')).toHaveCount(0)
+    await expect(
+      mina.getByText('Words drawn in this room never come back.'),
+    ).toBeVisible()
+
+    // Showing opponents the cards switches off the guessers' own-word clues.
+    await expect(mina.getByTestId('clues-off')).toHaveCount(0)
+    await chooseSetting(ari, 'Opponents see the draft', 'Cards + swaps')
+    await expect(mina.getByTestId('clues-off')).toBeVisible()
+  } finally {
+    await ari.context().close()
+    await mina.context().close()
+  }
+})
+
 test('a player the host removes sees the removed screen and can join again', async ({
   browser,
 }) => {

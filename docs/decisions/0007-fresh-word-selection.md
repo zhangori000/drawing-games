@@ -25,7 +25,13 @@ Draft cards are chosen by a pure, seeded selector in
    and one hard card, each labelled with its bonus.
 3. **Hard exclusions.** Words already drawn in the room (across rematches),
    the drawer's personal `avoid` memory (words they drew or reported as seen),
-   and the other team's cards this round.
+   and the other team's cards this round. When a small pool runs out, they
+   relax per slot, never for the whole draft: never-drawn words the drawer
+   has seen come first, then the room's least recently drawn words, and the
+   other team's cards last (see `docs/architecture/live-room.md`). Bots and
+   the draft deadline pick a never-drawn card when the hand has one, the
+   drawer sees drawn cards marked, and the lobby warns from which round a
+   room's words must repeat.
 4. **Soft penalties.** Recently offered words in the room, the drawer's
    `soft` memory (guessed, missed, offered, "don't know"), and teammates'
    memories lower a word's odds. Recently used packs are de-prioritized and
@@ -56,7 +62,8 @@ guess that merely contains the answer among other words.
 
 - Content quality depends on editorial care; packs need periodic review.
 - Small pools (few packs, short custom lists) exhaust room memory sooner; the
-  selector then relaxes to the oldest-used words instead of failing.
+  selector then brings back the least recently drawn words, only for the
+  slots that need them, instead of failing, and the lobby says so up front.
 - Soft memory from guests is unverifiable and only ever lowers odds.
 
 ## Compliance

@@ -48,7 +48,7 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = Object.freeze({
   roundResultsSeconds: 8,
   showdownSeconds: 120,
   seenRerollsPerDrawer: 1,
-  opponentDraftVisibility: 'options-and-actions',
+  opponentDraftVisibility: 'actions-only',
   wordLength: Object.freeze({
     initialVisibility: 'hidden',
     revealPolicy: 'team-majority',

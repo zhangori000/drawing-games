@@ -473,7 +473,7 @@ export interface RoomView {
   readonly hostId: string | null
   /** null when the viewer is not a member of this room. */
   readonly me: MeView | null
-  readonly settings: RoomSettings
+  readonly settings: RoomSettingsView
   readonly members: readonly MemberView[]
   readonly teams: Readonly<Record<TeamId, TeamView>>
   readonly lobby: LobbyView | null
@@ -483,6 +483,16 @@ export interface RoomView {
   readonly showdown: ShowdownView | null
   readonly final: FinalView | null
   readonly surrender: SurrenderView | null
+}
+
+/**
+ * The room's settings as one viewer sees them. The host's custom words are
+ * answers, so `customWords` holds the list for the current host only and is
+ * empty for everyone else, in every phase; `customWordCount` tells everyone
+ * how many there are.
+ */
+export interface RoomSettingsView extends RoomSettings {
+  readonly customWordCount: number
 }
 
 export interface MeView {
@@ -525,6 +535,14 @@ export interface LobbyView {
   readonly poolSize: number
   /** Pool words none of the current members has drawn or seen recently. */
   readonly freshWordCount: number
+  /** Pool words never drawn in this room (room memory survives rematches). */
+  readonly unusedWordCount: number
+  /**
+   * First round of the next match whose cards may include a word already
+   * drawn in this room (pool too small for the rounds, cards, and swaps), or
+   * null when every round stays fresh.
+   */
+  readonly repeatsFromRound: number | null
   readonly minPerTeam: number
   readonly maxPerTeam: number
 }
@@ -548,6 +566,11 @@ export interface DraftOptionView {
   readonly definition: string
   /** Difficulty bonus added on a solve: easy 0, medium 20, hard 40. */
   readonly bonus: number
+  /**
+   * Already drawn in this room. Only dealt once the pool has no never-drawn
+   * word left for the slot; the UI marks it so the drawer can skip it.
+   */
+  readonly drawnBefore: boolean
 }
 
 export interface GuessView {
@@ -556,6 +579,10 @@ export interface GuessView {
   readonly memberName: string
   /** null when the guess was correct (the answer is never echoed). */
   readonly text: string | null
+  /**
+   * `close` and `partial` only reach the guesser and the team's drawer;
+   * other teammates get `wrong` for those guesses.
+   */
   readonly verdict: GuessVerdict
   readonly atMs: number
   readonly mine: boolean
@@ -591,9 +618,16 @@ export interface MyTeamRoundView {
     readonly definition: string
     readonly packName: string
   } | null
-  /** Visible to the whole team once chosen (it is the stake, not the answer). */
+  /**
+   * The stake, for the whole team once chosen. Guessers get null while
+   * opponents see the draft cards (`ownWordCluesAllowed`), since it would
+   * point at one of them.
+   */
   readonly difficulty: WordDifficulty | null
-  /** Pack name for guessers when `categoryHint` is on; null otherwise. */
+  /**
+   * Pack name for guessers when `categoryHint` is on and opponents do not
+   * see the draft cards; null otherwise.
+   */
   readonly category: string | null
   /**
    * Guessers only, when length is shown or revealed: underscores for letters,
@@ -620,7 +654,10 @@ export interface OpponentRoundView {
   readonly team: TeamId
   readonly drawerId: string
   readonly drawerName: string
-  /** During word-draft only, and only if visibility is options-and-actions. */
+  /**
+   * During word-draft only, only if visibility is options-and-actions, and
+   * only for members who were in the room when the cards were dealt.
+   */
   readonly options:
     | readonly {
         readonly term: string

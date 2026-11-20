@@ -1,10 +1,14 @@
 'use client'
 
-import type { RoomSettings } from '@drawing-games/game-core'
+import {
+  ownWordCluesAllowed,
+  type RoomSettings,
+} from '@drawing-games/game-core'
 import type { ReactNode } from 'react'
 
 import { formatSeconds } from '../../_lib/format'
 import {
+  CLUES_OFF_WITH_CARDS,
   DIFFICULTY_MIX_CHOICES,
   DRAWING_SECONDS_CHOICES,
   HINT_COST_STEPPER,
@@ -53,6 +57,8 @@ export function SettingsPanel({
 }) {
   const settings = draft.settings
   const readOnly = !editable
+  // Kept as chosen, but not used while opponents see the draft cards.
+  const clues = ownWordCluesAllowed(settings)
   const set = <K extends keyof RoomSettings>(key: K, value: RoomSettings[K]) =>
     draft.update({ [key]: value } as Pick<RoomSettings, K>)
 
@@ -142,14 +148,23 @@ export function SettingsPanel({
         </Section>
 
         <Section title="Clues">
+          {clues ? null : (
+            <p
+              data-testid="clues-off"
+              className="-mt-2 rounded-2xl bg-[#ffd9cf] px-3 py-2 text-sm font-semibold leading-6"
+            >
+              {CLUES_OFF_WITH_CARDS} Pick “Swaps only” to bring them back.
+            </p>
+          )}
           <ChoiceGroup
             label="Word length"
             value={settings.wordLengthMode}
             choices={WORD_LENGTH_CHOICES}
-            readOnly={readOnly}
+            readOnly={readOnly || !clues}
             onChange={(value) => set('wordLengthMode', value)}
+            hint={clues ? undefined : 'Not used with “Cards + swaps”.'}
           />
-          {settings.wordLengthMode === 'hidden-vote' ? (
+          {clues && settings.wordLengthMode === 'hidden-vote' ? (
             <>
               <Stepper
                 label="Vote opens after"
@@ -171,9 +186,13 @@ export function SettingsPanel({
           ) : null}
           <Toggle
             label="Category hint"
-            description="Guessers see which pack their word came from, like “Animals”."
+            description={
+              clues
+                ? 'Guessers see which pack their word came from, like “Animals”.'
+                : 'Not used with “Cards + swaps”.'
+            }
             checked={settings.categoryHint}
-            readOnly={readOnly}
+            readOnly={readOnly || !clues}
             onChange={(value) => set('categoryHint', value)}
           />
         </Section>

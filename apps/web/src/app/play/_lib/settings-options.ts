@@ -102,15 +102,15 @@ export const WORD_LENGTH_CHOICES: readonly Choice<WordLengthMode>[] = [
 
 export const VISIBILITY_CHOICES: readonly Choice<OpponentDraftVisibility>[] = [
   {
-    value: 'options-and-actions',
-    label: 'Cards + swaps',
-    description:
-      'Each team sees the other drawer’s cards and swaps, never the pick.',
-  },
-  {
     value: 'actions-only',
     label: 'Swaps only',
     description: 'Opponents only see that a card was swapped.',
+  },
+  {
+    value: 'options-and-actions',
+    label: 'Cards + swaps',
+    description:
+      'Each team sees the other drawer’s cards and swaps, never the pick. Guessers lose the category, bonus, and letter clues for their own word.',
   },
   {
     value: 'hidden',
@@ -118,6 +118,13 @@ export const VISIBILITY_CHOICES: readonly Choice<OpponentDraftVisibility>[] = [
     description: 'Opponents see nothing during the draft.',
   },
 ]
+
+/**
+ * Why the Clues section is off while opponents see the cards (game-core's
+ * `ownWordCluesAllowed` is the rule).
+ */
+export const CLUES_OFF_WITH_CARDS =
+  'Off while opponents see the draft cards: any one clue plus those cards would give the word away.'
 
 export const CUSTOM_MODE_LABELS: Readonly<Record<CustomWordsMode, string>> = {
   mix: 'Mixed into the packs',

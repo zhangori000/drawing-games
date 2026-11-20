@@ -82,6 +82,8 @@ function GuessRow({
       </li>
     )
   }
+  // The room sends near-miss verdicts only to the guesser and the drawer;
+  // everyone else already gets these guesses as plain "wrong".
   const badge = guess.verdict === 'wrong' ? null : VERDICT_BADGES[guess.verdict]
   return (
     <li

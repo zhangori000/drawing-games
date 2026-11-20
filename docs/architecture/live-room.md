@@ -105,6 +105,13 @@ names and meanings in `types.ts` must hold.
   must be at least one enabled pack, unless `customWordsMode` is `only` and
   there are at least `2 × wordChoiceCount` custom words. Any accepted change
   clears every human's ready flag.
+- `LobbyView` also forecasts repeats: `unusedWordCount` (pool words never
+  drawn in this room, which survives rematches) and `repeatsFromRound`, the
+  first round of the configured match whose cards could include a drawn
+  word, i.e. the first round `r` with
+  `unusedWordCount − 2·(r − 1) < 2·(wordChoiceCount + replacementsPerDrawer)`
+  (`roundWordDemand`), or null. The lobby shows a warning instead of
+  "words never come back" when it is set; it does not block Start.
 - `lobby.add-bot` (host, lobby): ids `bot_<n>`; names cycle through
   `Pixel Pete, Doodlebot, Sketchy, Inkling, Scribbles, Smudge, Squiggles,
 Blotto`. Bots are always connected and ready and never have accounts.
@@ -144,12 +151,25 @@ At round start, for team A then team B:
 2. **Slots**: `difficultySlots(settings.difficultyMix, wordChoiceCount, rng)`.
    `balanced` means three cards are always one easy, one medium, one hard,
    each labelled with its bonus (+0/+20/+40) so the choice is meaningful.
-3. **Hard exclusions** (never offered):
-   - every word already drawn in this room, across rematches (until fewer
-     than `4 × wordChoiceCount` words would remain; then only the most recent
-     half of the used list stays excluded);
-   - the drawer's `memory.avoid` (drew before, reported "seen it");
-   - the other team's cards this round.
+3. **Exclusions, filled in stages** (`selectDraftWords`). Never offered:
+   the drawer's own live cards and words replaced earlier this round. The
+   slots are filled from the strictest stage that still has words, and a
+   later stage only fills the slots the earlier ones could not:
+   1. words never drawn in this room (across rematches, by id or answer
+      key), not in the drawer's `memory.avoid` (drew before, reported "seen
+      it"), and not on the other team's cards this round;
+   2. never-drawn words from the drawer's `memory.avoid`;
+   3. words drawn in this room, least recently drawn first: only the oldest
+      few are let back in, a step at a time (avoid memory still excluded);
+   4. any word but the other team's cards;
+   5. (tiny pools only) the other team's cards too.
+
+   So a drawn word only comes back once no never-drawn word is left for the
+   slot. With at least `roundWordDemand` never-drawn words at each draft no
+   card is ever a drawn word (an invariant checks no chosen word repeats in
+   a match while the pool has that room). The drawer's view marks such a
+   card `drawnBefore`.
+
 4. **Penalties** (lower odds, multiplied, floored at 0.01):
    - offered in this room within the last 6 drafts: ×0.05; offered earlier:
      ×0.35;
@@ -177,7 +197,7 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   `unknown-definition` adds it to `memory.soft`. The UI shows the definition
   first, so "don't know it" is a last resort rather than the only help.
 - At the draft deadline each unchosen team gets a random remaining card
-  (`chosenBy: 'auto'`).
+  (`chosenBy: 'auto'`), preferring cards never drawn in this room.
 
 ### Drawing and guessing
 
@@ -202,7 +222,8 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   letters; stems need 3+ letters with a vowel). `close` still compares only
   against the answer and its plurals; `partial` also recognises a verb form
   of one answer word. Every guess emits private `guess.feedback`. The team
-  feed keeps the last 60 guesses.
+  feed keeps the last 60 guesses; near-miss verdicts in it are private too
+  (see projection secrecy).
 - A correct guess locks that team's points:
   `round(50 + 50·remaining/drawingSeconds) + {0,20,40} − hintCost?`, never
   below 0. The other team keeps playing against the same deadline. Both
@@ -213,6 +234,12 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   `hintCost` if they later solve. `shown` reveals from the start for free;
   `hidden` never reveals.
 - `categoryHint` shows guessers the pack name of their own word.
+- Own-word clues (`MyTeamRoundView.difficulty`, `category`, and the length
+  pattern) are withheld from guessers while `opponentDraftVisibility` is
+  `options-and-actions` (`ownWordCluesAllowed`): the word-length mode then
+  acts as `hidden` (no blanks, `hint.vote` is refused) and `category` and
+  `difficulty` are null for everyone but the drawer. Default visibility is
+  `actions-only` (ADR 0008).
 
 ### Round results, surrender, showdown, final
 
@@ -256,8 +283,9 @@ Bots exist so one person can test the full game. Their behavior is scheduled
 by the reducer through `state.bots.schedule` and executed in `advanceRoom`;
 `getNextWakeAtMs` includes the next bot action.
 
-- Bot drawer: picks a card 2–5 s into the draft; then draws the word as
-  single-stroke letters (`renderTextStrokes`) one stroke every 0.7–1.2 s.
+- Bot drawer: picks a card 2–5 s into the draft (a never-drawn one when the
+  hand has one); then draws the word as single-stroke letters
+  (`renderTextStrokes`) one stroke every 0.7–1.2 s.
 - Bot guessers: 1–3 wrong guesses (other pool words) at random times, then a
   correct guess. With a bot drawer: a few seconds after most letters are
   drawn. With a human drawer: at a random point in 35–85 % of the round, but
@@ -268,8 +296,16 @@ by the reducer through `state.bots.schedule` and executed in `advanceRoom`;
 
 - A team's draft cards, chosen term, and definition reach only that team's
   drawer. Opponents see cards/actions only during the draft and only as
-  `opponentDraftVisibility` allows. The owning team's guessers never see
-  their own term before round results.
+  `opponentDraftVisibility` allows; a member who joined after the draft's
+  cards were dealt never sees that draft's cards. The owning team's guessers
+  never see their own term before round results, and no two seats on
+  opposite teams together can narrow it to a single card (clues are withheld
+  while cards are shown).
+- `settings.customWords` reaches only the current host, in every phase;
+  everyone else gets `[]` and `settings.customWordCount`. Drawn custom words
+  are revealed in results like any word; the rest of the list never is.
+- `close`/`partial` verdicts in the team feed reach only the guesser and the
+  team's drawer; other teammates see those guesses as `wrong`.
 - Guess texts reach only the guesser's own team; correct guesses are shown
   as `text: null`.
 - `pattern`/`letterCount` reach guessers only when shown or revealed.

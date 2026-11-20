@@ -52,7 +52,6 @@ function draftCards(
       opponentCards,
       replacedWordIds: [],
       wordMemory: ctx.state.wordMemory,
-      wordChoiceCount: settings.wordChoiceCount,
     },
     random,
   )

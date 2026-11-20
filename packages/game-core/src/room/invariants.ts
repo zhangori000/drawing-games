@@ -10,7 +10,7 @@ import { MAX_MEMBERS_PER_TEAM, MAX_ROOM_MEMBERS } from './settings'
 import { chosenOption } from './selectors'
 import type { MatchState, RoomState, RoundState } from './types'
 import { ROOM_STATE_VERSION } from './types'
-import { roomPool } from './words'
+import { roomPool, roundWordDemand } from './words'
 
 export class RoomInvariantError extends Error {
   constructor(message: string) {
@@ -234,10 +234,11 @@ function checkMatch(state: RoomState, match: MatchState): void {
   const chosen = [...match.history, ...(liveRound === null ? [] : [liveRound])]
     .flatMap((round) => TEAM_IDS.map((team) => round.teams[team].chosenWordId))
     .filter((id): id is string => id !== null)
-  const reserve = 4 * state.settings.wordChoiceCount
+  // With enough never-drawn words for every card a round can deal, the
+  // selector never deals a drawn word, so nothing can repeat.
   const poolHadRoom =
     roomPool(state.settings).length >=
-    state.wordMemory.usedWordIds.length + reserve
+    state.wordMemory.usedWordIds.length + roundWordDemand(state.settings)
   if (poolHadRoom) {
     check(
       new Set(chosen).size === chosen.length,

@@ -1,8 +1,11 @@
 import {
+  answerKeyForWordId,
   buildWordPool,
+  countFreshWords,
   CUSTOM_PACK_ID,
   getPlayableWordById,
   getWordPackName,
+  normalizeAnswer,
   selectDraftOptions,
   wordStems,
   type PlayableWord,
@@ -29,13 +32,22 @@ export function roomPool(settings: RoomSettings): readonly PlayableWord[] {
   return pool
 }
 
-/** Custom words that survive the word engine's own normalization. */
+const CUSTOM_COUNT_CACHE = new WeakMap<readonly string[], number>()
+
+/**
+ * Custom words that survive the word engine's own normalization. Memoized
+ * per (immutable) list, since every viewer's projection asks for it.
+ */
 export function countCustomWords(customWords: readonly string[]): number {
-  return buildWordPool({
+  const cached = CUSTOM_COUNT_CACHE.get(customWords)
+  if (cached !== undefined) return cached
+  const count = buildWordPool({
     packIds: [],
     customWords,
     customWordsMode: 'only',
   }).filter((word) => word.packId === CUSTOM_PACK_ID).length
+  CUSTOM_COUNT_CACHE.set(customWords, count)
+  return count
 }
 
 export function toDraftOption(word: PlayableWord): DraftOption {
@@ -93,8 +105,138 @@ const DRAWER_SOFT_PENALTY = 0.2
 const TEAMMATE_MEMORY_PENALTY = 0.3
 const RECENT_PACK_PENALTY = 0.6
 const MIN_PENALTY = 0.01
-/** Room-used exclusions relax once fewer than this many × cards remain. */
-const USED_EXCLUSION_RESERVE = 4
+
+/**
+ * Most distinct cards one round can deal: both drafts plus every swap.
+ * While a room has at least this many never-drawn words, no draft card is
+ * ever a word already drawn in the room.
+ */
+export function roundWordDemand(settings: RoomSettings): number {
+  return 2 * (settings.wordChoiceCount + settings.replacementsPerDrawer)
+}
+
+interface PoolKeys {
+  readonly byId: ReadonlyMap<string, string>
+  readonly keys: ReadonlySet<string>
+}
+
+const POOL_KEYS_CACHE = new WeakMap<readonly PlayableWord[], PoolKeys>()
+
+function poolKeys(pool: readonly PlayableWord[]): PoolKeys {
+  const cached = POOL_KEYS_CACHE.get(pool)
+  if (cached !== undefined) return cached
+  const byId = new Map(
+    pool.map((word) => [word.id, normalizeAnswer(word.term)]),
+  )
+  const result = { byId, keys: new Set(byId.values()) }
+  POOL_KEYS_CACHE.set(pool, result)
+  return result
+}
+
+type MemoryCache<T> = WeakMap<
+  readonly string[],
+  WeakMap<readonly PlayableWord[], T>
+>
+
+const USED_KEYS_CACHE: MemoryCache<ReadonlySet<string>> = new WeakMap()
+const UNUSED_COUNT_CACHE: MemoryCache<number> = new WeakMap()
+
+/**
+ * Per (immutable) used list and pool: every viewer's projection asks the
+ * same question about the same state.
+ */
+function memoByMemory<T>(
+  cache: MemoryCache<T>,
+  pool: readonly PlayableWord[],
+  usedWordIds: readonly string[],
+  compute: () => T,
+): T {
+  let byPool = cache.get(usedWordIds)
+  if (byPool === undefined) {
+    byPool = new WeakMap()
+    cache.set(usedWordIds, byPool)
+  }
+  if (byPool.has(pool)) return byPool.get(pool) as T
+  const value = compute()
+  byPool.set(pool, value)
+  return value
+}
+
+/**
+ * Room-used ids that still name a word in the pool (by id or answer key, so
+ * `custom/cat` counts for `animals/cat`), once each, least recently drawn
+ * first.
+ */
+function usedInPoolOldestFirst(
+  pool: readonly PlayableWord[],
+  usedWordIds: readonly string[],
+): string[] {
+  const { byId, keys } = poolKeys(pool)
+  const newestFirst: string[] = []
+  const seenIds = new Set<string>()
+  const seenKeys = new Set<string>()
+  for (let index = usedWordIds.length - 1; index >= 0; index -= 1) {
+    const id = usedWordIds[index] as string
+    if (seenIds.has(id)) continue
+    seenIds.add(id)
+    const key = byId.get(id) ?? answerKeyForWordId(id)
+    if (key === null || key === undefined || !keys.has(key)) continue
+    if (seenKeys.has(key)) continue
+    seenKeys.add(key)
+    newestFirst.push(id)
+  }
+  return newestFirst.reverse()
+}
+
+/** Answer keys of every pool word already drawn in this room. */
+export function roomUsedKeys(
+  pool: readonly PlayableWord[],
+  usedWordIds: readonly string[],
+): ReadonlySet<string> {
+  return memoByMemory(USED_KEYS_CACHE, pool, usedWordIds, () => {
+    const { byId } = poolKeys(pool)
+    return new Set(
+      usedInPoolOldestFirst(pool, usedWordIds).map(
+        (id) => byId.get(id) ?? answerKeyForWordId(id) ?? id,
+      ),
+    )
+  })
+}
+
+/** Whether a card is a word already drawn in this room. */
+export function drawnInRoom(
+  usedKeys: ReadonlySet<string>,
+  card: { readonly term: string },
+): boolean {
+  return usedKeys.has(normalizeAnswer(card.term))
+}
+
+/** Pool words never drawn in this room (the lobby's no-repeat budget). */
+export function unusedWordCount(
+  pool: readonly PlayableWord[],
+  usedWordIds: readonly string[],
+): number {
+  return memoByMemory(UNUSED_COUNT_CACHE, pool, usedWordIds, () =>
+    countFreshWords(pool, new Set(usedWordIds)),
+  )
+}
+
+/**
+ * The first round of a `rounds`-round match whose cards could include a word
+ * already drawn in this room, or null when every round stays fresh. Assumes
+ * each round draws two never-drawn words and may deal `roundWordDemand`
+ * distinct cards.
+ */
+export function firstRepeatRound(
+  settings: RoomSettings,
+  unused: number,
+): number | null {
+  const demand = roundWordDemand(settings)
+  for (let round = 1; round <= settings.rounds; round += 1) {
+    if (unused - 2 * (round - 1) < demand) return round
+  }
+  return null
+}
 
 export interface DraftRequest {
   readonly pool: readonly PlayableWord[]
@@ -108,31 +250,6 @@ export interface DraftRequest {
   /** Words replaced earlier this round by either team. */
   readonly replacedWordIds: readonly string[]
   readonly wordMemory: RoomWordMemory
-  readonly wordChoiceCount: number
-}
-
-/**
- * Words drawn in this room stay excluded until fewer than
- * `4 × wordChoiceCount` pool words would remain; then only the most recent
- * half of the used list (within the pool) stays excluded.
- */
-function roomUsedExclusions(
-  pool: readonly PlayableWord[],
-  usedWordIds: readonly string[],
-  wordChoiceCount: number,
-): Set<string> {
-  const poolIds = new Set(pool.map((word) => word.id))
-  const newestFirst: string[] = []
-  const seen = new Set<string>()
-  for (let index = usedWordIds.length - 1; index >= 0; index -= 1) {
-    const id = usedWordIds[index] as string
-    if (!poolIds.has(id) || seen.has(id)) continue
-    seen.add(id)
-    newestFirst.push(id)
-  }
-  const reserve = USED_EXCLUSION_RESERVE * wordChoiceCount
-  if (pool.length - newestFirst.length >= reserve) return seen
-  return new Set(newestFirst.slice(0, Math.ceil(newestFirst.length / 2)))
 }
 
 function draftPenalties(request: DraftRequest): Map<string, number> {
@@ -182,67 +299,78 @@ function lastDrawnStems(
     .flatMap((wordId) => wordStems(lookupWord(pool, wordId).term))
 }
 
-interface ExclusionTier {
-  readonly roomUsed: boolean
-  readonly drawerAvoid: boolean
-  readonly opponentCards: boolean
-}
-
 /**
- * Hard exclusions relax tier by tier only when a tiny pool cannot fill the
- * slots; the opponent's cards are the last thing given up.
+ * Picks draft cards for one drawer, following the layered word memory.
+ *
+ * Slots are filled in stages, each stage only for the slots the stricter
+ * ones before it could not fill:
+ *
+ * 1. words never drawn in this room and not in the drawer's avoid memory;
+ * 2. words never drawn in this room that the drawer has seen elsewhere;
+ * 3. words drawn in this room, least recently drawn first (avoid memory
+ *    still excluded), only as many of the oldest as the slots need;
+ * 4. any word but the other team's cards;
+ * 5. (tiny pools) the other team's cards too.
+ *
+ * So a drawn word only comes back once the pool has no never-drawn word
+ * left for that slot, and then the oldest one does. The drawer's own live
+ * cards and words replaced this round are never offered.
  */
-const EXCLUSION_TIERS: readonly ExclusionTier[] = [
-  { roomUsed: true, drawerAvoid: true, opponentCards: true },
-  { roomUsed: false, drawerAvoid: true, opponentCards: true },
-  { roomUsed: false, drawerAvoid: false, opponentCards: true },
-  { roomUsed: false, drawerAvoid: false, opponentCards: false },
-]
-
-/** Picks draft cards for one drawer, following the layered word memory. */
 export function selectDraftWords(
   request: DraftRequest,
   random: () => number,
 ): PlayableWord[] {
+  const { pool, slots, drawer } = request
   const penalties = draftPenalties(request)
   const packPenalties = recentPackPenalties(request.wordMemory)
-  const avoidStems = new Set([
+  const baseStems = [
     ...request.ownCards.flatMap((card) => wordStems(card.term)),
     ...request.opponentCards.flatMap((card) => wordStems(card.term)),
-    ...lastDrawnStems(request.pool, request.wordMemory),
-  ])
-  const used = roomUsedExclusions(
-    request.pool,
-    request.wordMemory.usedWordIds,
-    request.wordChoiceCount,
-  )
+    ...lastDrawnStems(pool, request.wordMemory),
+  ]
+  const base = [
+    ...request.ownCards.map((card) => card.wordId),
+    ...request.replacedWordIds,
+  ]
+  const opponent = request.opponentCards.map((card) => card.wordId)
+  const avoid = drawer.memory.avoid
+  const used = usedInPoolOldestFirst(pool, request.wordMemory.usedWordIds)
 
-  let best: PlayableWord[] = []
-  for (const tier of EXCLUSION_TIERS) {
-    const hardExclude = new Set<string>([
-      ...request.ownCards.map((card) => card.wordId),
-      ...request.replacedWordIds,
-    ])
-    if (tier.roomUsed) for (const id of used) hardExclude.add(id)
-    if (tier.drawerAvoid) {
-      for (const id of request.drawer.memory.avoid) hardExclude.add(id)
-    }
-    if (tier.opponentCards) {
-      for (const card of request.opponentCards) hardExclude.add(card.wordId)
-    }
-    const words = selectDraftOptions({
-      pool: request.pool,
-      slots: request.slots,
-      hardExclude,
+  const chosen: PlayableWord[] = []
+  /** Fills the still-open slots from words outside `excluded`. */
+  const fill = (excluded: readonly (readonly string[])[]): boolean => {
+    const open = slots.slice(chosen.length)
+    if (open.length === 0) return true
+    const picks = selectDraftOptions({
+      pool,
+      slots: open,
+      hardExclude: new Set([
+        ...excluded.flat(),
+        ...chosen.map((word) => word.id),
+      ]),
       penalties,
       packPenalties,
-      avoidStems,
+      avoidStems: new Set([
+        ...baseStems,
+        ...chosen.flatMap((word) => wordStems(word.term)),
+      ]),
       random,
     })
-    if (words.length > best.length) best = words
-    if (best.length >= request.slots.length) break
+    chosen.push(...picks)
+    return chosen.length >= slots.length
   }
-  return best
+
+  if (fill([base, opponent, avoid, used])) return chosen
+  if (fill([base, opponent, used])) return chosen
+  // Bring back the least recently drawn words, a few at a time.
+  const step = slots.length - chosen.length
+  for (let allowed = step; allowed < used.length; allowed += step) {
+    if (fill([base, opponent, avoid, used.slice(allowed)])) return chosen
+  }
+  if (fill([base, opponent, avoid])) return chosen
+  if (fill([base, opponent])) return chosen
+  fill([base])
+  return chosen
 }
 
 /** Records offered cards: one draft counter step per draft or replacement. */

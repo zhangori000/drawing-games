@@ -4,10 +4,17 @@ import type { RoomContext } from './context'
 import { reject, requireRound, updateMember, updateTeamRound } from './context'
 import { startDrawing } from './drawing'
 import { findActiveMember, rememberWords, teamRoster } from './members'
-import type { RoomCommand, RoomMember, TeamRoundState } from './types'
+import type {
+  DraftOption,
+  RoomCommand,
+  RoomMember,
+  TeamRoundState,
+} from './types'
 import {
+  drawnInRoom,
   recordOffers,
   roomPool,
+  roomUsedKeys,
   selectDraftWords,
   toDraftOption,
 } from './words'
@@ -111,7 +118,6 @@ export function handleDraftReplace(
         round.teams[team].replacements.map((entry) => entry.replacedWordId),
       ),
       wordMemory: ctx.state.wordMemory,
-      wordChoiceCount: ctx.state.settings.wordChoiceCount,
     },
     random,
   )
@@ -146,13 +152,31 @@ export function handleDraftReplace(
   }))
 }
 
+/**
+ * A random card for a drawer who is not choosing (the deadline, or a bot):
+ * one never drawn in this room when there is one, so the room only repeats
+ * a word when every card left is a repeat.
+ */
+function automaticPick(
+  ctx: RoomContext,
+  teamRound: TeamRoundState,
+): DraftOption {
+  const usedKeys = roomUsedKeys(
+    roomPool(ctx.state.settings),
+    ctx.state.wordMemory.usedWordIds,
+  )
+  const fresh = teamRound.options.filter(
+    (option) => !drawnInRoom(usedKeys, option),
+  )
+  return ctx.rng.pick(fresh.length > 0 ? fresh : teamRound.options)
+}
+
 /** Draft deadline: every unchosen team gets a random remaining card. */
 export function autoPickAndStartDrawing(ctx: RoomContext): void {
   for (const team of TEAM_IDS) {
     const teamRound = requireRound(ctx.state).teams[team]
     if (teamRound.chosenWordId !== null) continue
-    const option = ctx.rng.pick(teamRound.options)
-    lockWord(ctx, team, option.wordId, 'auto')
+    lockWord(ctx, team, automaticPick(ctx, teamRound).wordId, 'auto')
   }
 }
 
@@ -163,5 +187,5 @@ export function botPickWord(ctx: RoomContext, botId: string): void {
   if (bot === undefined) return
   const teamRound = requireRound(ctx.state).teams[bot.team]
   if (teamRound.drawerId !== bot.id || teamRound.chosenWordId !== null) return
-  lockWord(ctx, bot.team, ctx.rng.pick(teamRound.options).wordId, 'drawer')
+  lockWord(ctx, bot.team, automaticPick(ctx, teamRound).wordId, 'drawer')
 }

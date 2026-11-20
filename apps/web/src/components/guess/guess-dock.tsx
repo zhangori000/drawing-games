@@ -262,7 +262,7 @@ export function GuessDock({
               <span className="truncate px-1 text-xs text-black/45">
                 {disabled
                   ? disabledReason
-                  : 'Only you see how close your guesses are.'}
+                  : 'Only you and your drawer see how close your guesses are.'}
               </span>
             )}
           </p>

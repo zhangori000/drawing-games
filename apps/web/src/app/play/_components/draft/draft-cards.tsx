@@ -119,11 +119,22 @@ function OptionCard({
         type="button"
         disabled={disabled || replacing}
         onClick={onPick}
-        aria-label={`Pick ${option.term}, ${difficultyStake(option.difficulty)}, from ${option.packName}`}
+        aria-label={`Pick ${option.term}, ${difficultyStake(option.difficulty)}, from ${option.packName}${option.drawnBefore ? ', already drawn in this room' : ''}`}
         className="group flex min-h-36 flex-1 flex-col items-start gap-3 p-4 text-left transition hover:bg-[#f8ff80] focus-visible:bg-[#f8ff80] focus-visible:outline-none disabled:cursor-wait"
       >
         <span className="flex w-full items-center justify-between gap-2">
-          <DifficultyChip difficulty={option.difficulty} size="md" />
+          <span className="flex flex-wrap items-center gap-1.5">
+            <DifficultyChip difficulty={option.difficulty} size="md" />
+            {option.drawnBefore ? (
+              // Only dealt once the room has run out of never-drawn words.
+              <span
+                data-testid="drawn-before"
+                className="rounded-full border-2 border-[#181713] bg-[#ffd9cf] px-2 py-0.5 text-xs font-black"
+              >
+                Drawn here before
+              </span>
+            ) : null}
+          </span>
           <kbd
             aria-hidden="true"
             className="hidden rounded-lg border-2 border-black/20 px-2 font-mono text-xs font-black text-black/45 sm:inline"

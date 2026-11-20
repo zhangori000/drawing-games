@@ -2,6 +2,7 @@
 
 import {
   DIFFICULTY_BONUSES,
+  ownWordCluesAllowed,
   TEAM_NAMES,
   WORD_DIFFICULTIES,
   type MyTeamRoundView,
@@ -110,6 +111,10 @@ function DrawerDraft({ mine }: { readonly mine: MyTeamRoundView }) {
 }
 
 function TeammateDraft({ mine }: { readonly mine: MyTeamRoundView }) {
+  const { view } = useRoomSession()
+  // With the cards shown to opponents, the room sends guessers no clue
+  // about which card was picked (not even its difficulty).
+  const clues = ownWordCluesAllowed(view.settings)
   return (
     <Card className="grid gap-4">
       {mine.chosen && mine.difficulty ? (
@@ -118,10 +123,17 @@ function TeammateDraft({ mine }: { readonly mine: MyTeamRoundView }) {
           <DifficultyChip difficulty={mine.difficulty} showBonus size="md" />—
           get ready to guess!
         </p>
+      ) : mine.chosen ? (
+        <p className="text-lg font-black">
+          {mine.drawerName} locked in a word—get ready to guess!
+        </p>
       ) : (
         <p className="text-base leading-7 text-black/70">
           You’ll see what {mine.drawerName} draws and race the clock to guess
-          it. You only learn how hard it is, never the word.
+          it.{' '}
+          {clues
+            ? 'You only learn how hard it is, never the word.'
+            : 'The other team can see the cards, so you get no clues about which one was picked. You’ll see its bonus in the results.'}
         </p>
       )}
       <div>

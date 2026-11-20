@@ -16,8 +16,11 @@ import {
   teamRoster,
 } from './members'
 import {
+  effectiveCategoryHint,
+  effectiveWordLengthMode,
   MAX_MEMBERS_PER_TEAM,
   MIN_MEMBERS_PER_TEAM,
+  ownWordCluesAllowed,
   TEAM_NAMES,
 } from './settings'
 import {
@@ -51,6 +54,7 @@ import type {
   MyTeamRoundView,
   OpponentRoundView,
   RoomMember,
+  RoomSettingsView,
   RoomState,
   RoomView,
   RoundResultsView,
@@ -65,7 +69,14 @@ import type {
   TeamRoundState,
   TeamView,
 } from './types'
-import { roomPool } from './words'
+import {
+  countCustomWords,
+  drawnInRoom,
+  firstRepeatRound,
+  roomPool,
+  roomUsedKeys,
+  unusedWordCount,
+} from './words'
 
 /** Everything a projection needs about who is looking. */
 interface Viewer {
@@ -81,24 +92,54 @@ function seconds(ms: number): number {
   return Math.round(ms / 100) / 10
 }
 
+/**
+ * The team feed. "So close" and "part right" are private to the guesser and
+ * to the drawer (who knows the word anyway and can steer the drawing); other
+ * teammates see those guesses as plain wrong ones, so nobody can copy a
+ * near miss into a solve.
+ */
 function guessViews(
   viewer: Viewer,
   guesses: readonly GuessRecord[],
+  viewerIsDrawer: boolean,
 ): GuessView[] {
-  return guesses.map((guess) => ({
-    id: guess.id,
-    memberId: guess.memberId,
-    memberName: memberName(viewer.state, guess.memberId),
-    text: guess.verdict === 'correct' ? null : guess.text,
-    verdict: guess.verdict,
-    atMs: guess.atMs,
-    mine: viewer.member?.id === guess.memberId,
-  }))
+  return guesses.map((guess) => {
+    const mine = viewer.member?.id === guess.memberId
+    const nearMiss = guess.verdict === 'close' || guess.verdict === 'partial'
+    return {
+      id: guess.id,
+      memberId: guess.memberId,
+      memberName: memberName(viewer.state, guess.memberId),
+      text: guess.verdict === 'correct' ? null : guess.text,
+      verdict: nearMiss && !mine && !viewerIsDrawer ? 'wrong' : guess.verdict,
+      atMs: guess.atMs,
+      mine,
+    }
+  })
 }
 
 /* ------------------------------------------------------------------------ */
 /* Room-wide parts                                                          */
 /* ------------------------------------------------------------------------ */
+
+const NO_CUSTOM_WORDS: readonly string[] = Object.freeze([])
+
+/**
+ * Custom words are answers: only the current host (who typed them) gets the
+ * list, in every phase. Everyone else gets the count. Rematches reuse the
+ * list, so it stays hidden on the final screen too; drawn words are revealed
+ * one by one in results like any other word.
+ */
+function settingsView(viewer: Viewer): RoomSettingsView {
+  const { state, member } = viewer
+  const settings = state.settings
+  const isHost = member !== null && state.hostId === member.id
+  return {
+    ...settings,
+    customWords: isHost ? settings.customWords : NO_CUSTOM_WORDS,
+    customWordCount: countCustomWords(settings.customWords),
+  }
+}
 
 function meView(viewer: Viewer): MeView | null {
   const { member, state } = viewer
@@ -162,11 +203,14 @@ function lobbyView(state: RoomState): LobbyView {
     for (const id of member.memory.soft) remembered.add(id)
   }
   const blockers = lobbyBlockers(state)
+  const unused = unusedWordCount(pool, state.wordMemory.usedWordIds)
   return {
     canStart: blockers.length === 0,
     blockers,
     poolSize: pool.length,
     freshWordCount: pool.filter((word) => !remembered.has(word.id)).length,
+    unusedWordCount: unused,
+    repeatsFromRound: firstRepeatRound(state.settings, unused),
     minPerTeam: MIN_MEMBERS_PER_TEAM,
     maxPerTeam: MAX_MEMBERS_PER_TEAM,
   }
@@ -190,7 +234,10 @@ function matchSummaryView(
 /* Live round                                                               */
 /* ------------------------------------------------------------------------ */
 
-function optionView(option: DraftOption): DraftOptionView {
+function optionView(
+  option: DraftOption,
+  usedKeys: ReadonlySet<string>,
+): DraftOptionView {
   return {
     wordId: option.wordId,
     term: option.term,
@@ -199,7 +246,19 @@ function optionView(option: DraftOption): DraftOptionView {
     packName: option.packName,
     definition: option.definition,
     bonus: DIFFICULTY_BONUSES[option.difficulty],
+    drawnBefore: drawnInRoom(usedKeys, option),
   }
+}
+
+function draftOptionViews(
+  state: RoomState,
+  teamRound: TeamRoundState,
+): DraftOptionView[] {
+  const usedKeys = roomUsedKeys(
+    roomPool(state.settings),
+    state.wordMemory.usedWordIds,
+  )
+  return teamRound.options.map((option) => optionView(option, usedKeys))
 }
 
 function hintView(
@@ -209,7 +268,7 @@ function hintView(
 ): HintView {
   const { state, member, now } = viewer
   const settings = state.settings
-  const mode = settings.wordLengthMode
+  const mode = effectiveWordLengthMode(settings)
   const voting = mode === 'hidden-vote'
   const unlocksAtMs =
     voting && round.drawingStartedAtMs !== null
@@ -252,11 +311,14 @@ function myTeamRoundView(
   const amDrawer = teamRound.drawerId === member.id
   const chosen = chosenOption(teamRound)
   const drawing = state.phase === 'drawing'
+  // While opponents see the draft cards, guessers get nothing that tells
+  // the cards apart (see `ownWordCluesAllowed`).
+  const clues = ownWordCluesAllowed(settings)
   const lengthVisible =
     !amDrawer &&
     drawing &&
     chosen !== null &&
-    (settings.wordLengthMode === 'shown' || teamRound.hint.revealed)
+    (effectiveWordLengthMode(settings) === 'shown' || teamRound.hint.revealed)
   const solution = teamRound.solution
   return {
     team: member.team,
@@ -265,7 +327,7 @@ function myTeamRoundView(
     amDrawer,
     options:
       amDrawer && state.phase === 'word-draft'
-        ? teamRound.options.map(optionView)
+        ? draftOptionViews(state, teamRound)
         : null,
     replacementsLeft: amDrawer
       ? Math.max(
@@ -284,15 +346,16 @@ function myTeamRoundView(
             packName: chosen.packName,
           }
         : null,
-    difficulty: chosen?.difficulty ?? null,
+    difficulty:
+      chosen !== null && (amDrawer || clues) ? chosen.difficulty : null,
     category:
-      !amDrawer && settings.categoryHint && chosen !== null
+      !amDrawer && effectiveCategoryHint(settings) && chosen !== null
         ? chosen.packName
         : null,
     pattern: lengthVisible ? wordPattern(chosen.term) : null,
     letterCount: lengthVisible ? letterCount(chosen.term) : null,
     canvasId: teamRound.canvasId,
-    guesses: guessViews(viewer, teamRound.guesses),
+    guesses: guessViews(viewer, teamRound.guesses, amDrawer),
     solved: solution !== null,
     solution:
       solution === null
@@ -319,6 +382,12 @@ function opponentRoundView(
   const teamRound = round.teams[team]
   const visibility = state.settings.opponentDraftVisibility
   const seesDraft = member !== null && state.phase === 'word-draft'
+  // Someone who joins once the cards are dealt (say, a second tab on the
+  // other team) never gets this draft's cards.
+  const seesCards =
+    seesDraft &&
+    visibility === 'options-and-actions' &&
+    member.joinedAtMs <= round.startedAtMs
   const ownSolved =
     member !== null &&
     state.phase === 'drawing' &&
@@ -327,13 +396,12 @@ function opponentRoundView(
     team,
     drawerId: teamRound.drawerId,
     drawerName: memberName(state, teamRound.drawerId),
-    options:
-      seesDraft && visibility === 'options-and-actions'
-        ? teamRound.options.map((option) => ({
-            term: option.term,
-            difficulty: option.difficulty,
-          }))
-        : null,
+    options: seesCards
+      ? teamRound.options.map((option) => ({
+          term: option.term,
+          difficulty: option.difficulty,
+        }))
+      : null,
     actions:
       seesDraft && visibility !== 'hidden'
         ? teamRound.replacements.map((entry) => ({ reason: entry.reason }))
@@ -444,7 +512,7 @@ function showdownMineView(
         ? { term: card.term, difficulty: card.difficulty }
         : null,
     canvasId: teamState.canvasId,
-    guesses: guessViews(viewer, teamState.guesses),
+    guesses: guessViews(viewer, teamState.guesses, amDrawer),
     finished,
     canGuess: !finished && !amDrawer,
     canDraw: amDrawer && !finished,
@@ -609,7 +677,7 @@ export function projectView(
     phaseDeadlineAtMs: state.phaseDeadlineAtMs,
     hostId: state.hostId,
     me: meView(viewer),
-    settings: state.settings,
+    settings: settingsView(viewer),
     members: memberViews(state),
     teams: { A: teamView(state, match, 'A'), B: teamView(state, match, 'B') },
     lobby: phase === 'lobby' ? lobbyView(state) : null,

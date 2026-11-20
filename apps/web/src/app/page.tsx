@@ -7,7 +7,7 @@ const improvements = [
   {
     eyebrow: '01 · Fresh words',
     title: 'Every draft is a real choice.',
-    body: 'One easy, one medium, one hard card with its bonus on it. Words never repeat in a room, packs rotate, and the game remembers what you have already drawn or seen.',
+    body: 'One easy, one medium, one hard card with its bonus on it. A room never brings back a word it has drawn while fresh ones remain, packs rotate, and the game remembers what you have already drawn or seen.',
     color: 'bg-[#f8ff80]',
   },
   {

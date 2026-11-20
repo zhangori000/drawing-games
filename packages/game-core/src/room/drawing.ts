@@ -25,6 +25,7 @@ import {
   updateTeamRound,
 } from './context'
 import { findActiveMember, rememberWords } from './members'
+import { effectiveWordLengthMode } from './settings'
 import {
   chosenOption,
   countVotes,
@@ -196,7 +197,7 @@ export function handleHintVote(
   if (ctx.state.phase !== 'drawing') {
     reject('NOT_ALLOWED', 'Hint votes happen while drawing.')
   }
-  if (ctx.state.settings.wordLengthMode !== 'hidden-vote') {
+  if (effectiveWordLengthMode(ctx.state.settings) !== 'hidden-vote') {
     reject('NOT_ALLOWED', 'Length hints are not voted on in this room.')
   }
   const round = requireRound(ctx.state)

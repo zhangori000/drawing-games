@@ -2,7 +2,9 @@ import type { OpponentDraftVisibility } from '../settings'
 
 /**
  * Lobby-configurable rules for a live room. Every connected player can see
- * these; only the host may change them, and only in the lobby.
+ * these (except the custom words themselves, which only the host receives;
+ * see `RoomSettingsView`); only the host may change them, and only in the
+ * lobby.
  */
 export type DifficultyMix = 'balanced' | 'easy' | 'mixed' | 'hard'
 
@@ -35,7 +37,7 @@ export interface RoomSettings {
   readonly difficultyMix: DifficultyMix
   /** Enabled curated word packs (ids from @drawing-games/word-bank). */
   readonly packIds: readonly string[]
-  /** Host-supplied words, already trimmed and de-duplicated. */
+  /** Host-supplied words, already trimmed and de-duplicated. Host-only. */
   readonly customWords: readonly string[]
   readonly customWordsMode: CustomWordsMode
   /** Show guessers the pack/category name of their team's word. */
@@ -91,7 +93,9 @@ export const DEFAULT_ROOM_SETTINGS: RoomSettings = Object.freeze({
   roundResultsSeconds: 8,
   wordChoiceCount: 3,
   replacementsPerDrawer: 1,
-  opponentDraftVisibility: 'options-and-actions',
+  // Opponents see swaps, not cards: with the cards, a seat on the other team
+  // plus the guessers' own clues would point at the exact word.
+  opponentDraftVisibility: 'actions-only',
   wordLengthMode: 'hidden-vote',
   hintUnlockSeconds: 30,
   hintCost: 10,
@@ -105,3 +109,26 @@ export const DEFAULT_ROOM_SETTINGS: RoomSettings = Object.freeze({
 })
 
 export const TEAM_NAMES = Object.freeze({ A: 'Sun', B: 'Moon' } as const)
+
+/**
+ * Whether guessers get clues about their own word that tell draft cards
+ * apart: its difficulty (bonus), category, and letter blanks. They are off
+ * while opponents see the draft cards (`options-and-actions`), because
+ * anyone on the other team could then match a clue to one of the cards they
+ * saw and hand over the exact answer. Drawers always see their own word.
+ */
+export function ownWordCluesAllowed(settings: RoomSettings): boolean {
+  return settings.opponentDraftVisibility !== 'options-and-actions'
+}
+
+/** The word-length mode in effect (`hidden` while cards are shown). */
+export function effectiveWordLengthMode(
+  settings: RoomSettings,
+): WordLengthMode {
+  return ownWordCluesAllowed(settings) ? settings.wordLengthMode : 'hidden'
+}
+
+/** Whether guessers see their word's category right now. */
+export function effectiveCategoryHint(settings: RoomSettings): boolean {
+  return settings.categoryHint && ownWordCluesAllowed(settings)
+}

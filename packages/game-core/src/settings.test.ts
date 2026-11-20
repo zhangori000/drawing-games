@@ -10,7 +10,7 @@ describe('DEFAULT_GAME_SETTINGS', () => {
       wordDraftSeconds: 15,
       drawingSeconds: 90,
       seenRerollsPerDrawer: 1,
-      opponentDraftVisibility: 'options-and-actions',
+      opponentDraftVisibility: 'actions-only',
       surrender: {
         minimumCompletedRounds: 3,
       },

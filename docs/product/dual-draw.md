@@ -52,7 +52,7 @@ The room server, not a browser, owns every transition and deadline.
 | Round results             |                                              8 seconds | Fixed for the first version                |
 | Word choices              |                                                      3 | 2–7                                        |
 | Word replacements         |                                           1 per drawer | 0–5; shared across replacement reasons     |
-| Opponent draft visibility |                                      Options + actions | Options + actions, actions only, or hidden |
+| Opponent draft visibility |                                           Actions only | Options + actions, actions only, or hidden |
 | Word length               | Hidden; team-majority reveal after 30s costs 10 points | Shown, hidden, or reveal disabled          |
 | Prompt difficulty         |                                                  Mixed | Easy, mixed, or hard-biased                |
 | Colors                    |                   Accessible palette plus custom color | Host may restrict for modes later          |
@@ -81,23 +81,36 @@ history and moderation. Opponents may observe the action only when the room's
 draft-visibility setting permits it. A word's stored definition is editorial
 metadata for the catalog and is never sent to guessers with a live answer.
 
-To honor the intended social transparency, the casual-room default shows the
-**opposing team** that drawer's offered options and every replacement action
-while the drawer’s own guessers see only their team's selection status. Once
-selection locks, each final answer is hidden from every guesser and from the
-other drawer; it is delivered only to the drawer who chose it. The setting is
-explicit and reversible before a match or between rounds:
+Each final answer is hidden from every guesser and from the other drawer; it
+is delivered only to the drawer who chose it. What the **opposing team** sees
+of a draft is an explicit room setting, changeable in the lobby:
 
-- **Options + actions (default):** each opposing team sees the other
-  drawer's candidate pool and replacements, but not a final-answer message.
-- **Actions only:** the opposing team sees replacements without word text.
+- **Actions only (default):** the opposing team sees that the other drawer
+  swapped a card and why ("seen it" / "don't know it"), never the words.
+- **Options + actions:** the opposing team also sees the other drawer's
+  cards (terms and difficulty) while the draft is open, but never the pick.
 - **Hidden:** opponents see neither options nor draft actions.
 
-Showing options creates a collusion path when friends share voice chat: an
-opponent could relay the narrowed candidate pool to the owning team's guessers.
-The exposure is symmetric, but not cheat-proof. A future ranked/public mode
-should default to hidden; casual rooms retain the more playful transparent
-default unless playtests show it ruins guessing.
+Guessers' own-word clues (the difficulty chip with its bonus, the category
+hint, and the letter blanks) each tell a draft's cards apart: a balanced
+draft has one card per difficulty, cards prefer different packs, and terms
+differ in length. So with **options + actions**, a seat on the other team (a
+friend, or the same person in a second tab) plus any one clue would name the
+exact answer. Therefore:
+
+- The default is **actions only**, so guessers keep every clue. (The first
+  version defaulted to options + actions; see ADR 0008.)
+- When a host chooses **options + actions**, guessers get no difficulty, no
+  category, and no letter blanks for their own word (the word-length setting
+  acts as "never shown" and there is no reveal vote). The lobby says so next
+  to the Clues settings; the difficulty, bonus, and category appear in the
+  round results as usual. The drawer still sees everything about their word.
+- Someone who joins after a draft's cards were dealt never sees that draft's
+  cards, only later ones.
+
+Options + actions remains a playful, trust-based mode: the opposing team
+could still relay the shortlist of cards to the owning team's guessers. A
+future ranked/public mode should use hidden.
 
 A same-prompt race can be added later as a separate setting. It is not the
 default because independent choices and difficulty bonuses are part of the
@@ -106,6 +119,25 @@ current competitive design.
 The server avoids recently used room words and records seen reports separately
 from correctness. A report is a personalization signal, not proof that a word
 must be deleted globally.
+
+### Custom words and repeats
+
+The host's custom words are answers, so only the current host ever receives
+the list (it passes to the next host if the host leaves). Everyone else sees
+how many custom words there are and whether only they are used. Words drawn
+from the list are revealed one at a time in round results like any other
+word; the rest of the list is never revealed, because a rematch reuses it.
+
+A word drawn in a room does not come back in that room (across rounds and
+rematches) while any never-drawn word is left. Only when the pool runs out
+does a draft deal a drawn word, and then the least recently drawn one. Such a
+card is marked "Drawn here before" for the drawer, and practice bots and the
+draft deadline's automatic pick choose a never-drawn card whenever the hand
+has one. The lobby counts the room's never-drawn words and, when they cannot
+cover every card the configured match could deal (two drafts plus every swap
+per round, two words drawn per round), warns everyone from which round cards
+may repeat. The host can still start: a short family list is a legitimate
+choice, as long as nobody is told words never repeat.
 
 ## Drawing and guessing
 
@@ -127,6 +159,10 @@ add a second dot beneath the line.
 Guess matching is server-side, case-insensitive, whitespace-normalized, and
 accent-tolerant. Fuzzy spelling tolerance is a later, bounded setting because
 overly broad matching can reveal answers or accept wrong words.
+Near-miss feedback ("So close", "Part right") is private to the guesser and
+their team's drawer (who can steer the drawing). Other teammates see those
+guesses in the team feed as plain wrong guesses, so nobody can copy a near
+miss into a solve.
 
 The opponent view is deliberately unhelpful but entertaining: a low-frequency,
 coarse grid derived by the server, followed by visual blur/pixelation. The raw
