@@ -29,6 +29,34 @@ async function waitFor(check: () => Promise<boolean>, label: string, timeoutMs =
 	}
 }
 
+/**
+ * Pins a fresh room's PRNG seed (`rngState` in the stored core state), then
+ * evicts the object so it reloads with it. Bot plans (pick times, wrong
+ * guesses, and the deliberate misses of `SOLVE_MODEL`) come from that PRNG,
+ * so a pinned room plays out the same way on every run. Call it before any
+ * socket joins.
+ */
+async function pinRoomSeed(roomCode: string, rngState: number): Promise<void> {
+	const stub = env.GAME_ROOM.getByName(roomCode);
+	await runInDurableObject(stub, (_instance, state) => {
+		const row = state.storage.sql.exec<{ value: string }>(`SELECT value FROM kv WHERE key = 'state.core'`).one();
+		const core = JSON.parse(row.value) as { rngState: number };
+		state.storage.sql.exec(`UPDATE kv SET value = ? WHERE key = 'state.core'`, JSON.stringify({ ...core, rngState }));
+	});
+	await evictDurableObject(stub);
+}
+
+/** Whether the stored bot schedule has a bot guesser answering `canvasId` correctly. */
+async function plansCorrectGuess(roomCode: string, canvasId: string): Promise<boolean> {
+	return runInDurableObject(env.GAME_ROOM.getByName(roomCode), (_instance, state) => {
+		const row = state.storage.sql.exec<{ value: string }>(`SELECT value FROM kv WHERE key = 'state.bots'`).one();
+		const bots = JSON.parse(row.value) as {
+			schedule: { action: { type: string; canvasId?: string; correct?: boolean } }[];
+		};
+		return bots.schedule.some(({ action }) => action.type === 'guess' && action.canvasId === canvasId && action.correct === true);
+	});
+}
+
 function requireRound(view: RoomView): NonNullable<RoomView['round']> {
 	if (view.round === null) throw new Error(`no round in phase ${view.phase}`);
 	return view.round;
@@ -258,6 +286,9 @@ describe('live drawing', () => {
 	});
 });
 
+/** A seed whose first practice round has the Moon bot guesser solve (see `pinRoomSeed`). */
+const PRACTICE_SEED = 3;
+
 describe('practice match on alarms', () => {
 	afterEach(() => {
 		vi.useRealTimers();
@@ -266,6 +297,10 @@ describe('practice match on alarms', () => {
 	it('progresses through draft, drawing, and results with bots', async () => {
 		vi.useFakeTimers({ toFake: ['Date'], now: Date.now() });
 		const roomCode = await createRoom();
+		// Bots miss on purpose now and then (8-20% per word), so a random seed
+		// would make "the bot team solves" fail some runs. With this seed the
+		// Moon bot guesser plans the answer in round 1 (checked below).
+		await pinRoomSeed(roomCode, PRACTICE_SEED);
 		const stub = env.GAME_ROOM.getByName(roomCode);
 		const host = await joinRoom(roomCode, 'Ana');
 		try {
@@ -288,6 +323,10 @@ describe('practice match on alarms', () => {
 			expect(await runDurableObjectAlarm(stub)).toBe(true);
 			const drawing = await host.view((view) => view.phase === 'drawing', 'drawing');
 			expect(requireRound(drawing).mine?.word).not.toBeNull();
+			expect(
+				await plansCorrectGuess(roomCode, botCanvas),
+				'This seed now plans a deliberate bot miss (a game-core change to PRNG use?): pick another PRACTICE_SEED',
+			).toBe(true);
 
 			// The bot drawer draws and its teammate solves before the deadline.
 			vi.setSystemTime((drawing.phaseDeadlineAtMs ?? 0) + 1);
