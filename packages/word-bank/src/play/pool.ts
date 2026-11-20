@@ -2,6 +2,7 @@ import { CURATED_PACKS } from '../packs'
 import { CUSTOM_PACK_ID } from '../packs/meta'
 import type { WordDifficulty } from '../types'
 import { parseCustomWordEntry } from './custom-entry'
+import { createSameWordSet } from './same-word'
 import { foldText, normalizeAnswer } from './text'
 import type { PlayableWord, WordPackData, WordPoolOptions } from './types'
 
@@ -148,11 +149,20 @@ export function answerKeyForWordId(id: string): string | null {
   return normalizeAnswer(slug)
 }
 
-/** Answer key of a pool word, using the curated cache when possible. */
-function answerKeyOf(word: PlayableWord): string {
-  return (
-    getCuratedIndex().answerKeyById.get(word.id) ?? normalizeAnswer(word.term)
-  )
+/**
+ * The term a word id stands for, even when the word is not in the current
+ * pool: curated ids via the catalog, custom ids via their slug (`custom/mr-
+ * whiskers` → `mr whiskers`, same answer key as the original). Null for an
+ * unknown pack's id and for hashed custom slugs, which cannot be read back.
+ */
+export function termForWordId(id: string): string | null {
+  const curated = getPlayableWordById(id)
+  if (curated !== undefined) return curated.term
+  const prefix = `${CUSTOM_PACK_ID}/`
+  if (!id.startsWith(prefix)) return null
+  const slug = id.slice(prefix.length)
+  if (slug.length === 0 || slug.includes(HASHED_SLUG_SEPARATOR)) return null
+  return slug.replace(/-/g, ' ')
 }
 
 /** Trimmed, control-free, whitespace-collapsed display form. */
@@ -167,7 +177,8 @@ function cleanCustomTerm(raw: string): string {
 /**
  * Host custom words become playable words in the `custom` pack with ids
  * `custom/<slug>`, so room memory recognizes repeats. Words that share a slug
- * or an answer key (`ice cream`, `Ice-Cream`, `icecream`) are kept once, in
+ * or an answer key (`ice cream`, `Ice-Cream`, `icecream`), or are the same
+ * word by inflection (`cat`, `cats`; see `isSameWord`), are kept once, in
  * first-seen order; words with no letters or digits, and entries with a
  * malformed difficulty tag, are dropped. A tagged entry (`kite|hard`, see
  * `parseCustomWordEntry`) gets that difficulty; an untagged one gets
@@ -180,18 +191,18 @@ export function customPlayableWords(
   untaggedDifficulty: WordDifficulty = 'medium',
 ): PlayableWord[] {
   const seenSlugs = new Set<string>()
-  const seenKeys = new Set<string>()
+  const seenWords = createSameWordSet()
   const words: PlayableWord[] = []
   for (const raw of customWords) {
     const entry = parseCustomWordEntry(raw)
     if (entry === null) continue
     const term = cleanCustomTerm(entry.term)
     const answerKey = normalizeAnswer(term)
-    if (answerKey.length === 0 || seenKeys.has(answerKey)) continue
+    if (answerKey.length === 0 || seenWords.has(term)) continue
     const slug = customSlug(term, answerKey)
     if (seenSlugs.has(slug)) continue
     seenSlugs.add(slug)
-    seenKeys.add(answerKey)
+    seenWords.add(term)
     words.push({
       id: `${CUSTOM_PACK_ID}/${slug}`,
       term,
@@ -205,15 +216,17 @@ export function customPlayableWords(
   return words
 }
 
-/** Keeps the first word for each answer key (curated before custom). */
-function dedupeByAnswerKey(words: readonly PlayableWord[]): PlayableWord[] {
+/**
+ * Keeps the first word of each same word (one answer key, or one word by
+ * inflection, see `isSameWord`), curated before custom.
+ */
+function dedupeSameWords(words: readonly PlayableWord[]): PlayableWord[] {
   const seenIds = new Set<string>()
-  const seenKeys = new Set<string>()
+  const seenWords = createSameWordSet()
   return words.filter((word) => {
-    const key = answerKeyOf(word)
-    if (seenIds.has(word.id) || seenKeys.has(key)) return false
+    if (seenIds.has(word.id) || seenWords.has(word.term)) return false
     seenIds.add(word.id)
-    seenKeys.add(key)
+    seenWords.add(word.term)
     return true
   })
 }
@@ -221,9 +234,11 @@ function dedupeByAnswerKey(words: readonly PlayableWord[]): PlayableWord[] {
 /**
  * The playable pool for a room's settings: enabled curated packs (unknown ids
  * ignored) plus custom words, or only custom words in `only` mode. A custom
- * word that repeats a curated term is dropped in favor of the curated entry,
- * which has a real definition and difficulty. Never empty while any curated
- * pack exists: an empty selection falls back to every curated word.
+ * word that repeats a curated term, or is the same word by inflection
+ * (`dolphins` beside the curated `dolphin`), is dropped in favor of the
+ * curated entry, which has a real definition and difficulty. Never empty
+ * while any curated pack exists: an empty selection falls back to every
+ * curated word.
  */
 export function buildWordPool(options: WordPoolOptions): PlayableWord[] {
   const custom = customPlayableWords(options.customWords)
@@ -233,6 +248,6 @@ export function buildWordPool(options: WordPoolOptions): PlayableWord[] {
   const curated = getAllPlayableWords().filter((word) =>
     enabled.has(word.packId),
   )
-  const pool = dedupeByAnswerKey([...curated, ...custom])
+  const pool = dedupeSameWords([...curated, ...custom])
   return pool.length > 0 ? pool : [...getAllPlayableWords()]
 }

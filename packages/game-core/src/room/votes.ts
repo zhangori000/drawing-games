@@ -4,11 +4,13 @@ import { TEAM_IDS } from '../types'
 import { RECONNECT_GRACE_MS, SURRENDER_RULES } from './constants'
 import type { RoomContext } from './context'
 import { updateTeamRound } from './context'
+import { planBotOutlineOnReveal } from './bots'
 import { endMatch } from './match'
 import { isWithinGrace, teamRoster } from './members'
 import {
   countVotes,
   majorityNeeded,
+  sitOutIds,
   teamElectorate,
   twoThirdsNeeded,
 } from './selectors'
@@ -44,7 +46,10 @@ export function hintUnlocksAtMs(state: RoomState): number | null {
     : startedAt + state.settings.hintUnlockSeconds * 1000
 }
 
-/** Human guessers within grace, minus the drawer and earlier drawers. */
+/**
+ * Human guessers within grace, minus the drawer and everyone sitting the
+ * turn out (earlier drawers and late joiners).
+ */
 export function hintElectorate(
   state: RoomState,
   teamRound: TeamRoundState,
@@ -55,7 +60,7 @@ export function hintElectorate(
     teamRound.team,
     teamRound.drawerId,
     now,
-    teamRound.formerDrawerIds,
+    sitOutIds(teamRound),
   )
 }
 
@@ -284,6 +289,8 @@ export function revealHint(ctx: RoomContext, team: TeamId): void {
     ...current,
     hint: { ...current.hint, revealed: true, revealedAtMs: ctx.now },
   }))
+  // A practice bot drawing for the team now draws the blanks it paid for.
+  planBotOutlineOnReveal(ctx, team)
 }
 
 /** Applies a due resolution: reveal the hint, or end the match. */

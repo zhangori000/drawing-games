@@ -20,6 +20,102 @@ export const PHRASES_PACK: WordPackData = {
       definition:
         'Two people slapping their raised palms together to celebrate.',
     },
+    {
+      term: 'top dog',
+      difficulty: 'easy',
+      definition:
+        'The boss or winner of a group, the one everybody else looks up to.',
+    },
+    {
+      term: 'big cheese',
+      difficulty: 'easy',
+      definition:
+        'The most important person in charge, like the boss of a whole company.',
+    },
+    {
+      term: 'hot potato',
+      difficulty: 'easy',
+      definition:
+        'A touchy problem that everybody wants to pass along to someone else fast.',
+    },
+    {
+      term: 'heart of gold',
+      difficulty: 'easy',
+      definition:
+        'A very kind and generous nature, like a friend who always helps others.',
+    },
+    {
+      term: 'cash cow',
+      difficulty: 'easy',
+      definition:
+        'Something that keeps bringing in lots of money, like a bestselling product.',
+    },
+    {
+      term: 'pig out',
+      difficulty: 'easy',
+      definition:
+        'To eat a huge amount of food all at once, like at an all-you-can-eat buffet.',
+    },
+    {
+      term: 'sweet dreams',
+      difficulty: 'easy',
+      definition:
+        'A cozy goodnight wish for someone who is about to fall asleep.',
+    },
+    {
+      term: 'big mouth',
+      difficulty: 'easy',
+      definition: 'Someone who talks too much and can never keep a secret.',
+    },
+    {
+      term: 'egghead',
+      difficulty: 'easy',
+      definition: 'A very brainy person who loves books, facts, and big ideas.',
+    },
+    {
+      term: 'cool cat',
+      difficulty: 'easy',
+      definition: 'A calm, stylish person who never seems to get nervous.',
+    },
+    {
+      term: 'crybaby',
+      difficulty: 'easy',
+      definition:
+        'Someone who whines or sobs over every little thing that goes wrong.',
+    },
+    {
+      term: 'bad apple',
+      difficulty: 'easy',
+      definition: 'One troublemaker who gives a whole group a bad name.',
+    },
+    {
+      term: 'zip it',
+      difficulty: 'easy',
+      definition: 'A playful way to tell someone to stop talking right now.',
+    },
+    {
+      term: 'love bug',
+      difficulty: 'easy',
+      definition:
+        'A sweet, cuddly person, or the giddy feeling of falling for someone.',
+    },
+    {
+      term: 'eagle eye',
+      difficulty: 'easy',
+      definition:
+        'Super sharp eyesight that spots the tiniest detail from far away.',
+    },
+    {
+      term: 'cat nap',
+      difficulty: 'easy',
+      definition: 'A short, light snooze in the middle of the day.',
+    },
+    {
+      term: 'lucky duck',
+      difficulty: 'easy',
+      definition:
+        'Someone who keeps getting good luck, like winning every raffle they enter.',
+    },
 
     // Medium
     {

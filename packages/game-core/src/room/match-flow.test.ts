@@ -775,7 +775,7 @@ describe('rematch and membership mid-match', () => {
     )
   })
 
-  it('keeps leavers in history, lets newcomers guess, and falls back to the lobby', () => {
+  it('keeps leavers in history, lets newcomers play from the next turn, and falls back to the lobby', () => {
     const driver = startHumanRoom({ settings: { rounds: 2, showdown: false } })
     driver.pickWords()
     driver.ok({ type: 'member.leave', memberId: 'di' })
@@ -791,8 +791,18 @@ describe('rematch and membership mid-match', () => {
 
     driver.join('eve', 'Eve', { team: 'B' })
     expect(driver.state.match?.stats.eve).toBeDefined()
-    driver.solve('B', 'eve')
-    expect(driver.teamRound('B').solution?.guesserId).toBe('eve')
+    // Joined mid-turn (could be Di back as a new seat): sits this one out.
+    expect(driver.view('eve').round?.mine).toMatchObject({
+      canGuess: false,
+      sittingOut: 'joined-mid-turn',
+    })
+    expect(
+      driver.fail({
+        type: 'guess.submit',
+        actorId: 'eve',
+        text: driver.term('B'),
+      }).message,
+    ).toBe('You joined during this turn, so guess from the next one.')
 
     // Ana leaves after drawing round 1 (a drawer leaving mid-turn hands the
     // turn over instead; see drawer-handoff.test.ts).
@@ -800,6 +810,13 @@ describe('rematch and membership mid-match', () => {
     expect(driver.state.phase).toBe('round-results')
     driver.ok({ type: 'member.leave', memberId: 'ana' })
     expect(driver.state.hostId).toBe('ben')
+    // From round 2 Eve plays like everyone else: she draws for Moon.
+    driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    expect(driver.state.phase).toBe('word-draft')
+    expect(driver.drawer('B')).toBe('eve')
+    driver.pickWords()
+    driver.solve('B', 'cy')
+    expect(driver.teamRound('B').solution?.guesserId).toBe('cy')
     finishQuickMatch(driver)
     const final = driver.view('ben').final!
     // Di left before doing anything, so has no row; Ana drew round 1.

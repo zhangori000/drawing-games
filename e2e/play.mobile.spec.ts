@@ -14,6 +14,9 @@ import {
  * - on an iPhone-sized screen the guesser's drawing stays large while the
  *   compact keyboard is up, every draft card fits, and every drawing tool is
  *   on screen (portrait and landscape);
+ * - with the phone's own keyboard on a landscape phone (about 148 px left)
+ *   the guess box, its feedback, the clue and a usable drawing stay on
+ *   screen, and rotating or a tablet keyboard never rebuilds the guess box;
  * - pinching the game surface never zooms the page.
  * Teammates play from a desktop context.
  */
@@ -287,6 +290,89 @@ test.describe('iPhone-sized screen (390 x 664)', () => {
       }
     } finally {
       await mate.context.close()
+    }
+  })
+})
+
+test.describe('phone keyboard on a landscape phone (844 x 390)', () => {
+  test.use({ viewport: { width: 844, height: 390 } })
+
+  test('guesser: the guess box, its feedback, the clue and the drawing all stay on screen, and layout changes keep the guess', async ({
+    page,
+    browser,
+  }) => {
+    const host = await desktopPlayer(browser)
+    try {
+      const code = await createRoom(host.page)
+      await join(host.page, 'Ari')
+      await page.goto(`/play/${code}`)
+      await join(page, 'Mina')
+      await startWithMoonBots(host.page, page)
+      await pickFirstCard(host.page)
+
+      const input = page.getByLabel('Your guess')
+      await expect(input).toBeEnabled({ timeout: PHASE_TIMEOUT })
+      const layout = page.getByTestId('play-layout')
+      await expect(layout).toHaveAttribute('data-layout', 'wide-short')
+      await page.getByRole('button', { name: 'Use phone keyboard' }).tap()
+      await input.tap()
+      await expect(input).toBeFocused()
+      await page.keyboard.type('ab')
+      const element = await input.elementHandle()
+      if (!element) throw new Error('No guess input')
+      const sameInput = () => element.evaluate((node) => node.isConnected)
+
+      // The phone keyboard leaves about 148 px. The layout stays landscape,
+      // the top bar steps aside, and the guess box keeps its text and focus.
+      await page.setViewportSize({ width: 844, height: 148 })
+      await expect(layout).toHaveAttribute('data-typing', 'true')
+      await expect(layout).toHaveAttribute('data-layout', 'wide-short')
+      await expect(page.getByTestId('top-bar')).toBeHidden()
+      await expect(input).toHaveValue('ab')
+      await expect(input).toBeFocused()
+      expect(await sameInput()).toBe(true)
+
+      await input.press('Enter')
+      const status = page.getByTestId('guess-dock').getByRole('status')
+      await expect(status).toContainText('ab')
+      await expect(input).toBeFocused()
+      await expectOnScreen(page, input)
+      await expectOnScreen(page, status)
+      await expectOnScreen(page, page.getByTestId('clue-banner'))
+      // The clock moves into the one-line clue while the top bar is away.
+      await expectOnScreen(page, page.getByRole('timer'))
+      const paper = await boxOf(
+        page.getByTestId('team-canvas').locator('canvas'),
+      )
+      expect(paper.height).toBeGreaterThanOrEqual(120)
+      expect(await documentScroll(page)).toBe(0)
+
+      // Rotating mid-guess keeps the same guess box, text and focus.
+      await input.fill('cat')
+      await page.setViewportSize({ width: 390, height: 844 })
+      await expect(layout).toHaveAttribute('data-layout', 'stacked')
+      await expect(page.getByTestId('top-bar')).toBeVisible()
+      await expect(input).toHaveValue('cat')
+      await expect(input).toBeFocused()
+      expect(await sameInput()).toBe(true)
+
+      // A tablet whose browser shrinks the page for its keyboard keeps the
+      // wide layout (and the keyboard) while typing.
+      await page.setViewportSize({ width: 1138, height: 712 })
+      await expect(layout).toHaveAttribute('data-layout', 'wide')
+      await input.focus()
+      await page.setViewportSize({ width: 1138, height: 392 })
+      await expect(page.getByTestId('clue-banner')).toHaveAttribute(
+        'data-compact',
+        '',
+      )
+      await expect(layout).toHaveAttribute('data-layout', 'wide')
+      await expect(input).toHaveValue('cat')
+      await expect(input).toBeFocused()
+      expect(await sameInput()).toBe(true)
+      await expectOnScreen(page, input)
+    } finally {
+      await host.context.close()
     }
   })
 })

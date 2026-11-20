@@ -396,11 +396,56 @@ function puzzleBlockHeight(lineCount: number, height: number): number {
   )
 }
 
+/** A rectangle of the canvas, as fractions (x and y both 0..1). */
+export interface TextBounds {
+  readonly left: number
+  readonly right: number
+  readonly top: number
+  readonly bottom: number
+}
+
+/**
+ * Where a puzzle's blanks go: `full` uses `BOT_TEXT_BOUNDS`; `below-tray`
+ * leaves the top band free for loose letters drawn before the team could
+ * see the word's length (see `renderLooseLetter`).
+ */
+export type PuzzleLayout = 'full' | 'below-tray'
+
+/** Top band for loose letters (no blanks, no order, no letter count). */
+export const LETTER_TRAY_BOUNDS: TextBounds = Object.freeze({
+  left: 0.06,
+  right: 0.94,
+  top: 0.05,
+  bottom: 0.21,
+})
+/** The blanks' area under the letter tray. */
+const BELOW_TRAY_BOUNDS: TextBounds = Object.freeze({
+  left: 0.06,
+  right: 0.94,
+  top: 0.28,
+  bottom: 0.92,
+})
+/**
+ * The tray has this many fixed cells whatever the word, filled in reveal
+ * order (itself shuffled), so where a letter sits says nothing about where
+ * it goes or how long the word is.
+ */
+export const LETTER_TRAY_CELLS = 10
+/** Cap height of a tray letter, as a fraction of canvas height. */
+const TRAY_GLYPH_HEIGHT = 0.11
+
+function layoutBounds(layout: PuzzleLayout): TextBounds {
+  return layout === 'full' ? BOT_TEXT_BOUNDS : BELOW_TRAY_BOUNDS
+}
+
 function puzzleLayoutAt(
   words: readonly string[],
   height: number,
+  bounds: TextBounds,
 ): string[][] | null {
-  const maxEm = (BOX_WIDTH * CANVAS_ASPECT) / height
+  const boxWidth = bounds.right - bounds.left
+  const boxHeight = bounds.bottom - bounds.top
+  const maxEm = (boxWidth * CANVAS_ASPECT) / height
   const lines: string[][] = []
   let current: string[] = []
   for (const word of words) {
@@ -414,8 +459,8 @@ function puzzleLayoutAt(
   }
   if (current.length > 0) lines.push(current)
   const fits =
-    lines.every((line) => emToX(puzzleLineEm(line), height) <= BOX_WIDTH) &&
-    puzzleBlockHeight(lines.length, height) <= BOX_HEIGHT
+    lines.every((line) => emToX(puzzleLineEm(line), height) <= boxWidth) &&
+    puzzleBlockHeight(lines.length, height) <= boxHeight
   return fits ? lines : null
 }
 
@@ -438,19 +483,26 @@ export interface BotPuzzle {
  * one equal-width blank per letter or digit (spaces are gaps, hyphens and
  * apostrophes are drawn), plus each letter's glyph above its blank, so a
  * bot can reveal letters one at a time without ever writing the answer.
- * Same character rules, bounds, and rounding as `renderTextStrokes`.
+ * Same character rules and rounding as `renderTextStrokes`, inside the
+ * bounds of `layout`.
  */
-export function renderLetterPuzzle(text: string): BotPuzzle {
+export function renderLetterPuzzle(
+  text: string,
+  layout: PuzzleLayout = 'full',
+): BotPuzzle {
+  const bounds = layoutBounds(layout)
+  const boxWidth = bounds.right - bounds.left
+  const boxHeight = bounds.bottom - bounds.top
   const words = drawableWords(text)
   if (words.length === 0) return { slots: [], marks: [] }
-  let lines = puzzleLayoutAt(words, MAX_GLYPH_HEIGHT)
+  let lines = puzzleLayoutAt(words, MAX_GLYPH_HEIGHT, bounds)
   let height = MAX_GLYPH_HEIGHT
   if (lines === null) {
     let low = 0
     let high = MAX_GLYPH_HEIGHT
     for (let step = 0; step < LAYOUT_SEARCH_STEPS; step += 1) {
       const middle = (low + high) / 2
-      const fitted = puzzleLayoutAt(words, middle)
+      const fitted = puzzleLayoutAt(words, middle, bounds)
       if (fitted === null) {
         high = middle
       } else {
@@ -465,19 +517,18 @@ export function renderLetterPuzzle(text: string): BotPuzzle {
   const point = (xEm: number, lineLeft: number, y: number) => ({
     x: roundCoordinate(
       lineLeft + emToX(xEm, height),
-      BOT_TEXT_BOUNDS.left,
-      BOT_TEXT_BOUNDS.right,
+      bounds.left,
+      bounds.right,
     ),
-    y: roundCoordinate(y, BOT_TEXT_BOUNDS.top, BOT_TEXT_BOUNDS.bottom),
+    y: roundCoordinate(y, bounds.top, bounds.bottom),
   })
   const slots: BotPuzzleSlot[] = []
   const marks: BotStroke[] = []
   const blockTop =
-    BOT_TEXT_BOUNDS.top +
-    (BOX_HEIGHT - puzzleBlockHeight(lines.length, height)) / 2
+    bounds.top + (boxHeight - puzzleBlockHeight(lines.length, height)) / 2
   lines.forEach((line, lineIndex) => {
     const lineLeft =
-      BOT_TEXT_BOUNDS.left + (BOX_WIDTH - emToX(puzzleLineEm(line), height)) / 2
+      bounds.left + (boxWidth - emToX(puzzleLineEm(line), height)) / 2
     const lineTop =
       blockTop + lineIndex * height * (1 + PUZZLE_BLANK_DROP_EM + LINE_GAP_EM)
     const blankY = lineTop + height * (1 + PUZZLE_BLANK_DROP_EM)
@@ -512,4 +563,40 @@ export function renderLetterPuzzle(text: string): BotPuzzle {
     })
   })
   return { slots, marks }
+}
+
+/**
+ * One revealed letter as a loose tile in cell `cell` of the letter tray
+ * (`LETTER_TRAY_BOUNDS`): no blank under it, and a position that depends
+ * only on the cell, never on the word, so loose letters give away neither
+ * their order nor the word's length. Cells alternate slightly up and down
+ * so the row reads as scattered tiles, not as a word. Empty for a
+ * character the font cannot draw or a cell outside the tray.
+ */
+export function renderLooseLetter(char: string, cell: number): BotStroke[] {
+  const shape = GLYPHS[char.toUpperCase()]
+  if (
+    shape === undefined ||
+    isPuzzleMark(char) ||
+    !Number.isInteger(cell) ||
+    cell < 0 ||
+    cell >= LETTER_TRAY_CELLS
+  ) {
+    return []
+  }
+  const bounds = LETTER_TRAY_BOUNDS
+  const cellWidth = (bounds.right - bounds.left) / LETTER_TRAY_CELLS
+  const height = TRAY_GLYPH_HEIGHT
+  const slack = bounds.bottom - bounds.top - height
+  const top = bounds.top + (cell % 2 === 0 ? slack * 0.2 : slack * 0.8)
+  const left =
+    bounds.left +
+    cellWidth * cell +
+    (cellWidth - emToX(shape.width, height)) / 2
+  return shape.strokes.map((polyline) =>
+    polyline.map(([x, y]) => ({
+      x: roundCoordinate(left + emToX(x, height), bounds.left, bounds.right),
+      y: roundCoordinate(top + y * height, bounds.top, bounds.bottom),
+    })),
+  )
 }

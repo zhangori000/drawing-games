@@ -1,12 +1,17 @@
 import { matchGuess } from '@drawing-games/word-bank'
 
 import type { TeamId, WordDifficulty } from '../types'
-import { renderLetterPuzzle } from './bot-font'
+import {
+  LETTER_TRAY_CELLS,
+  renderLetterPuzzle,
+  type PuzzleLayout,
+} from './bot-font'
 import type { RoomContext } from './context'
 import { patchState } from './context'
 import { findMember, teamRoster } from './members'
+import { effectiveWordLengthMode } from './settings'
 import { roomPool } from './words'
-import type { BotScheduleItem } from './types'
+import type { BotScheduleItem, RoomState } from './types'
 
 /** Bot drawers pick a card this long into the draft. */
 const DRAFT_PICK_DELAY_MS = { min: 2_000, max: 5_000 } as const
@@ -114,27 +119,95 @@ export interface CanvasPlan {
   readonly canMiss?: boolean
 }
 
-/** Schedules a bot drawer's letter puzzle (see `renderLetterPuzzle`). */
-function planBotPuzzle(ctx: RoomContext, plan: CanvasPlan): void {
-  const start = ctx.now
-  const puzzle = renderLetterPuzzle(plan.term)
+/**
+ * Whether `team`'s guessers can see their word's letter pattern right now:
+ * a normal round's drawing with word length shown, or revealed by the
+ * team's vote. Never during a showdown card (no length is shown there), or
+ * while the length is never shown or clues are off (`effectiveWordLengthMode`).
+ * A bot drawer only draws the blanks once this holds, so the canvas never
+ * gives away the letter count the room's settings keep hidden.
+ */
+export function botPatternVisible(state: RoomState, team: TeamId): boolean {
+  const round = state.match?.round
+  if (state.phase !== 'drawing' || round === null || round === undefined) {
+    return false
+  }
+  const mode = effectiveWordLengthMode(state.settings)
+  return mode === 'shown' || round.teams[team].hint.revealed
+}
+
+/**
+ * Where a bot drawer's blanks go: across the whole text area when the length
+ * is shown from the start, else under the letter tray, which holds the
+ * letters revealed before the team could see the length.
+ */
+export function botPuzzleLayout(state: RoomState): PuzzleLayout {
+  return effectiveWordLengthMode(state.settings) === 'shown'
+    ? 'full'
+    : 'below-tray'
+}
+
+/** Schedules the blanks (and hyphens/apostrophes), quickly, from now. */
+function scheduleBotOutline(
+  ctx: RoomContext,
+  botId: string,
+  canvasId: string,
+  term: string,
+): number {
+  const puzzle = renderLetterPuzzle(term, botPuzzleLayout(ctx.state))
   const outlineCount = puzzle.marks.length + puzzle.slots.length
-  let at = start
+  let at = ctx.now
   for (let index = 0; index < outlineCount; index += 1) {
     at += ctx.rng.int(OUTLINE_INTERVAL_MS.min, OUTLINE_INTERVAL_MS.max)
     scheduleBotItem(ctx, {
       atMs: at,
-      botId: plan.drawerId,
-      action: { type: 'draw.outline', canvasId: plan.canvasId, index },
+      botId,
+      action: { type: 'draw.outline', canvasId, index },
     })
   }
-  const letters = puzzle.slots.length
-  const reveals = Math.min(letters - 1, Math.floor(letters * MAX_REVEAL_SHARE))
+  return at
+}
+
+/**
+ * The team just revealed its word's length by vote: a bot drawing for it
+ * now draws the blanks, and its later letters land in them (letters already
+ * shown stay loose in the tray).
+ */
+export function planBotOutlineOnReveal(ctx: RoomContext, team: TeamId): void {
+  const teamRound = ctx.state.match?.round?.teams[team]
+  if (teamRound === undefined || teamRound.solution !== null) return
+  if (findMember(ctx.state, teamRound.drawerId)?.kind !== 'bot') return
+  const word = teamRound.options.find(
+    (option) => option.wordId === teamRound.chosenWordId,
+  )
+  if (word === undefined) return
+  scheduleBotOutline(ctx, teamRound.drawerId, teamRound.canvasId, word.term)
+}
+
+/**
+ * Schedules a bot drawer's letter puzzle. With the pattern visible to the
+ * team (`botPatternVisible`) it draws a blank per letter first and reveals
+ * letters into them (see `renderLetterPuzzle`); otherwise it reveals them as
+ * loose tiles in the tray (`renderLooseLetter`), never drawing blanks, so
+ * the exact letter count stays hidden as the room's settings say.
+ */
+function planBotPuzzle(ctx: RoomContext, plan: CanvasPlan): void {
+  const start = ctx.now
+  const visible = botPatternVisible(ctx.state, plan.team)
+  const outlineDone = visible
+    ? scheduleBotOutline(ctx, plan.drawerId, plan.canvasId, plan.term)
+    : start
+  const letters = renderLetterPuzzle(plan.term).slots.length
+  const reveals = Math.min(
+    letters - 1,
+    Math.floor(letters * MAX_REVEAL_SHARE),
+    // Loose letters each need a tray cell; blanks never run out.
+    visible ? letters : LETTER_TRAY_CELLS,
+  )
   if (reveals <= 0) return
   const order = ctx.rng.shuffle(
     Array.from({ length: letters }, (_, slot) => slot),
   )
-  const outlineDone = at
   for (let step = 0; step < reveals; step += 1) {
     const share =
       REVEAL_WINDOW.start +
@@ -153,6 +226,7 @@ function planBotPuzzle(ctx: RoomContext, plan: CanvasPlan): void {
         type: 'draw.letter',
         canvasId: plan.canvasId,
         slot: order[step] as number,
+        step,
       },
     })
   }
@@ -160,9 +234,9 @@ function planBotPuzzle(ctx: RoomContext, plan: CanvasPlan): void {
 
 /**
  * Plans practice-bot behavior for a fresh canvas starting at `ctx.now`. A
- * bot drawer draws a letter puzzle: a blank per letter, then a few letters
- * revealed over the budget (never the whole word), so a human guesser gets
- * a fair puzzle rather than the answer to read. Every bot guesser follows
+ * bot drawer draws a letter puzzle: a few letters revealed over the budget
+ * (never the whole word), in blanks once the team can see the length, so a
+ * human guesser gets a fair puzzle rather than the answer to read. Every bot guesser follows
  * `SOLVE_MODEL` whoever draws: 1–3 wrong guesses, then the answer at a
  * random share of the budget, or (sometimes) never. A human drawer's ink
  * must also look like a real attempt before the answer lands (bot-runner).

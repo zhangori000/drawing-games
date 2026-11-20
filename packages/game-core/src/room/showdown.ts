@@ -213,6 +213,7 @@ export function clearShowdownCard(
         drawerId: null,
         guesses: [],
         formerDrawerIds: [],
+        lateJoinerIds: [],
         finishedAtMs: ctx.now,
       }
     : {
@@ -227,6 +228,7 @@ export function clearShowdownCard(
         firstStrokeAtMs: null,
         guesses: [],
         formerDrawerIds: [],
+        lateJoinerIds: [],
       }
   const firstClear =
     finished && requireShowdown(ctx.state).firstClearTeam === null

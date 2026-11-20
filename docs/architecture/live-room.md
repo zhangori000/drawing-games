@@ -88,7 +88,15 @@ names and meanings in `types.ts` must hold.
   suffix (`Mina 2`). The first human becomes host. A member joins the
   requested team if it has fewer than 8 members, otherwise the smaller team
   (ties → A). Joining mid-match is allowed: the newcomer is a guesser now and
-  enters the drawer rotation naturally.
+  enters the drawer rotation naturally. A newcomer whose team's draft,
+  drawing, or showdown card is under way (and not yet solved) is recorded in
+  that turn's `lateJoinerIds` (`markLateJoiner`) and sits it out exactly like
+  a former drawer: no guesses (`You joined during this turn, so guess from
+the next one.`), no hint vote, not counted as a possible guesser for a
+  takeover, no `missed` word event, and `sittingOut: 'joined-mid-turn'` on
+  `round.mine` / `showdown.mine`. The server cannot tell a new seat from the
+  turn's drawer rejoining by code or a second tab, so this applies to every
+  late joiner. A showdown card's list resets with each new card.
 - `member.presence` updates `connected`/`lastSeenAtMs`.
 - `member.leave`: in the lobby the member is removed. Mid-match the member is
   marked disconnected and left; they are removed when the room returns to the
@@ -127,11 +135,16 @@ names and meanings in `types.ts` must hold.
   `unusedWordCount − 2·(r − 1) < 2·(wordChoiceCount + replacementsPerDrawer)`
   (`roundWordDemand`), or null. The lobby shows a warning instead of
   "words never come back" when it is set; it does not block Start.
+  `difficultyShortfall` (Balanced mix only, `firstShortDifficulty`) is the
+  earliest `{ difficulty, fromRound }` with
+  `freshOfDifficulty − 2·(r − 1) < 2·⌊wordChoiceCount / 3⌋`, i.e. from which
+  round a hand may lack that difficulty, or null; the lobby can show it as
+  a note (it never blocks Start).
   `freshWordCount` counts distinct pool words that neither the room nor any
   current member has drawn or recently seen (`memory.avoid` and `.soft`);
-  like `unusedWordCount` it matches by id or answer key (`countFreshWords`,
-  the draft's rule), so a custom "chair" is not fresh for someone whose
-  history holds `everyday/chair`.
+  like `unusedWordCount` it matches by id, answer key, or inflection
+  (`countFreshWords`, the draft's rule), so a custom "chair" (or "chairs")
+  is not fresh for someone whose history holds `everyday/chair`.
 - `lobby.add-bot` (host, lobby): ids `bot_<n>`; names cycle through
   `Pixel Pete, Doodlebot, Sketchy, Inkling, Scribbles, Smudge, Squiggles,
 Blotto`. Bots are always connected and ready and never have accounts.
@@ -198,6 +211,16 @@ same way, without the grace.
 At round start, for team A then team B:
 
 1. **Pool**: `buildWordPool(settings)` (enabled packs ± custom words).
+   Words are one word when they share an answer key or are the same word
+   by inflection (`isSameWord`/`sameWordKeys` in word-bank: simple and
+   irregular plurals and singulars, on X of an "X of Y" phrase, exactly the
+   noun forms `matchGuess` accepts as correct): `dolphin`/`dolphins`,
+   `cat`/`cats`, `mouse`/`mice`. The pool keeps the first of each (curated
+   before custom, so a custom `dolphins` gives way to the curated
+   `dolphin`), and the same rule applies to room memory, personal memory
+   (`poolWordFor`, `termForWordId`), stage exclusions, `drawnBefore`, and
+   the lobby counts. Verb forms are not one word (`wave`/`waving` stay two
+   cards).
 2. **Slots**: `difficultySlots(settings.difficultyMix, wordChoiceCount, rng)`.
    `balanced` means three cards are always one easy, one medium, one hard,
    each labelled with its bonus (+0/+20/+40) so the choice is meaningful.
@@ -205,8 +228,8 @@ At round start, for team A then team B:
    the drawer's own live cards and words replaced earlier this round. The
    slots are filled from the strictest stage that still has words, and a
    later stage only fills the slots the earlier ones could not:
-   1. words never drawn in this room (across rematches, by id or answer
-      key), not in the drawer's `memory.avoid` (drew before, reported "seen
+   1. words never drawn in this room (across rematches, by id, answer
+      key, or inflection), not in the drawer's `memory.avoid` (drew before, reported "seen
       it"), and not on the other team's cards this round;
    2. never-drawn words from the drawer's `memory.avoid`;
    3. words drawn in this room, least recently drawn first: only the oldest
@@ -214,8 +237,20 @@ At round start, for team A then team B:
    4. any word but the other team's cards;
    5. (tiny pools only, fresh deals only) the other team's cards too.
 
+   Within stages 1–3 a word first fills a slot of its own difficulty
+   (`selectDraftSlots` with `strictDifficulty`), and only then a slot of
+   another difficulty; in stage 3 that means a drawn word of the slot's
+   difficulty comes back before an older one of another difficulty.
+   **Sharing a short supply**: when the room's never-drawn words
+   (`unusedWordCount`) cannot fill both hands (`< 2 · wordChoiceCount`), team
+   A, dealt first, may take at most its share of them (`freshShareFor`:
+   half, the odd one to A in odd rounds and to B in even rounds; stages 1–2
+   stop there, filling first the slots whose difficulty has the most
+   never-drawn words, `maxPicks`), and stage 3 then keeps the rest
+   (`neverDrawnIds`) out of A's hand while drawn words can fill it. So B is
+   never left with only drawn cards while A holds every fresh one.
    So a drawn word only comes back once no never-drawn word is left for the
-   slot. With at least `roundWordDemand` never-drawn words at each draft no
+   slot (or for this hand's share). With at least `roundWordDemand` never-drawn words at each draft no
    card is ever a drawn word (an invariant checks no chosen word repeats in
    a match while the pool has that room). The drawer's view marks such a
    card `drawnBefore`.
@@ -287,9 +322,12 @@ increments per team draft. `canvas.reset` is emitted for both team canvases
   `brush teeth`, `breaking the ice`). A verb form is never accepted when it
   is another word in the pool (`wave` while `waving` is playable), a known
   `-ing` noun (`wed` is not `wedding`), or a stub (`king`, `spring` keep their
-  letters; stems need 3+ letters with a vowel). `close` still compares only
-  against the answer and its plurals; `partial` also recognises a verb form
-  of one answer word. Every guess emits private `guess.feedback`. The team
+  letters; stems need 3+ letters with a vowel); a verb form refused only
+  because it names another word earns `close` (`sneeze` for `sneezing`,
+  `cook` for `cooking`). In an "X of Y" phrase the plural goes on X
+  (`pots of gold` is correct, `pot of golds` only close). Otherwise `close`
+  compares only against the answer and its plurals; `partial` also
+  recognises a verb form of one answer word. Every guess emits private `guess.feedback`. The team
   feed keeps the last 60 guesses; near-miss verdicts in it are private too
   (see projection secrecy).
 - A correct guess locks that team's points:
@@ -435,6 +473,20 @@ by the reducer through `state.bots.schedule` and executed in `advanceRoom`;
   blanks (`draw.letter`) in a seeded random order: at most 60 % of them and
   never all, spread from 15 % to 75 % of the time budget (±1.5 s). Equal
   blanks keep narrow and wide letters indistinguishable.
+  The blanks are only drawn while the team can see its pattern
+  (`botPatternVisible`: a normal round's drawing with
+  `effectiveWordLengthMode` `shown`, or `hint.revealed`). Otherwise no
+  `draw.outline` is scheduled, and each `draw.letter` (carrying its reveal
+  `step`) draws the letter as a loose tile in tray cell `step`
+  (`renderLooseLetter`, `LETTER_TRAY_BOUNDS`, 10 fixed cells, so at most 10
+  loose reveals): the position depends only on the step, never on the word.
+  When a hint vote passes (`handleHintVote` or due `revealHint`),
+  `planBotOutlineOnReveal` schedules the blanks from that moment, and
+  `draw.letter` items due after it fill blanks. With `hidden-vote` the blanks
+  use the `below-tray` layout (under the tray); with `shown`, the full text
+  area. The decision is made when each item runs, from room state, so it
+  stays deterministic. Showdown cards never show a length, so bots draw loose
+  tiles there.
 - Bot guessers follow **one timing model whoever draws** (`SOLVE_MODEL`), so
   both teams of a practice match play by the same clock: 1–3 clearly wrong
   guesses (other pool words), then the answer at a uniform share of the time
@@ -628,7 +680,12 @@ Non-members get previews during play and full access in results/stats.
 
 - Every text input is at least 16 px (iOS Safari zooms smaller inputs on
   focus), uses `autocomplete/autocorrect/autocapitalize off`,
-  `spellcheck=false`, and `enterkeyhint=send`.
+  `spellcheck=false`, and `enterkeyhint=send`. Beyond the guess box, a
+  base-layer rule in `globals.css` holds every text field on every page
+  (lobby, accounts, Word Library) to at least 16 px on coarse pointers: an
+  inherited small size is floored, and `text-xs`/`text-sm` resolve to 1rem
+  inside fields there. `e2e/form-fields.spec.ts` checks the pages with an
+  iPhone profile.
 - Submitting a guess never blurs the input, navigates, or scrolls; focus is
   restored with `preventScroll`.
 - The play screen is a fixed full-screen layout pinned to the visual
@@ -661,6 +718,28 @@ Non-members get previews during play and full access in results/stats.
   slims to 44 px while the device keyboard is open. On a 390 x 664 phone the
   paper stays 374 x 280 with the compact keys up and about 250 px wide with
   the device keyboard covering 45% of the screen.
+- One element tree for every play layout: `PlayLayout` always renders the
+  same regions in the same order (pane with banner and canvas, tools, side,
+  dock) inside one CSS grid, and a layout change only swaps the grid
+  template. Rotating a phone or resizing a window therefore never remounts
+  the canvas or the guess dock: a half-typed guess, its focus, the phone
+  keyboard, `↑` recall and send errors all survive.
+- The layout (`usePlayLayoutMode`, rule in `_lib/layout-mode.ts`) is decided
+  on `GameViewport`'s `width` and `layoutHeight`: the keyboard-closed height
+  (the height at this width before something editable was focused, or the
+  tallest seen while typing) while the device keyboard is open, so a
+  keyboard that shrinks the layout viewport (Android's
+  `interactive-widget=resizes-content`, tablets, foldables, a desktop window
+  resized while typing) cannot flip `wide` to `wide-short` or `stacked` to
+  `wide`. Media queries stand in until the first measurement. A tablet
+  typing in `wide` collapses the clue banner to one line and hides the
+  scoreboard (the scores are in the top bar) so the feed keeps room.
+- Landscape phone with the device keyboard (about 148-162 px visible): the
+  top bar hides (`useTypingOnShortLandscape`), the one-line clue banner
+  shows the clock, and the sidebar holds the guess box and its status line
+  first, then the clue; the feed and opponent tile give way to the status
+  line's teammate guess and opponent chip. The paper keeps the full height
+  (176 x 132 on 844 x 148, 194 x 146 on 863 x 162).
 - Drawer tools on phones are all on screen at once (no hidden sideways
   scroll): two rows under the canvas in portrait (pen, eraser, size, undo,
   redo, clear; then 12 colors in a grid), and a narrow panel in the landscape
@@ -692,8 +771,11 @@ Non-members get previews during play and full access in results/stats.
   ids per list; a v1 single list is moved into `soft` once) and send it on
   join: `recentAvoidIds` = words this browser drew (it was still the drawer
   named in the round results) or reported "seen it" on (recorded when the
-  room acks the swap), `recentWordIds` = every other word it met. The room
-  puts them in the joining member's `avoid` and `soft` memory, exactly like
+  room acks the swap), `recentWordIds` = every other word it met. Draft
+  cards (and the drawer's word) are written the moment the view deals them,
+  not at the round results, so a reload, a closed tab or a match abandoned
+  mid-round keeps them; the drawn word moves to `avoid` at the results. The
+  room puts them in the joining member's `avoid` and `soft` memory, exactly like
   an account's `drew`/`seen-report` and other roles, so a guest is not dealt
   their own drawn words again either. Both lists only shape that player's
   own cards (and their teammates' drafts a little), so they are taken on

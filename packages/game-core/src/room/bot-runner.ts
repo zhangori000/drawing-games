@@ -4,8 +4,13 @@ import {
   type NormalizedPoint,
 } from '@drawing-games/drawing-model'
 
-import { renderLetterPuzzle, type BotPuzzle } from './bot-font'
-import { scheduleBotItem } from './bots'
+import {
+  renderLetterPuzzle,
+  renderLooseLetter,
+  type BotPuzzle,
+  type PuzzleLayout,
+} from './bot-font'
+import { botPatternVisible, botPuzzleLayout, scheduleBotItem } from './bots'
 import {
   BOT_STROKE_STYLE,
   GUESS_MIN_INTERVAL_MS,
@@ -40,15 +45,16 @@ const PUZZLE_CACHE = new Map<string, BotPuzzle>()
 const PUZZLE_CACHE_LIMIT = 64
 
 /** Memoized: every outline/letter item of a canvas asks for the same term. */
-function puzzleFor(term: string): BotPuzzle {
-  const cached = PUZZLE_CACHE.get(term)
+function puzzleFor(term: string, layout: PuzzleLayout): BotPuzzle {
+  const key = `${layout}:${term}`
+  const cached = PUZZLE_CACHE.get(key)
   if (cached !== undefined) return cached
-  const puzzle = renderLetterPuzzle(term)
+  const puzzle = renderLetterPuzzle(term, layout)
   if (PUZZLE_CACHE.size >= PUZZLE_CACHE_LIMIT) {
     const oldest = PUZZLE_CACHE.keys().next().value
     if (oldest !== undefined) PUZZLE_CACHE.delete(oldest)
   }
-  PUZZLE_CACHE.set(term, puzzle)
+  PUZZLE_CACHE.set(key, puzzle)
   return puzzle
 }
 
@@ -89,7 +95,7 @@ function drawStrokes(
   ) {
     return
   }
-  const strokes = pick(puzzleFor(canvas.term))
+  const strokes = pick(puzzleFor(canvas.term, botPuzzleLayout(ctx.state)))
   const drawn = ctx.state.bots.strokesDrawn[canvasId] ?? 0
   const ops: DrawingAction[] = []
   let next = drawn
@@ -165,18 +171,24 @@ export function runBotItem(ctx: RoomContext, item: BotScheduleItem): void {
       // Retired: bots no longer write the answer out.
       return
     case 'draw.outline':
+      // Blanks would give away the letter count the team cannot see.
+      if (!botPatternVisible(ctx.state, bot.team)) return
       drawStrokes(ctx, bot, action.canvasId, (puzzle) =>
         outlineStroke(puzzle, action.index),
       )
       return
-    case 'draw.letter':
-      drawStrokes(
-        ctx,
-        bot,
-        action.canvasId,
-        (puzzle) => puzzle.slots[action.slot]?.glyph ?? [],
-      )
+    case 'draw.letter': {
+      const loose =
+        action.step !== undefined && !botPatternVisible(ctx.state, bot.team)
+      drawStrokes(ctx, bot, action.canvasId, (puzzle) => {
+        const slot = puzzle.slots[action.slot]
+        if (slot === undefined) return []
+        return loose
+          ? renderLooseLetter(slot.char, action.step as number)
+          : slot.glyph
+      })
       return
+    }
     case 'guess':
       guess(ctx, bot, item, action)
   }

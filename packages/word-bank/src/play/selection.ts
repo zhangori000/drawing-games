@@ -1,6 +1,7 @@
 import type { WordDifficulty } from '../types'
 import { boundedMemo } from './memo'
-import { answerKeyForWordId } from './pool'
+import { termForWordId } from './pool'
+import { createSameWordSet, type SameWordSet } from './same-word'
 import { wordStems } from './stems'
 import { normalizeAnswer } from './text'
 import type { DraftSelectionInput, PlayableWord } from './types'
@@ -53,44 +54,47 @@ function unitRoll(random: () => number): number {
 }
 
 /**
- * Answer keys behind the excluded ids, so an excluded `custom/cat` also
+ * The words behind the excluded ids, so an excluded `custom/cat` also
  * blocks `animals/cat` (and vice versa) when the pool changes between
- * matches.
+ * matches, and an excluded `animals/dolphin` blocks a custom `dolphins`
+ * (`isSameWord`).
  */
-function excludedAnswerKeys(
+function excludedWords(
   pool: readonly PlayableWord[],
   excludedIds: ReadonlySet<string>,
-): Set<string> {
-  const keys = new Set<string>()
-  if (excludedIds.size === 0) return keys
+): SameWordSet {
+  const words = createSameWordSet()
+  if (excludedIds.size === 0) return words
   for (const word of pool) {
-    if (excludedIds.has(word.id)) keys.add(termAnswerKey(word.term))
+    if (excludedIds.has(word.id)) words.add(word.term)
   }
   for (const id of excludedIds) {
-    const key = answerKeyForWordId(id)
-    if (key !== null) keys.add(key)
+    const term = termForWordId(id)
+    if (term !== null) words.add(term)
   }
-  return keys
+  return words
 }
 
 /**
- * Pool words that are not excluded, once each (by id and by answer key), in
- * pool order.
+ * Pool words that are not excluded, once each (by id, and by answer key or
+ * inflection: one of `dolphin`/`dolphins`), in pool order.
  */
 function freshWords(
   pool: readonly PlayableWord[],
   excludedIds: ReadonlySet<string>,
 ): { word: PlayableWord; key: string }[] {
-  const excludedKeys = excludedAnswerKeys(pool, excludedIds)
+  const excluded = excludedWords(pool, excludedIds)
   const seenIds = new Set<string>()
-  const seenKeys = new Set<string>()
+  const seen = createSameWordSet()
   const fresh: { word: PlayableWord; key: string }[] = []
   for (const word of pool) {
     if (seenIds.has(word.id) || excludedIds.has(word.id)) continue
     const key = termAnswerKey(word.term)
-    if (key.length === 0 || seenKeys.has(key) || excludedKeys.has(key)) continue
+    if (key.length === 0 || seen.has(word.term) || excluded.has(word.term)) {
+      continue
+    }
     seenIds.add(word.id)
-    seenKeys.add(key)
+    seen.add(word.term)
     fresh.push({ word, key })
   }
   return fresh
@@ -98,7 +102,7 @@ function freshWords(
 
 /**
  * How many distinct pool words remain offerable under `excludedIds`, using
- * the same id-or-answer-key rule as `selectDraftOptions`. The room uses it to
+ * the same id-or-same-word rule as `selectDraftOptions`. The room uses it to
  * decide when its used-word memory must relax.
  */
 export function countFreshWords(
@@ -125,15 +129,18 @@ function weightedPick<T>(
 /**
  * Passes from best to most relaxed: requested difficulty without shared
  * stems, other difficulties without shared stems, then the same two with
- * shared stems allowed at heavily reduced odds.
+ * shared stems allowed at heavily reduced odds. `strict` skips the other
+ * difficulties.
  */
 function pickForSlot(
   candidates: readonly Candidate[],
   slot: WordDifficulty,
   progress: DraftProgress,
   random: () => number,
+  strict = false,
 ): Candidate | null {
-  const order = FALLBACK_ORDER[slot] ?? FALLBACK_ORDER.medium
+  const fallback = FALLBACK_ORDER[slot] ?? FALLBACK_ORDER.medium
+  const order = strict ? fallback.slice(0, 1) : fallback
   for (const strictStems of [true, false]) {
     for (const difficulty of order) {
       const eligible: { item: Candidate; weight: number }[] = []
@@ -164,7 +171,8 @@ function pickForSlot(
  * Picks one word per slot with weighted randomness.
  *
  * - Hard exclusions are absolute and also cover other ids with the same
- *   answer key; no two cards ever share an id or an answer key.
+ *   answer key or inflection (`isSameWord`); no two cards ever share an id
+ *   or name the same word.
  * - Caller penalties and pack penalties multiply a word's odds (clamped to
  *   [`MIN_PENALTY_MULTIPLIER`, 1]); a repeated pack within the draft costs
  *   `SAME_PACK_IN_DRAFT_FACTOR` per earlier card from that pack.
@@ -177,6 +185,38 @@ function pickForSlot(
  * non-excluded word left.
  */
 export function selectDraftOptions(input: DraftSelectionInput): PlayableWord[] {
+  const chosen: PlayableWord[] = []
+  for (const word of selectDraftSlots(input)) {
+    if (word === null) break
+    chosen.push(word)
+  }
+  return chosen
+}
+
+export interface DraftSlotSelectionInput extends DraftSelectionInput {
+  /**
+   * Only fill a slot with a word of its own difficulty (no fallback to the
+   * nearest other difficulty); slots with none stay empty.
+   */
+  readonly strictDifficulty?: boolean
+  /**
+   * Fill at most this many slots. The slots whose difficulty has the most
+   * candidates are filled first (ties in slot order), so scarce words of a
+   * difficulty are left for whoever needs them next (the other hand).
+   */
+  readonly maxPicks?: number
+}
+
+/**
+ * `selectDraftOptions` slot by slot: `result[i]` is the word for
+ * `slots[i]`, or null when it stays empty (nothing eligible, or past
+ * `maxPicks`). Same rules and the same one `random` call per filled slot;
+ * without `strictDifficulty` and `maxPicks`, the filled slots are exactly
+ * the cards `selectDraftOptions` returns.
+ */
+export function selectDraftSlots(
+  input: DraftSlotSelectionInput,
+): (PlayableWord | null)[] {
   const candidates: Candidate[] = freshWords(input.pool, input.hardExclude).map(
     ({ word, key }) => ({
       word,
@@ -192,12 +232,37 @@ export function selectDraftOptions(input: DraftSelectionInput): PlayableWord[] {
     usedStems: new Set(input.avoidStems),
     packCounts: new Map(),
   }
-  const chosen: PlayableWord[] = []
+  const result: (PlayableWord | null)[] = input.slots.map(() => null)
+  const maxPicks = input.maxPicks ?? input.slots.length
+  let order = input.slots.map((_, index) => index)
+  if (maxPicks < input.slots.length) {
+    const supply = new Map<WordDifficulty, number>()
+    for (const candidate of candidates) {
+      const difficulty = candidate.word.difficulty
+      supply.set(difficulty, (supply.get(difficulty) ?? 0) + 1)
+    }
+    const supplyOf = (index: number) =>
+      supply.get(input.slots[index] as WordDifficulty) ?? 0
+    order = [...order].sort((left, right) => supplyOf(right) - supplyOf(left))
+  }
 
-  for (const slot of input.slots) {
-    const pick = pickForSlot(candidates, slot, progress, input.random)
-    if (pick === null) break
-    chosen.push(pick.word)
+  let picks = 0
+  for (const index of order) {
+    if (picks >= maxPicks) break
+    const pick = pickForSlot(
+      candidates,
+      input.slots[index] as WordDifficulty,
+      progress,
+      input.random,
+      input.strictDifficulty === true,
+    )
+    if (pick === null) {
+      // With fallback, nothing is left for any later slot either.
+      if (input.strictDifficulty === true) continue
+      break
+    }
+    result[index] = pick.word
+    picks += 1
     progress.chosenKeys.add(pick.key)
     for (const stem of pick.stems) progress.usedStems.add(stem)
     progress.packCounts.set(
@@ -205,6 +270,5 @@ export function selectDraftOptions(input: DraftSelectionInput): PlayableWord[] {
       (progress.packCounts.get(pick.word.packId) ?? 0) + 1,
     )
   }
-
-  return chosen
+  return result
 }

@@ -2,7 +2,7 @@ import type { TeamId } from '../types'
 import { TEAM_IDS } from '../types'
 import { creditLinkedMember, markMatchCredited } from './account-effects'
 import { BOT_NAMES } from './constants'
-import { handOffDrawerTurn } from './drawer-handoff'
+import { handOffDrawerTurn, markLateJoiner } from './drawer-handoff'
 import type { RoomContext } from './context'
 import { patchState, reject, updateMatch, updateMember } from './context'
 import { startMatch } from './match'
@@ -111,6 +111,8 @@ export function handleJoin(
       stats: { ...match.stats, [member.id]: EMPTY_MEMBER_MATCH_STATS },
     }))
     if (member.accountId !== null) markMatchCredited(ctx, member.id)
+    // Could be this turn's drawer back as a new seat, or a second tab.
+    markLateJoiner(ctx, member)
   }
 }
 

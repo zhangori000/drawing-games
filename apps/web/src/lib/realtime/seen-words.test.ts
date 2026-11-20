@@ -22,32 +22,41 @@ function draftView(options: { wordId: string }[]) {
   })
 }
 
+function drawingView(wordId: string, roundNumber = 2) {
+  return makeView({
+    phase: 'drawing',
+    me,
+    match,
+    round: {
+      number: roundNumber,
+      mine: { amDrawer: true, options: null, word: { wordId } },
+    },
+  })
+}
+
 test('the drawer remembers every card shown plus the chosen word, once per round', () => {
   const tracker = new SeenWordsTracker()
+  // Cards are remembered as soon as they are dealt, each once.
+  expect(
+    tracker.observe(
+      draftView([{ wordId: 'animals/cat' }, { wordId: 'food/pizza' }]),
+    ),
+  ).toEqual({ avoid: [], soft: ['animals/cat', 'food/pizza'] })
   expect(
     tracker.observe(
       draftView([{ wordId: 'animals/cat' }, { wordId: 'food/pizza' }]),
     ),
   ).toEqual({ avoid: [], soft: [] })
-  // A replacement swaps one card.
-  tracker.observe(
-    draftView([{ wordId: 'animals/cat' }, { wordId: 'nature/volcano' }]),
-  )
-  tracker.observe(
-    makeView({
-      phase: 'drawing',
-      me,
-      match,
-      round: {
-        number: 2,
-        mine: {
-          amDrawer: true,
-          options: null,
-          word: { wordId: 'animals/cat' },
-        },
-      },
-    }),
-  )
+  // A replacement swaps one card: only the new card is new.
+  expect(
+    tracker.observe(
+      draftView([{ wordId: 'animals/cat' }, { wordId: 'nature/volcano' }]),
+    ),
+  ).toEqual({ avoid: [], soft: ['nature/volcano'] })
+  expect(tracker.observe(drawingView('animals/cat'))).toEqual({
+    avoid: [],
+    soft: [],
+  })
 
   const results = makeView({
     phase: 'round-results',
@@ -176,4 +185,74 @@ test('a guesser on the other team remembers both revealed words, own first', () 
     avoid: [],
     soft: ['places/oasis', 'everyday/kite'],
   })
+})
+
+test('draft cards survive a reload or a match abandoned before the results', () => {
+  // Before the reload: the draft is recorded straight away.
+  const before = new SeenWordsTracker()
+  expect(
+    before.observe(
+      draftView([
+        { wordId: 'vehicles/motorcycle' },
+        { wordId: 'everyday/coat-hanger' },
+        { wordId: 'food/brain-freeze' },
+      ]),
+    ),
+  ).toEqual({
+    avoid: [],
+    soft: ['vehicles/motorcycle', 'everyday/coat-hanger', 'food/brain-freeze'],
+  })
+  // After the reload a new tracker only sees the drawing phase: the word
+  // being drawn is remembered at once, and is strict after the results.
+  const after = new SeenWordsTracker()
+  expect(after.observe(drawingView('everyday/coat-hanger'))).toEqual({
+    avoid: [],
+    soft: ['everyday/coat-hanger'],
+  })
+  expect(after.observe(drawingView('everyday/coat-hanger'))).toEqual({
+    avoid: [],
+    soft: [],
+  })
+  expect(
+    after.observe(
+      makeView({
+        phase: 'round-results',
+        me,
+        match,
+        results: {
+          roundNumber: 2,
+          teams: {
+            A: {
+              term: 'coat hanger',
+              wordId: 'everyday/coat-hanger',
+              drawerId: 'm1',
+            },
+            B: { term: 'kite', wordId: 'everyday/kite', drawerId: 'cy' },
+          },
+        },
+      }),
+    ),
+  ).toEqual({ avoid: ['everyday/coat-hanger'], soft: ['everyday/kite'] })
+})
+
+test('a new round starts a new set of cards', () => {
+  const tracker = new SeenWordsTracker()
+  tracker.observe(draftView([{ wordId: 'animals/cat' }]))
+  expect(
+    tracker.observe(
+      makeView({
+        phase: 'word-draft',
+        me,
+        match,
+        round: {
+          number: 3,
+          mine: {
+            amDrawer: true,
+            options: [{ wordId: 'animals/cat' }, { wordId: 'food/pizza' }],
+            word: null,
+          },
+        },
+      }),
+    ),
+  ).toEqual({ avoid: [], soft: ['animals/cat', 'food/pizza'] })
 })

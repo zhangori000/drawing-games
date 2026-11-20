@@ -64,6 +64,35 @@
     font: inherit;
   }
 
+  /*
+   * No zoom on focus: iOS Safari zooms the page into any text field under
+   * 16px. On touch screens every typed-into field is at least 16px, even
+   * one that inherits a small label size or uses `text-xs`/`text-sm`
+   * (those utilities read these variables, so they resolve to 1rem here;
+   * larger sizes such as `text-lg` still apply).
+   */
+  @media (pointer: coarse) {
+    input:where(
+      :not(
+        [type='checkbox'],
+        [type='radio'],
+        [type='range'],
+        [type='color'],
+        [type='file'],
+        [type='button'],
+        [type='submit'],
+        [type='reset'],
+        [type='image']
+      )
+    ),
+    select,
+    textarea {
+      --text-xs: 1rem;
+      --text-sm: 1rem;
+      font-size: max(1rem, 1em);
+    }
+  }
+
   ::selection {
     background: #f8ff80;
     color: #181713;

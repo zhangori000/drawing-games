@@ -149,6 +149,7 @@ export function ShowdownScreen({
           status={opponentStatus}
           watching={watchingOpponent}
           onToggleWatch={() => setWatching((value) => !value)}
+          unlockedLabel="Your team cleared every card"
         />
       }
       aside={<Scoreboard />}

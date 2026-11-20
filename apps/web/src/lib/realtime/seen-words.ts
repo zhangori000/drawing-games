@@ -15,15 +15,16 @@ export interface SeenWordIds {
 const nothing = (): SeenWordIds => ({ avoid: [], soft: [] })
 
 /**
- * Decides which word ids a guest should remember after each round, the way
- * an account's history does: the word they drew goes to `avoid`; their
- * team's word as a guesser, every other draft card they were shown as
- * drawer (the round-results view no longer carries draft cards, so they are
- * collected while the draft is visible), and last the other team's word,
- * which the results screen reveals to everyone, go to `soft`. A drawer whose
- * turn someone took over did not draw the word, so it is only `soft` for
- * them. ("Seen it" reports are recorded by the room client when the swap is
- * accepted.)
+ * Decides which word ids a guest should remember, the way an account's
+ * history does. Draft cards are recorded as `soft` the moment they are
+ * dealt (and the drawer's word the moment it is shown), so a reload, a
+ * closed tab, or an abandoned match before the results cannot lose them.
+ * After each round the word they drew goes to `avoid` (which moves it out of
+ * `soft`), and their team's word as a guesser, the other draft cards, and
+ * last the other team's word, which the results screen reveals to everyone,
+ * go to `soft` again as the newest entries. A drawer whose turn someone took
+ * over did not draw the word, so it stays `soft` for them. ("Seen it"
+ * reports are recorded by the room client when the swap is accepted.)
  */
 export class SeenWordsTracker {
   private roundKey: string | null = null
@@ -31,19 +32,34 @@ export class SeenWordsTracker {
   private chosenId: string | null = null
   private recordedKey: string | null = null
 
-  /** Returns ids to record once per finished round. */
+  /**
+   * Returns ids to record now: newly dealt draft cards (and the drawer's
+   * word) as soon as they appear, and the round's summary once per finished
+   * round. The stored history de-duplicates, so repeats are harmless.
+   */
   observe(view: RoomView): SeenWordIds {
     const matchNumber = view.match?.number ?? 0
     const round = view.round
     if (round && (view.phase === 'word-draft' || view.phase === 'drawing')) {
       this.enterRound(`${matchNumber}:${round.number}`)
       const mine = round.mine
+      const dealt: string[] = []
       for (const option of mine?.options ?? []) {
         if (!this.draftIds.includes(option.wordId)) {
           this.draftIds.push(option.wordId)
+          dealt.push(option.wordId)
         }
       }
-      if (mine?.word) this.chosenId = mine.word.wordId
+      const word = mine?.word?.wordId
+      if (word && word !== this.chosenId) {
+        this.chosenId = word
+        // Normally one of the cards already; not after a reload mid-round.
+        if (!this.draftIds.includes(word)) {
+          this.draftIds.push(word)
+          dealt.push(word)
+        }
+      }
+      return { avoid: [], soft: dealt }
     }
 
     const results = view.results

@@ -27,7 +27,7 @@ import {
   playedFinishedMatch,
   type FinalAccountStatus,
 } from '../../_lib/account-status'
-import { formatSeconds, plural } from '../../_lib/format'
+import { finalResultLine, formatSeconds, plural } from '../../_lib/format'
 import { useRoomSession } from '../room-session'
 import { DifficultyChip } from '../shared/difficulty-chip'
 import { Eyebrow, ScrollPane } from '../shared/layout'
@@ -288,9 +288,10 @@ function WinnerBanner({ final }: { readonly final: FinalView }) {
         ? 'Dead level after every round. Rematch?'
         : !playedFinishedMatch(me)
           ? 'You didn’t play this one. You’re in for the rematch.'
-          : winner === me.team
-            ? 'Your team took it. Nicely drawn.'
-            : 'So close. Run it back?'
+          : finalResultLine(
+              winner === me.team ? 'won' : 'lost',
+              final.scores.A - final.scores.B,
+            )
   return (
     <section
       aria-labelledby="final-heading"

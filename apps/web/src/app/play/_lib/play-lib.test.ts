@@ -12,6 +12,7 @@ import { installMemoryStorage } from '../../../lib/testing/memory-storage'
 import { describePattern, patternWords, revealState } from './clue'
 import {
   CUSTOM_WORD_LIMITS,
+  formatWithSkipped,
   mergeCustomWords,
   parseCustomWords,
 } from './custom-words'
@@ -19,9 +20,12 @@ import {
   breakdownParts,
   breakdownSentence,
   difficultyStake,
+  finalResultLine,
   formatSeconds,
+  leaveRoomDescription,
   phaseLabel,
 } from './format'
+import { playLayoutMode } from './layout-mode'
 import { claimPracticeSetup, practiceBotPlan } from './practice'
 import { ROUND_CHOICES, stepValue } from './settings-options'
 import { parseWordLibrary } from './word-library'
@@ -119,6 +123,20 @@ test('custom words: split on commas and lines, cleaned and de-duplicated', () =>
   expect(parsed.duplicates).toBe(1)
   expect(parsed.invalid).toBe(2)
   expect(parsed.overLimit).toBe(0)
+  expect(parsed.skipped).toEqual([
+    { entry: 'x', reason: 'length' },
+    { entry: 'y'.repeat(33), reason: 'length' },
+  ])
+})
+
+test('custom words: an import keeps the host’s skipped entries below the list', () => {
+  const typed = parseCustomWords('kite, tree house|mediun\nx')
+  const text = formatWithSkipped(['kite', 'lava lamp|easy'], typed.skipped)
+  expect(text).toBe('kite\nlava lamp|easy\ntree house|mediun\nx')
+  // The box still describes exactly the imported list, and still flags them.
+  const again = parseCustomWords(text)
+  expect(again.words).toEqual(['kite', 'lava lamp|easy'])
+  expect(again.skipped).toEqual(typed.skipped)
 })
 
 test('custom words: lengths count characters, and kept words fit the wire schema', () => {
@@ -147,6 +165,7 @@ test('custom words: difficulty tags are kept canonical, bad ones skipped', () =>
     `${'y'.repeat(CUSTOM_WORD_LIMITS.maxLength)}|medium`,
   ])
   expect(parsed).toMatchObject({ badTags: 1, duplicates: 1, invalid: 0 })
+  expect(parsed.skipped).toEqual([{ entry: 'typo|huge', reason: 'tag' }])
   // The tag does not count toward the length, for the room or the wire.
   expect(
     roomSettingsPatchSchema.safeParse({ customWords: [...parsed.words] })
@@ -367,4 +386,74 @@ test('clue: compact patterns drop letter spacing but keep words apart', () => {
   expect(patternWords('_ _ A   _ _')).toEqual(['__A', '__'])
   expect(patternWords('  _ _  ')).toEqual(['__'])
   expect(patternWords('')).toEqual([])
+})
+
+/* --------------------------- final and leave copy --------------------------- */
+
+test('the final banner only calls a loss "so close" when it was', () => {
+  expect(finalResultLine('lost', 87 - 217)).toBe(
+    'Their match. Shake it off and run it back?',
+  )
+  expect(finalResultLine('lost', -20)).toBe('So close. Run it back?')
+  expect(finalResultLine('lost', 30)).toBe('So close. Run it back?')
+  expect(finalResultLine('lost', -75)).toBe('Not this time. Run it back?')
+  expect(finalResultLine('won', 12)).toBe('Down to the wire. Nicely drawn.')
+  expect(finalResultLine('won', -140)).toBe('Your team took it. Nicely drawn.')
+})
+
+test('the leave dialog says a solo practice match ends when you leave', () => {
+  const inMatch = (members: MemberView[]): RoomView => ({
+    ...lobbyView(members, 'me'),
+    phase: 'drawing',
+  })
+  const me = member('me')
+  const solo = inMatch([
+    me,
+    member('bot-1', { kind: 'bot' }),
+    member('bot-2', { kind: 'bot', team: 'B' }),
+  ])
+  expect(leaveRoomDescription(solo)).toMatch(/practice match ends/)
+
+  const othersAway = inMatch([
+    me,
+    member('ana', { team: 'B', connected: false }),
+  ])
+  expect(leaveRoomDescription(othersAway)).toMatch(/Nobody else is connected/)
+
+  const withTeam = inMatch([me, member('ana'), member('cy', { team: 'B' })])
+  expect(leaveRoomDescription(withTeam)).toBe(
+    'Your team keeps playing without you, and your seat is given up.',
+  )
+  const alone = inMatch([me, member('cy', { team: 'B' })])
+  expect(leaveRoomDescription(alone)).toBe(
+    'The match goes on without you, and your seat is given up.',
+  )
+  expect(leaveRoomDescription(lobbyView([me], 'me'))).toBe(
+    'You can come back any time with the room code.',
+  )
+})
+
+/* ------------------------------- play layout ------------------------------- */
+
+test('play layout: phones, tablets and desktops get the layout their screen fits', () => {
+  // Portrait phone, landscape phones, a landscape tablet, a desktop.
+  expect(playLayoutMode(412, 915, true)).toBe('stacked')
+  expect(playLayoutMode(844, 390, true)).toBe('wide-short')
+  expect(playLayoutMode(863, 360, true)).toBe('wide-short')
+  expect(playLayoutMode(1138, 712, true)).toBe('wide')
+  expect(playLayoutMode(1280, 800, false)).toBe('wide')
+  // A narrow desktop window stacks; a short wide one is still side by side.
+  expect(playLayoutMode(800, 900, false)).toBe('stacked')
+  expect(playLayoutMode(1280, 480, false)).toBe('wide-short')
+  // An unfolded foldable in portrait stacks (aspect under 4:3).
+  expect(playLayoutMode(884, 1104, true)).toBe('stacked')
+})
+
+test('play layout: given the keyboard-closed height, a soft keyboard never switches layouts', () => {
+  // The visible heights with a keyboard up would have flipped the layout...
+  expect(playLayoutMode(1138, 392, true)).toBe('wide-short')
+  expect(playLayoutMode(884, 662, true)).toBe('wide')
+  // ...so the layout is decided on the height with the keyboard closed.
+  expect(playLayoutMode(1138, 712, true)).toBe('wide')
+  expect(playLayoutMode(884, 1104, true)).toBe('stacked')
 })

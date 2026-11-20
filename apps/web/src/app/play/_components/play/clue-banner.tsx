@@ -8,6 +8,7 @@ import { cx } from '@/components/ui/cx'
 import { describePattern, patternWords, revealState } from '../../_lib/clue'
 import { useRoomSession } from '../room-session'
 import { DifficultyChip } from '../shared/difficulty-chip'
+import { BannerTimer } from './banners'
 import { usePlayChrome } from './play-layout'
 
 export interface ClueBannerProps {
@@ -94,6 +95,7 @@ export function ClueBanner({
           <DifficultyChip difficulty={difficulty} showBonus size="xs" />
         ) : null}
         <RevealButton reveal={reveal} hint={hint} compact />
+        <BannerTimer />
       </div>
     )
   }

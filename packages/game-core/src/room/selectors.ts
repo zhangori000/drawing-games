@@ -5,6 +5,7 @@ import type {
   MatchState,
   RoomMember,
   RoomState,
+  SitOutReason,
   TeamRoundState,
 } from './types'
 
@@ -49,6 +50,33 @@ export interface ActiveCanvas {
   readonly startedAtMs: number
   /** Earlier drawers of this turn (they saw the word, so they sit it out). */
   readonly formerDrawerIds: readonly string[]
+  /** Members who joined during this turn (they sit it out too). */
+  readonly lateJoinerIds: readonly string[]
+}
+
+/** The sit-out lists a live turn (round team or showdown card) carries. */
+export interface TurnSitOuts {
+  readonly formerDrawerIds?: readonly string[]
+  readonly lateJoinerIds?: readonly string[]
+}
+
+/**
+ * Why `memberId` may not guess or vote on this turn although teammates can,
+ * or null. A former drawer saw the cards; a late joiner might be that
+ * drawer back under a new seat (or a second tab), so both sit it out.
+ */
+export function sitOutReason(
+  turn: TurnSitOuts,
+  memberId: string,
+): SitOutReason | null {
+  if (turn.formerDrawerIds?.includes(memberId) === true) return 'former-drawer'
+  if (turn.lateJoinerIds?.includes(memberId) === true) return 'joined-mid-turn'
+  return null
+}
+
+/** Everyone who sits `turn` out, for electorates and takeover checks. */
+export function sitOutIds(turn: TurnSitOuts): string[] {
+  return [...(turn.formerDrawerIds ?? []), ...(turn.lateJoinerIds ?? [])]
 }
 
 export function activeCanvas(
@@ -72,6 +100,7 @@ export function activeCanvas(
       inkLength: teamRound.inkLength ?? 0,
       startedAtMs: match.round.drawingStartedAtMs ?? match.round.startedAtMs,
       formerDrawerIds: teamRound.formerDrawerIds ?? [],
+      lateJoinerIds: teamRound.lateJoinerIds ?? [],
     }
   }
   if (state.phase === 'showdown' && match.showdown !== null) {
@@ -89,6 +118,7 @@ export function activeCanvas(
       inkLength: teamState.inkLength ?? 0,
       startedAtMs: teamState.cardStartedAtMs,
       formerDrawerIds: teamState.formerDrawerIds ?? [],
+      lateJoinerIds: teamState.lateJoinerIds ?? [],
     }
   }
   return null

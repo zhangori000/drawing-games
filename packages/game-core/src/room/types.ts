@@ -140,6 +140,13 @@ export interface TeamRoundState {
    * first. They saw the cards, so they may not guess or vote on this word.
    */
   readonly formerDrawerIds?: readonly string[]
+  /**
+   * Internal. Members who joined the room while this team's draft or drawing
+   * was under way, in join order. A new seat may be a drawer of this turn
+   * who left and came back, or a second tab, so they sit the turn out like
+   * a former drawer and guess from the next one.
+   */
+  readonly lateJoinerIds?: readonly string[]
 }
 
 /** Internal: where the human stroke in progress last ended. */
@@ -198,6 +205,8 @@ export interface ShowdownTeamState {
    * it, so they may not guess it.
    */
   readonly formerDrawerIds?: readonly string[]
+  /** Internal. Like `TeamRoundState.lateJoinerIds`, for the active card. */
+  readonly lateJoinerIds?: readonly string[]
   /** Set when every card is cleared. */
   readonly finishedAtMs: number | null
   /**
@@ -327,11 +336,17 @@ export interface BotScheduleItem {
         readonly canvasId: string
         readonly index: number
       }
-    /** Reveals one letter of the puzzle above its blank. */
+    /**
+     * Reveals letter `slot` of the puzzle: above its blank while the team can
+     * see the pattern, else as a loose tile in tray cell `step` (the reveal's
+     * position in the shuffled order). Items stored without `step` always
+     * use the blank.
+     */
     | {
         readonly type: 'draw.letter'
         readonly canvasId: string
         readonly slot: number
+        readonly step?: number
       }
     | {
         readonly type: 'guess'
@@ -676,6 +691,17 @@ export interface LobbyView {
    * null when every round stays fresh.
    */
   readonly repeatsFromRound: number | null
+  /**
+   * With the Balanced mix: the first round of the next match from which a
+   * hand may lack a difficulty because the pool's never-drawn words of it
+   * run short (that slot then gets another difficulty, or a drawn word), e.g.
+   * a pack or custom list with few easy words. Null when every round can be
+   * dealt one easy, one medium, one hard (and for the other mixes).
+   */
+  readonly difficultyShortfall: {
+    readonly difficulty: WordDifficulty
+    readonly fromRound: number
+  } | null
   readonly minPerTeam: number
   readonly maxPerTeam: number
 }
@@ -797,14 +823,16 @@ export interface MyTeamRoundView {
   /**
    * Why the viewer may not guess this word although teammates can, so the
    * screen can say so: `former-drawer` held this turn before a takeover and
-   * saw the cards. Null otherwise (including for the drawer).
+   * saw the cards; `joined-mid-turn` joined the room while this turn was
+   * under way (a new seat could be its drawer back, or a second tab). Null
+   * otherwise (including for the drawer).
    */
   readonly sittingOut: SitOutReason | null
   readonly canDraw: boolean
 }
 
 /** See `MyTeamRoundView.sittingOut`. */
-export type SitOutReason = 'former-drawer'
+export type SitOutReason = 'former-drawer' | 'joined-mid-turn'
 
 export interface OpponentRoundView {
   readonly team: TeamId

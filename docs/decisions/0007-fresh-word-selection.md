@@ -57,7 +57,14 @@ Guess matching is forgiving about formatting (case, accents, spacing,
 hyphens, punctuation, leading articles, simple plurals, `-ing` ↔ base verb
 forms that are not another word in the pool, aliases) and gives
 private "so close" and "one word is right" feedback, but never accepts a
-guess that merely contains the answer among other words.
+guess that merely contains the answer among other words. A base verb that
+is refused only because it is another word in play (`sneeze` for
+`sneezing`) is "so close", not wrong.
+
+Word identity for no-repeat follows the matcher: two words whose noun
+forms the matcher accepts for each other (`dolphin`/`dolphins`,
+`mouse`/`mice`) are one word for the pool, room memory, personal memory,
+and the lobby's fresh count (`isSameWord` in word-bank).
 
 ## Consequences
 

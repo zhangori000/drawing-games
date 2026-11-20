@@ -84,8 +84,9 @@ function push(
  * Nobody is credited with play they were not there for: a drawer who was
  * away for the whole drawing (`round.absentIds`, e.g. a deadline pick after
  * their phone locked) gets no `drew`/`offered`, a guesser who was away gets
- * no `missed`, and an earlier drawer of a turn someone took over (who saw
- * the cards but could not guess) gets `offered` for every card instead.
+ * no `missed`, an earlier drawer of a turn someone took over (who saw
+ * the cards but could not guess) gets `offered` for every card instead, and
+ * a member who joined during the turn (and so sat it out) gets nothing.
  */
 export function roundWordEvents(
   state: RoomState,
@@ -110,6 +111,7 @@ export function roundWordEvents(
     const facts = optionFacts(chosen)
     const absent = new Set(round.absentIds ?? [])
     const former = new Set(teamRound.formerDrawerIds ?? [])
+    const lateJoiners = new Set(teamRound.lateJoinerIds ?? [])
 
     if (!absent.has(teamRound.drawerId)) {
       push(
@@ -158,6 +160,7 @@ export function roundWordEvents(
         member.left === true ||
         member.id === teamRound.drawerId ||
         former.has(member.id) ||
+        lateJoiners.has(member.id) ||
         absent.has(member.id)
       ) {
         continue

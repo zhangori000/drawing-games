@@ -8,7 +8,10 @@ import { cx } from '@/components/ui/cx'
 import {
   CUSTOM_WORD_LIMITS,
   formatCustomWords,
+  formatWithSkipped,
   parseCustomWords,
+  sameWordList,
+  type SkippedCustomWord,
 } from '../../_lib/custom-words'
 import { plural } from '../../_lib/format'
 import { minimumCustomWordsForOnly } from '../../_lib/settings-options'
@@ -169,13 +172,22 @@ function CustomWords({
   const id = useId()
   const { view } = useRoomSession()
   const settings = draft.settings
-  // null while not editing: show the room's list, one word per line.
+  const saved = settings.customWords
+  // The host's own text, exactly as typed (skipped entries included), or
+  // null to show the room's list one word per line.
   const [text, setText] = useState<string | null>(null)
+  const [focused, setFocused] = useState(false)
   const [importing, setImporting] = useState(false)
-  const shown = text ?? formatCustomWords(settings.customWords)
-  const parsed = parseCustomWords(shown)
-  const count =
-    text === null ? settings.customWords.length : parsed.words.length
+  const typed = text === null ? null : parseCustomWords(text)
+  // After blur the text stays, so a mistyped entry and the "skipped" note
+  // are still there to fix, for as long as it still describes the saved
+  // list. A change from elsewhere (another tab, a refused edit) replaces it.
+  const keepText =
+    typed !== null && (focused || sameWordList(typed.words, saved))
+  if (text !== null && !keepText) setText(null)
+  const shown = keepText && text !== null ? text : formatCustomWords(saved)
+  const parsed = keepText && typed !== null ? typed : parseCustomWords(shown)
+  const count = keepText ? parsed.words.length : saved.length
   const needed = minimumCustomWordsForOnly(settings.wordChoiceCount)
   const onlyCustom = settings.customWordsMode === 'only'
 
@@ -200,12 +212,12 @@ function CustomWords({
   const notes: string[] = []
   if (parsed.invalid > 0) {
     notes.push(
-      `${plural(parsed.invalid, 'entry', 'entries')} skipped (${CUSTOM_WORD_LIMITS.minLength}–${CUSTOM_WORD_LIMITS.maxLength} characters)`,
+      `${plural(parsed.invalid, 'entry', 'entries')} skipped (${CUSTOM_WORD_LIMITS.minLength}–${CUSTOM_WORD_LIMITS.maxLength} characters${skippedList(parsed.skipped, 'length')})`,
     )
   }
   if (parsed.badTags > 0) {
     notes.push(
-      `${plural(parsed.badTags, 'entry', 'entries')} skipped (tag with |easy, |medium or |hard)`,
+      `${plural(parsed.badTags, 'entry', 'entries')} skipped (tag with |easy, |medium or |hard${skippedList(parsed.skipped, 'tag')})`,
     )
   }
   if (parsed.duplicates > 0)
@@ -238,8 +250,10 @@ function CustomWords({
             customWords: parseCustomWords(event.target.value).words,
           })
         }}
+        onFocus={() => setFocused(true)}
         onBlur={() => {
-          void draft.flush().finally(() => setText(null))
+          setFocused(false)
+          void draft.flush()
         }}
         placeholder="Comma or one per line: grandma’s car, pizza night|easy, Mr. Whiskers|hard"
         autoComplete="off"
@@ -251,7 +265,13 @@ function CustomWords({
       />
       <p
         id={`${id}-count`}
-        className="text-xs leading-5 text-black/55"
+        data-testid="custom-words-note"
+        className={cx(
+          'text-xs leading-5',
+          parsed.skipped.length > 0
+            ? 'rounded-xl bg-[#ffd9cf] px-3 py-1.5 text-[#181713]'
+            : 'text-black/55',
+        )}
         aria-live="polite"
       >
         <strong className="text-[#181713]">{plural(count, 'word')}</strong> · up
@@ -283,10 +303,28 @@ function CustomWords({
         onClose={() => setImporting(false)}
         existing={settings.customWords}
         onImport={(words) => {
-          setText(null)
+          // Keep any entries the host still has to fix below the new list.
+          setText(
+            parsed.skipped.length > 0
+              ? formatWithSkipped(words, parsed.skipped)
+              : null,
+          )
           draft.update({ customWords: words })
         }}
       />
     </div>
   )
+}
+
+/** `: “tree house|mediun”, “x”` for the note (at most three, then "…"). */
+function skippedList(
+  skipped: readonly SkippedCustomWord[],
+  reason: SkippedCustomWord['reason'],
+): string {
+  const entries = skipped
+    .filter((item) => item.reason === reason)
+    .map((item) => item.entry)
+  if (entries.length === 0) return ''
+  const shown = entries.slice(0, 3).map((entry) => `“${entry}”`)
+  return `: ${shown.join(', ')}${entries.length > 3 ? ', …' : ''}`
 }

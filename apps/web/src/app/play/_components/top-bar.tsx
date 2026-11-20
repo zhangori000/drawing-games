@@ -13,7 +13,13 @@ import { IconButton } from '@/components/ui/icon-button'
 import { Modal } from '@/components/ui/modal'
 import { TEAM_COLORS, TEAM_SYMBOLS } from '@/components/ui/team-badge'
 
-import { phaseLabel, shortPhaseLabel, timerLabel } from '../_lib/format'
+import {
+  leaveRoomDescription,
+  phaseLabel,
+  shortPhaseLabel,
+  timerLabel,
+} from '../_lib/format'
+import { useTypingOnShortLandscape } from './play/play-layout'
 import { useRoomSession } from './room-session'
 
 const noopSubscribe = () => () => {}
@@ -32,17 +38,25 @@ export function useInviteLink(roomCode: string): string {
  * Persistent match header: leave, room code (tap to copy the invite link),
  * round or phase, the countdown, and both scores. While the device keyboard
  * is open it slims from 56 to 44 px so the drawing keeps more of the screen.
+ * A landscape phone typing a guess has only about 150 px, so there it steps
+ * aside until the keyboard closes; the clue banner shows the clock.
  */
 export function TopBar() {
   const { view, roomCode, serverNow } = useRoomSession()
   const [confirmLeave, setConfirmLeave] = useState(false)
   const slim = useGameViewport().keyboardOpen
+  const typingOnShortLandscape = useTypingOnShortLandscape()
+  const hidden =
+    typingOnShortLandscape &&
+    (view.phase === 'drawing' || view.phase === 'showdown')
 
   return (
     <header
+      data-testid="top-bar"
       className={cx(
         'relative z-10 flex shrink-0 items-center gap-1.5 border-b-2 border-[#181713] bg-[#fffdf7] px-2 sm:gap-3 sm:px-4',
         slim ? 'h-11' : 'h-14',
+        hidden && 'hidden',
       )}
     >
       <IconButton
@@ -155,7 +169,6 @@ function LeaveDialog({
 }) {
   const { view, actions, pending } = useRoomSession()
   const router = useRouter()
-  const midMatch = view.phase !== 'lobby' && view.phase !== 'stats'
 
   const leave = () =>
     pending.run('leave', async () => {
@@ -168,11 +181,7 @@ function LeaveDialog({
       open={open}
       onClose={onClose}
       title="Leave the room?"
-      description={
-        midMatch
-          ? 'Your team keeps playing without you, and your seat is given up.'
-          : 'You can come back any time with the room code.'
-      }
+      description={leaveRoomDescription(view)}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>

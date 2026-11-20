@@ -145,7 +145,9 @@ sends them when joining a room:
   because round results reveal both words to everyone. These are dealt less
   often.
 
-The browser keeps the newest 300 of each. A drawer whose turn a teammate
+Draft cards are saved the moment they are dealt, so reloading the page or
+leaving before the round results still remembers them. The browser keeps the
+newest 300 of each. A drawer whose turn a teammate
 took over did not draw the word, so it is only "met" for them, as for an
 account.
 
@@ -201,8 +203,13 @@ and the drawer's card, word banner and the round results label it "Custom ·
 +20" instead of inventing a difficulty. Guessers' stake chip still reads
 "Medium +20", because "Custom" would tell them it is one of the host's words
 even with the category hint off. An entry whose tag is not one of the three
-is skipped (the lobby says how many), so a typo never becomes part of an
-answer. Custom words have no definition, so their cards offer no "What's
+is skipped, so a typo never becomes part of an answer. The lobby names
+skipped entries (a bad tag, or too short or long) and counts removed
+repeats, and the host's text stays in the box exactly as typed after the
+box loses focus, so a mistyped entry is still there to fix. Only a change
+from elsewhere (another tab, an edit the room refused) replaces it with the
+saved list; an import from the Word Library keeps the skipped entries below
+the new list. Custom words have no definition, so their cards offer no "What's
 this?" and "Don't know it" swaps straight away; the draft's help line says
 these are the host's own words.
 
@@ -212,16 +219,38 @@ how many custom words there are and whether only they are used. Words drawn
 from the list are revealed one at a time in round results like any other
 word; the rest of the list is never revealed, because a rematch reuses it.
 
+A word and its plural or singular are one word everywhere words are
+remembered, because a guess of either one counts for the other:
+"dolphins" in a custom list is the curated "dolphin" (the curated card,
+with its definition, is kept), "cat" and "cats" in one list are one word,
+"mice" is "mouse", and a player who drew "dolphin" in another room does not
+count "dolphins" as fresh. Verb forms stay separate cards ("wave" and
+"waving").
+
 A word drawn in a room does not come back in that room (across rounds and
 rematches) while any never-drawn word is left. Only when the pool runs out
-does a draft deal a drawn word, and then the least recently drawn one. Such a
+does a draft deal a drawn word, and then the least recently drawn one. When
+the never-drawn words left cannot fill both hands, the two hands share them:
+each gets half, the odd one going to Sun in odd rounds and to Moon in even
+rounds, so neither team is stuck choosing between drawn words while the
+other holds every fresh card. A scarce fresh word also goes to a slot of
+its own difficulty first, and a drawn word of the slot's difficulty comes
+back before an older one of another difficulty, so Balanced hands stay one
+easy, one medium, one hard whenever the pool has them. Such a
 card is marked "Drawn here before" for the drawer, and practice bots and the
 draft deadline's automatic pick choose a never-drawn card whenever the hand
 has one. The lobby counts the room's never-drawn words and, when they cannot
 cover every card the configured match could deal (two drafts plus every swap
 per round, two words drawn per round), warns everyone from which round cards
 may repeat. The host can still start: a short family list is a legitimate
-choice, as long as nobody is told words never repeat. A swap never hands a
+choice, as long as nobody is told words never repeat. With the Balanced mix
+the lobby also forecasts, per difficulty, the first round from which a hand
+may lack an easy, medium, or hard card because the never-drawn words of that
+difficulty run short (for example a custom list tagged with only two easy
+words); that slot then gets a word of another difficulty. Every curated pack
+has at least 15 words of each difficulty, so any single pack keeps Balanced
+hands for a whole match (Phrases & Idioms gained easy idioms such as "top
+dog", "hot potato", and "cat nap" for this). A swap never hands a
 drawer a card from the other team's hand (it could be their answer): on a
 list so short that nothing else is left, the swap is refused with "There are
 no other words left to swap in."
@@ -246,6 +275,11 @@ add a second dot beneath the line.
 Guess matching is server-side, case-insensitive, whitespace-normalized, and
 accent-tolerant. Fuzzy spelling tolerance is a later, bounded setting because
 overly broad matching can reveal answers or accept wrong words.
+Matching forgives plurals (on the head noun of an "X of Y" phrase: "pots of
+gold", not "pot of golds") and base verbs ("juggle" for "juggling"). When a
+base verb cannot be accepted because it is another card in play ("sneeze"
+beside a "sneeze" card, "cook" beside "chef"), the guesser hears "So close"
+instead of a flat miss, nudging them to the -ing form.
 Near-miss feedback ("So close", "Part right") is private to the guesser and
 their team's drawer (who can steer the drawing). Other teammates see those
 guesses in the team feed as plain wrong guesses, so nobody can copy a near
@@ -290,6 +324,14 @@ Phone choices that follow from this (portrait and landscape):
   input brings them back. Nothing covers the keys: the `next dev` route
   indicator, which sat on Backspace when the owner played from a phone on
   `pnpm dev`, is turned off.
+- **Landscape typing fits.** A landscape phone with its own keyboard up has
+  only about 150 px: the top bar steps aside until the keyboard closes (the
+  clue line shows the clock), and beside the full-height drawing the guess
+  box and its feedback come first, then the one-line clue.
+- **Rotating never loses a guess.** Turning the phone, resizing the window,
+  or a tablet's keyboard opening keeps the same guess box: the half-typed
+  guess, the keyboard and focus stay. A keyboard opening never switches the
+  screen to another layout.
 - **No zoom on the game surface.** Pinch and double-tap never zoom any play
   screen (join, lobby, draft, drawing, results). Browser and accessibility
   zoom are still allowed for players who need them, and then the layout
@@ -424,6 +466,19 @@ one!" for a Showdown card) while their teammates keep guessing. For the same rea
 takeover only happens when someone else on the team could still guess: in a
 pair (or one player with one practice bot) the turn waits for the drawer.
 
+Anyone who **joins mid-turn** sits out that turn the same way: a seat that
+joins while its team's draft, drawing, or Showdown card is under way watches
+the rest of it and guesses from the next turn (the next round, or the next
+Showdown card). The room cannot tell a newcomer from that turn's drawer who
+left and came back by code under a new seat, or from the drawer's second tab
+("Join as someone new"), and either already knows the cards, so this is the
+safe default for everyone. A late joiner may still draw if the turn is handed
+to them, never counts as the teammate who "could still guess" for a takeover,
+does not vote on the length reveal, and gets no "missed" for a word they
+could not guess. Joining a team that already solved its word changes nothing.
+Their view carries the reason (`sittingOut: 'joined-mid-turn'`) so the guess
+box can say why it is closed.
+
 Nobody is credited with play they were not there for. A word auto-picked for
 a drawer who was away the whole time is not "drew" (and never joins their
 never-again list), a guesser who was away is not "missed", and a player who
@@ -432,6 +487,10 @@ connected for a full minute (or everyone has left), the match is abandoned:
 the room goes back to the lobby and the match is not recorded, so practice
 bots never play out a match, and hand someone a loss, after they closed the
 tab. A minute is meant to survive a locked phone or a brief server restart.
+The leave dialog says which applies: in a solo practice match (every other
+player is a bot) "This practice match ends when you leave"; when the other
+humans are all disconnected, the match ends unless one comes back within a
+minute; otherwise the match goes on without the leaver.
 
 ## Fair-use limits
 
@@ -515,6 +574,11 @@ completion bonus.
 Old images are not Showdown clues. They may appear afterward in the match recap,
 where players can compare the original and relay drawings.
 
+The winner banner's line fits the result: a loss within 30 points is "So
+close. Run it back?", up to 100 points "Not this time", and anything bigger
+"Their match. Shake it off and run it back?"; a win within 30 points is "Down
+to the wire".
+
 The final page should make different kinds of contribution visible:
 
 - team score, rounds won, comeback points, and largest lead (the biggest
@@ -538,12 +602,23 @@ easy-word selection, or other behavior that makes the game worse.
 Practice bots let one person play a whole match. They should give a fair
 contest, not a reading test or a walkover:
 
-- **A bot drawer sets a puzzle, it never writes the answer.** It draws one
-  blank per letter (all the same width, so they give nothing away beyond the
-  length and word breaks), then reveals letters one at a time over the round,
-  at most 60 % of them and never the whole word. The human guesses from the
-  blanks, the revealed letters, and the category, with the usual forgiving
+- **A bot drawer sets a puzzle, it never writes the answer.** It reveals
+  letters one at a time over the round, at most 60 % of them and never the
+  whole word. The human guesses from the revealed letters, the category, and
+  (when the team can see the length) the blanks, with the usual forgiving
   matching.
+- **The puzzle follows the room's word-length setting.** Blanks (one per
+  letter, all the same width, so they give nothing away beyond the length
+  and word breaks) are only drawn while the team can see its word's length:
+  at once when the length is shown, the moment the team's "Reveal letters"
+  vote passes, and never when the length is never shown, clues are off
+  (opponents see the draft cards), or on a Showdown card. Until then the
+  letters appear as loose, scrambled tiles in a row along the top, one per
+  fixed cell in the order they are revealed (itself random), so they say
+  neither where each letter goes nor how long the word is. After a paid
+  reveal the bot draws the blanks under the tiles and puts its later letters
+  in them, so the 10 points buy the length and positions the team did not
+  have.
 - **Both teams' bots play by the same clock.** A bot guesser gets the word at
   a random point of the round that depends only on its difficulty (easy
   sooner, hard later) and sometimes not at all (more often for hard words),

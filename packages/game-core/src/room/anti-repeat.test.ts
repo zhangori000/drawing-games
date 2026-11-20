@@ -61,6 +61,22 @@ function room(
   return driver
 }
 
+/** Each drawer picks their first card the room has never drawn, if any. */
+function pickNeverDrawn(driver: RoomDriver): void {
+  for (const team of ['A', 'B'] as const) {
+    if (driver.state.phase !== 'word-draft') return
+    const teamRound = driver.teamRound(team)
+    if (teamRound.chosenWordId !== null) continue
+    const options = driver.view(teamRound.drawerId).round!.mine!.options!
+    const pick = options.find((option) => !option.drawnBefore) ?? options[0]!
+    driver.ok({
+      type: 'draft.select',
+      actorId: teamRound.drawerId,
+      wordId: pick.wordId,
+    })
+  }
+}
+
 function chosenWordsOf(driver: RoomDriver): string[] {
   return driver.state.match!.history.flatMap((round) => [
     round.teams.A.chosenWordId!,
@@ -256,29 +272,36 @@ describe('anti-repeat word memory', () => {
       packIds: [],
       wordChoiceCount: 2,
     })
-    const log: DraftLog = { checkedDrafts: 0 }
-    const dealt: string[][] = []
+    const dealt: { A: string[]; B: string[]; drawn: Set<string> }[] = []
     let lastRound = 0
     while (driver.state.phase !== 'stats') {
       const round = driver.state.match?.round
       if (driver.state.phase === 'word-draft' && round!.number !== lastRound) {
         lastRound = round!.number
-        dealt.push(round!.teams.B.options.map((option) => option.wordId))
+        dealt.push({
+          A: round!.teams.A.options.map((option) => option.wordId),
+          B: round!.teams.B.options.map((option) => option.wordId),
+          drawn: new Set(driver.state.wordMemory.usedWordIds),
+        })
       }
-      if (driver.state.phase === 'word-draft') driver.pickWords()
+      if (driver.state.phase === 'word-draft') pickNeverDrawn(driver)
       else driver.advanceTo(driver.state.phaseDeadlineAtMs!)
     }
-    log.checkedDrafts = dealt.length
-    expect(log.checkedDrafts).toBe(6)
+    expect(dealt).toHaveLength(6)
     const all = chosenWordsOf(driver)
     expect(all).toHaveLength(12)
-    // Rounds 1–3 and Sun's round-4 card use 7 different words. In round 4
-    // the only never-drawn word left is on Sun's hand, so Moon gets the two
-    // least recently drawn words (round 1's) back.
-    expect(new Set(all.slice(0, 7)).size).toBe(7)
-    expect([...dealt[3]!].sort()).toEqual([...all.slice(0, 2)].sort())
-    // Round 5 hands Sun that last never-drawn word, so all 8 get drawn.
-    expect(new Set(all.slice(0, 10)).size).toBe(8)
+    // Rounds 1–3 draw 6 different words, leaving 2 never drawn for round 4:
+    // one for each hand, each completed by one of the least recently drawn
+    // words (round 1's), so all 8 get drawn by the end of round 4.
+    expect(new Set(all.slice(0, 6)).size).toBe(6)
+    const round4 = dealt[3]!
+    for (const team of ['A', 'B'] as const) {
+      const fresh = round4[team].filter((id) => !round4.drawn.has(id))
+      expect(fresh).toHaveLength(1)
+      const repeat = round4[team].find((id) => round4.drawn.has(id))!
+      expect(all.slice(0, 2)).toContain(repeat)
+    }
+    expect(new Set(all.slice(0, 8)).size).toBe(8)
   })
 
   it('never repeats 16 custom words over 6 rounds, whatever card is picked', () => {
@@ -316,9 +339,10 @@ describe('anti-repeat word memory', () => {
     }
   })
 
-  it('deals a drawn word only when nothing fresh is left, and marks it', () => {
+  it('shares the last never-drawn words between both hands, and marks drawn cards', () => {
     // Six words, three cards: round 2 has four never-drawn words for six
-    // cards, so Moon's hand mixes one fresh word with two drawn ones.
+    // cards, so each hand gets two fresh cards and one drawn one, instead of
+    // Sun taking three and Moon getting two drawn cards.
     const driver = room({
       rounds: 2,
       showdown: false,
@@ -332,20 +356,69 @@ describe('anti-repeat word memory', () => {
     expect(driver.state.match!.round!.number).toBe(2)
     const drawn = new Set(chosenWordsOf(driver))
     expect(drawn.size).toBe(2)
-    const sun = driver.view(driver.drawer('A')).round!.mine!.options!
-    expect(sun.map((option) => option.drawnBefore)).toEqual([
-      false,
-      false,
-      false,
-    ])
-    const moon = driver.view(driver.drawer('B')).round!.mine!.options!
-    expect(moon.map((option) => option.drawnBefore)).toEqual([
-      false,
-      true,
-      true,
-    ])
-    for (const option of moon) {
-      expect(drawn.has(option.wordId)).toBe(option.drawnBefore)
+    for (const team of ['A', 'B'] as const) {
+      const options = driver.view(driver.drawer(team)).round!.mine!.options!
+      expect(options.filter((option) => option.drawnBefore)).toHaveLength(1)
+      for (const option of options) {
+        expect(drawn.has(option.wordId)).toBe(option.drawnBefore)
+      }
+    }
+  })
+
+  it('never starves the hand dealt second of never-drawn words (host list)', () => {
+    // The playtest list: three words never drawn by the rematch's round 2.
+    const words = [
+      'birthday cake|easy',
+      "grandma's car|hard",
+      'pizza night|medium',
+      'Mr. Whiskers|hard',
+      'garden gnome',
+      'dolphins|easy',
+      'bunk bed|easy',
+      'snow angel|hard',
+      'banana split|medium',
+    ]
+    const fresh = ['custom/dolphins', 'custom/mr-whiskers', 'custom/snow-angel']
+    for (let seed = 1; seed <= 40; seed += 1) {
+      const driver = new RoomDriver({ seed })
+      for (const [index, name] of ['Ana', 'Ben', 'Cy', 'Di'].entries()) {
+        driver.join(name.toLowerCase(), name, { team: index < 2 ? 'A' : 'B' })
+      }
+      driver.settings('ana', {
+        rounds: 2,
+        showdown: false,
+        customWordsMode: 'only',
+        customWords: words,
+        packIds: [],
+      })
+      // The room already drew the other six words.
+      driver.state = {
+        ...driver.state,
+        wordMemory: {
+          ...driver.state.wordMemory,
+          usedWordIds: roomPool(driver.state.settings)
+            .map((word) => word.id)
+            .filter((id) => !fresh.includes(id)),
+        },
+      }
+      driver.readyAll()
+      driver.ok({ type: 'match.start', actorId: 'ana' })
+      const freshIn = (team: 'A' | 'B') =>
+        driver
+          .teamRound(team)
+          .options.filter((option) => fresh.includes(option.wordId))
+      // Round 1 (odd): Sun gets two of the three, Moon the third.
+      expect(freshIn('A')).toHaveLength(2)
+      expect(freshIn('B')).toHaveLength(1)
+      // Balanced hands stay one easy, one medium, one hard.
+      for (const team of ['A', 'B'] as const) {
+        expect(
+          driver
+            .teamRound(team)
+            .options.map((option) => option.difficulty)
+            .sort(),
+        ).toEqual(['easy', 'hard', 'medium'])
+      }
     }
   })
 
@@ -443,5 +516,118 @@ describe('anti-repeat word memory', () => {
     driver.settings('ana', { rounds: 6 })
     // 14 fresh: round 4 has 8, round 5 only 6.
     expect(lobby().repeatsFromRound).toBe(5)
+  })
+
+  it('counts plural and singular forms as one word for memory and the fresh count', () => {
+    const driver = new RoomDriver({ seed: 4 })
+    // Di drew the curated "dolphin" in another room (guest memory).
+    const names = ['Ana', 'Ben', 'Cy', 'Di']
+    names.forEach((name, index) => {
+      driver.join(name.toLowerCase(), name, {
+        team: index < 2 ? 'A' : 'B',
+        memory: { avoid: index === 3 ? ['animals/dolphin'] : [], soft: [] },
+      })
+    })
+    const words = [
+      'birthday cake|easy',
+      "grandma's car|hard",
+      'pizza night|medium',
+      'Mr. Whiskers|hard',
+      'garden gnome',
+      'dolphins|easy',
+      'bunk bed|easy',
+      'snow angel|hard',
+      'banana split|medium',
+    ]
+    driver.settings('ana', {
+      rounds: 2,
+      showdown: false,
+      customWordsMode: 'only',
+      customWords: words,
+      packIds: [],
+    })
+    expect(driver.view('ana').lobby).toMatchObject({
+      poolSize: 9,
+      // "dolphins" is the word Di already drew.
+      freshWordCount: 8,
+      unusedWordCount: 9,
+    })
+    // With animals on too, the custom "dolphins" is the curated "dolphin".
+    driver.settings('ana', { customWordsMode: 'mix', packIds: ['animals'] })
+    const pool = roomPool(driver.state.settings)
+    expect(pool.some((word) => word.id === 'custom/dolphins')).toBe(false)
+    expect(pool.some((word) => word.id === 'animals/dolphin')).toBe(true)
+
+    // A room that drew "custom/cats" treats a later custom "cat" as drawn.
+    const later = new RoomDriver({ seed: 4 })
+    names.forEach((name, index) => {
+      later.join(name.toLowerCase(), name, { team: index < 2 ? 'A' : 'B' })
+    })
+    later.settings('ana', {
+      rounds: 2,
+      showdown: false,
+      customWordsMode: 'only',
+      customWords: ['cats', ...customWordList(5)],
+      packIds: [],
+    })
+    later.readyAll()
+    later.ok({ type: 'match.start', actorId: 'ana' })
+    // Round 1 deals all six words; whoever holds "cats" draws it.
+    for (const team of ['A', 'B'] as const) {
+      const teamRound = later.teamRound(team)
+      const cats = teamRound.options.find((option) => option.term === 'cats')
+      if (cats !== undefined) {
+        later.ok({
+          type: 'draft.select',
+          actorId: teamRound.drawerId,
+          wordId: cats.wordId,
+        })
+      }
+    }
+    while (later.state.phase !== 'stats') {
+      if (later.state.phase === 'word-draft') pickNeverDrawn(later)
+      else later.advanceTo(later.state.phaseDeadlineAtMs!)
+    }
+    const drawn = later.state.wordMemory.usedWordIds
+    expect(drawn).toContain('custom/cats')
+    expect(drawn).toHaveLength(4)
+    later.ok({ type: 'match.rematch', actorId: 'ana', mode: 'change-settings' })
+    later.settings('ana', { customWords: ['cat', ...customWordList(5)] })
+    // Only two are fresh for the room: "cat" was drawn as "cats".
+    expect(later.view('ana').lobby).toMatchObject({
+      poolSize: 6,
+      unusedWordCount: 2,
+    })
+  })
+
+  it('warns in the lobby when Balanced hands would run out of a difficulty', () => {
+    const driver = new RoomDriver({ seed: 3 })
+    driver.join('ana', 'Ana', { team: 'A' })
+    driver.join('ben', 'Ben', { team: 'B' })
+    const lobby = () => driver.view('ben').lobby!
+    expect(lobby().difficultyShortfall).toBeNull()
+    // Phrases & Idioms alone keeps Balanced hands for a long match.
+    driver.settings('ana', { packIds: ['phrases'], rounds: 8 })
+    expect(lobby().difficultyShortfall).toBeNull()
+    // A host list with two easy words: round 1 can deal one to each hand,
+    // after that a hand may get no easy card.
+    driver.settings('ana', {
+      rounds: 4,
+      customWordsMode: 'only',
+      customWords: [
+        'kite|easy',
+        'sock|easy',
+        ...customWordList(8).map((word, index) =>
+          index % 2 === 0 ? `${word}|medium` : `${word}|hard`,
+        ),
+      ],
+    })
+    expect(lobby().difficultyShortfall).toEqual({
+      difficulty: 'easy',
+      fromRound: 2,
+    })
+    // Other mixes have no fixed slots to forecast.
+    driver.settings('ana', { difficultyMix: 'mixed' })
+    expect(lobby().difficultyShortfall).toBeNull()
   })
 })

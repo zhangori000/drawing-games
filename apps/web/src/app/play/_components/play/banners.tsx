@@ -6,9 +6,11 @@ import type {
 } from '@drawing-games/game-core'
 import { useState, type ReactNode } from 'react'
 
+import { Countdown } from '@/components/ui/countdown'
 import { cx } from '@/components/ui/cx'
 
-import { breakdownSentence, signedPoints } from '../../_lib/format'
+import { breakdownSentence, signedPoints, timerLabel } from '../../_lib/format'
+import { useRoomSession } from '../room-session'
 import { DifficultyChip } from '../shared/difficulty-chip'
 import { usePlayChrome } from './play-layout'
 
@@ -139,6 +141,24 @@ export function SolvedBanner({
   )
 }
 
+/**
+ * The phase clock inside a one-line banner, only while the top bar has
+ * stepped aside for a landscape phone's keyboard (`timerInBanner`).
+ */
+export function BannerTimer() {
+  const { timerInBanner } = usePlayChrome()
+  const { view, serverNow } = useRoomSession()
+  if (!timerInBanner) return null
+  return (
+    <Countdown
+      deadlineAtMs={view.phaseDeadlineAtMs}
+      serverNow={serverNow}
+      label={timerLabel(view)}
+      className="min-w-0! shrink-0 px-1.5! py-0! text-sm!"
+    />
+  )
+}
+
 /** A plain banner line (showdown intro, waiting states). */
 export function NoteBanner({
   children,
@@ -159,6 +179,7 @@ export function NoteBanner({
       )}
     >
       {children}
+      <BannerTimer />
     </div>
   )
 }

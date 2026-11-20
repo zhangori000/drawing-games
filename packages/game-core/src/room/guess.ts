@@ -85,6 +85,9 @@ export function checkGuess(
   if (canvas.formerDrawerIds.includes(member.id)) {
     return fail('You saw this word as the drawer, so sit this one out.')
   }
+  if (canvas.lateJoinerIds.includes(member.id)) {
+    return fail('You joined during this turn, so guess from the next one.')
+  }
 
   const text = typeof rawText === 'string' ? cleanText(rawText) : ''
   const length = codePointLength(text)

@@ -100,6 +100,42 @@ export function singularForms(key: string): string[] {
 }
 
 /**
+ * Index of the head noun of an "X of Y" phrase (`pot of gold`, `bag of
+ * chips`, `lord of the rings`), whose plural goes on X, or null.
+ */
+function ofPhraseHead(tokens: readonly string[]): number | null {
+  return tokens.length >= 3 && tokens[1] === 'of' ? 0 : null
+}
+
+function nounForms(
+  tokens: readonly string[],
+  inflect: (key: string) => string[],
+): string[] {
+  const key = tokens.join('')
+  if (key.length === 0) return []
+  const head = ofPhraseHead(tokens)
+  if (head === null) return inflect(key)
+  const forms = inflect(tokens[head] as string).map((form) =>
+    tokens.map((token, index) => (index === head ? form : token)).join(''),
+  )
+  return [...new Set(forms)].filter((form) => form !== key)
+}
+
+/**
+ * Plural answer keys of a whole answer (its folded tokens): the last word
+ * takes the plural (`hermit crab` → `hermitcrabs`), except in an "X of Y"
+ * phrase, where X does (`pot of gold` → `potsofgold`, never `potofgolds`).
+ */
+export function nounPluralKeys(tokens: readonly string[]): string[] {
+  return nounForms(tokens, pluralForms)
+}
+
+/** Singular answer keys of a whole answer, by the rule of `nounPluralKeys`. */
+export function nounSingularKeys(tokens: readonly string[]): string[] {
+  return nounForms(tokens, singularForms)
+}
+
+/**
  * One canonical singular for grouping word families (not for accepting
  * answers): `berries` → `berry`, `boxes` → `box`, `cats` → `cat`.
  */

@@ -29,6 +29,16 @@ export interface ParsedCustomWords {
   readonly duplicates: number
   /** Valid words beyond the room's maximum that were not kept. */
   readonly overLimit: number
+  /**
+   * The entries dropped for their length or tag, cleaned, in input order, so
+   * the lobby can name them and keep them in the box for fixing.
+   */
+  readonly skipped: readonly SkippedCustomWord[]
+}
+
+export interface SkippedCustomWord {
+  readonly entry: string
+  readonly reason: 'length' | 'tag'
 }
 
 function cleanWord(raw: string): string {
@@ -57,12 +67,14 @@ export function sanitizeWordList(
   let badTags = 0
   let duplicates = 0
   let overLimit = 0
+  const skipped: SkippedCustomWord[] = []
   for (const entry of entries) {
     const cleaned = cleanWord(entry)
     if (cleaned.length === 0) continue
     const parsed = parseCustomWordEntry(cleaned)
     if (parsed === null) {
       badTags += 1
+      skipped.push({ entry: cleaned, reason: 'tag' })
       continue
     }
     const term = parsed.term
@@ -72,6 +84,7 @@ export function sanitizeWordList(
       length > CUSTOM_WORD_LIMITS.maxLength
     ) {
       invalid += 1
+      skipped.push({ entry: cleaned, reason: 'length' })
       continue
     }
     const key = term.toLowerCase()
@@ -86,12 +99,24 @@ export function sanitizeWordList(
     }
     words.push(formatCustomWordEntry({ term, difficulty: parsed.difficulty }))
   }
-  return { words, invalid, badTags, duplicates, overLimit }
+  return { words, invalid, badTags, duplicates, overLimit, skipped }
 }
 
 /** One word per line: the textarea's canonical form. */
 export function formatCustomWords(words: readonly string[]): string {
   return words.join('\n')
+}
+
+/**
+ * The host's box after an import: the new list, one word per line, then the
+ * entries the host typed that were skipped (a mistyped tag, too long), so
+ * an import never throws away text they still mean to fix.
+ */
+export function formatWithSkipped(
+  words: readonly string[],
+  skipped: readonly SkippedCustomWord[],
+): string {
+  return [...words, ...skipped.map((item) => item.entry)].join('\n')
 }
 
 /** Appends `added` after `existing`, keeping the first spelling of repeats. */

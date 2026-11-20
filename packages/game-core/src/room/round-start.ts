@@ -12,6 +12,7 @@ import type {
   TeamRoundState,
 } from './types'
 import {
+  freshShareFor,
   recordOffers,
   roomPool,
   selectDraftWords,
@@ -32,6 +33,7 @@ function draftCards(
   pool: readonly PlayableWord[],
   drawer: RoomMember,
   opponentCards: readonly DraftOption[],
+  maxFreshCards: number | undefined,
 ): DraftOption[] {
   const settings = ctx.state.settings
   const random = () => ctx.rng.next()
@@ -52,6 +54,7 @@ function draftCards(
       opponentCards,
       replacedWordIds: [],
       wordMemory: ctx.state.wordMemory,
+      ...(maxFreshCards === undefined ? {} : { maxFreshCards }),
     },
     random,
   )
@@ -87,7 +90,9 @@ function teamRound(
 /**
  * Opens the next normal round: picks both drawers from the rotation, deals
  * team A's cards then team B's (excluding A's), resets both canvases, and
- * starts the word-draft deadline.
+ * starts the word-draft deadline. When the room has too few never-drawn
+ * words for two full hands, A takes only its share (`freshShareFor`), so B
+ * is never left with drawn words while fresh ones went to A.
  */
 export function startRound(ctx: RoomContext): void {
   const match = requireMatch(ctx.state)
@@ -110,8 +115,14 @@ export function startRound(ctx: RoomContext): void {
     previous?.teams.B.drawerId ?? null,
     ctx.now,
   )
-  const optionsA = draftCards(ctx, pool, drawerA, [])
-  const optionsB = draftCards(ctx, pool, drawerB, optionsA)
+  const shareA = freshShareFor(
+    pool,
+    ctx.state.wordMemory.usedWordIds,
+    settings.wordChoiceCount,
+    number,
+  )
+  const optionsA = draftCards(ctx, pool, drawerA, [], shareA)
+  const optionsB = draftCards(ctx, pool, drawerB, optionsA, undefined)
 
   const draftDeadlineAtMs = ctx.now + settings.wordDraftSeconds * 1000
   const round: RoundState = {

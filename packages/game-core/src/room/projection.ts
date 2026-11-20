@@ -37,6 +37,7 @@ import {
   majorityNeeded,
   requireChosen,
   roundsWon,
+  sitOutReason,
   twoThirdsNeeded,
 } from './selectors'
 import type {
@@ -74,6 +75,7 @@ import {
   countCustomWords,
   drawnInRoom,
   firstRepeatRound,
+  firstShortDifficulty,
   roomPool,
   roomUsedKeys,
   unusedWordCount,
@@ -222,6 +224,11 @@ function lobbyView(state: RoomState): LobbyView {
     freshWordCount: countFreshWords(pool, remembered),
     unusedWordCount: unused,
     repeatsFromRound: firstRepeatRound(state.settings, unused),
+    difficultyShortfall: firstShortDifficulty(
+      state.settings,
+      pool,
+      state.wordMemory.usedWordIds,
+    ),
     minPerTeam: MIN_MEMBERS_PER_TEAM,
     maxPerTeam: MAX_MEMBERS_PER_TEAM,
   }
@@ -316,9 +323,9 @@ function myTeamRoundView(
   const settings = state.settings
   const teamRound = round.teams[member.team]
   const amDrawer = teamRound.drawerId === member.id
-  // Held this turn before a takeover: saw the cards, so sits this word out.
-  const formerDrawer =
-    !amDrawer && teamRound.formerDrawerIds?.includes(member.id) === true
+  // Held this turn before a takeover (saw the cards), or joined while it
+  // was under way (maybe that drawer back as a new seat): sits this word out.
+  const sittingOut = amDrawer ? null : sitOutReason(teamRound, member.id)
   const chosen = chosenOption(teamRound)
   const drawing = state.phase === 'drawing'
   // While opponents see the draft cards, guessers get nothing that tells
@@ -380,8 +387,8 @@ function myTeamRoundView(
             breakdown: solution.breakdown,
           },
     hint: hintView(viewer, round, teamRound),
-    canGuess: drawing && !amDrawer && solution === null && !formerDrawer,
-    sittingOut: formerDrawer ? 'former-drawer' : null,
+    canGuess: drawing && !amDrawer && solution === null && sittingOut === null,
+    sittingOut,
     canDraw: drawing && amDrawer,
   }
 }
@@ -514,11 +521,12 @@ function showdownMineView(
   const teamState = showdown.teams[team]
   const finished = teamState.finishedAtMs !== null
   const amDrawer = member !== null && teamState.drawerId === member.id
-  // Held the active card before a takeover, so may not guess it.
-  const formerDrawer =
-    member !== null &&
-    !amDrawer &&
-    teamState.formerDrawerIds?.includes(member.id) === true
+  // Held the active card before a takeover, or joined while it was up, so
+  // may not guess it.
+  const sittingOut =
+    member === null || amDrawer || finished
+      ? null
+      : sitOutReason(teamState, member.id)
   const card = teamState.cards[teamState.cardIndex]
   return {
     team,
@@ -542,8 +550,8 @@ function showdownMineView(
     canvasId: teamState.canvasId,
     guesses: guessViews(viewer, teamState.guesses, amDrawer),
     finished,
-    canGuess: !finished && !amDrawer && !formerDrawer,
-    sittingOut: formerDrawer && !finished ? 'former-drawer' : null,
+    canGuess: !finished && !amDrawer && sittingOut === null,
+    sittingOut,
     canDraw: amDrawer && !finished,
   }
 }

@@ -111,19 +111,19 @@ function GuessRow({
 
 /**
  * The guess dock's idle status line. While a keyboard has pushed the feed
- * row off a portrait phone screen, it shows the newest teammate guess so the
- * team chatter stays visible; otherwise the usual privacy note.
+ * off a phone screen (portrait, or landscape with the device keyboard), it
+ * shows the newest teammate guess so the team chatter stays visible;
+ * otherwise the usual privacy note.
  */
 export function LatestTeamGuess({
   guesses,
 }: {
   readonly guesses: readonly GuessView[]
 }) {
-  const { feedInDock, mode } = usePlayChrome()
-  const latest =
-    feedInDock && mode === 'stacked'
-      ? guesses.findLast((guess) => !guess.mine)
-      : undefined
+  const { feedInDock } = usePlayChrome()
+  const latest = feedInDock
+    ? guesses.findLast((guess) => !guess.mine)
+    : undefined
   if (!latest) {
     return (
       <span className="truncate px-1 text-xs text-black/45">

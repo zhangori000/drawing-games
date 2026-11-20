@@ -184,6 +184,12 @@ test('tagged custom words draft like rated cards, and a missed pick is explained
   ).toHaveAttribute('aria-checked', 'true')
   await chooseSetting(page, 'Rounds', '2')
   await expect(page.getByTestId('lobby-start')).toBeEnabled({ timeout: 15_000 })
+  // The room has the list now, and the box still holds the host's text: the
+  // skipped entry stays there to be fixed, and the note still names it.
+  await expect(area).toHaveValue(/typo\|huge/)
+  await expect(page.getByTestId('custom-words-note')).toContainText(
+    '9 words · up to 300 · 1 entry skipped (tag with |easy, |medium or |hard: “typo|huge”)',
+  )
   await page.getByTestId('lobby-start').click()
 
   // Ari joined before the bots, so Ari drafts for Sun: one easy, one

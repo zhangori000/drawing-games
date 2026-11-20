@@ -22,9 +22,10 @@ function threeVsTwo(
     readonly accounts?: boolean
     readonly showdown?: boolean
     readonly botsOnA?: number
+    readonly seed?: number
   } = {},
 ): RoomDriver {
-  const driver = new RoomDriver({ seed: 5 })
+  const driver = new RoomDriver({ seed: options.seed ?? 5 })
   const account = (id: string) =>
     options.accounts === true ? { accountId: `${id}-acct` } : {}
   driver.join('ana', 'Ana', { team: 'A', ...account('ana') })
@@ -213,7 +214,8 @@ describe('a drawer who leaves mid-turn hands the turn over', () => {
     wakeUntil(draft, () => draft.state.phase === 'drawing')
     expect(draft.teamRound('A').chosenBy).toBe('drawer')
 
-    const drawing = threeVsTwo({ botsOnA: 2 })
+    // A seed where the bot guesser gets it (bots sometimes miss).
+    const drawing = threeVsTwo({ botsOnA: 2, seed: 6 })
     drawing.pickWords()
     leave(drawing, 'ana')
     const drawer = drawing.drawer('A')
@@ -223,6 +225,8 @@ describe('a drawer who leaves mid-turn hands the turn over', () => {
       strokes.push(...drawing.effects)
       return drawing.teamRound('A').solution !== null
     })
+    expect(drawing.state.match?.round?.number).toBe(1)
+    expect(drawing.drawer('A')).toBe(drawer)
     expect(
       strokes.some(
         (effect) =>
@@ -447,17 +451,44 @@ describe('a drawer who stays disconnected past the reconnect grace', () => {
     expect(driver.drawer('A')).toBe('eve')
   })
 
-  it('lets someone who joins later pick up a turn its leaver could not hand over', () => {
+  it('lets someone who joins later pick up a turn nobody connected could take', () => {
+    const driver = threeVsTwo()
+    presence(driver, 'ben', false)
+    presence(driver, 'eve', false)
+    presence(driver, 'ana', false)
+    driver.advanceBy(RECONNECT_GRACE_MS + 1_000)
+    expect(driver.drawer('A')).toBe('ana')
+    // Fay joins mid-turn, so she may not guess it, but she may draw it for
+    // Ben and Eve, who can once they are back.
+    driver.join('fay', 'Fay', { team: 'A' })
+    expect(driver.drawer('A')).toBe('fay')
+    expect(driver.view('fay').round?.mine).toMatchObject({
+      amDrawer: true,
+      sittingOut: null,
+    })
+  })
+
+  it('never hands a turn over just so late joiners could guess it', () => {
     const driver = threeVsTwo()
     leave(driver, 'ben')
     leave(driver, 'eve')
     leave(driver, 'ana')
-    expect(driver.drawer('A')).toBe('ana')
     driver.join('fay', 'Fay', { team: 'A' })
-    // Fay alone could draw for nobody; with Gus here she takes over.
-    expect(driver.drawer('A')).toBe('ana')
     driver.join('gus', 'Gus', { team: 'A' })
-    expect(driver.drawer('A')).toBe('fay')
+    // Either of them could be Ana back: nobody left could guess this turn.
+    expect(driver.drawer('A')).toBe('ana')
+    expect(driver.view('gus').round?.mine).toMatchObject({
+      canGuess: false,
+      sittingOut: 'joined-mid-turn',
+    })
+    // The next round deals them in as usual.
+    driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    expect(driver.state.phase).toBe('word-draft')
+    expect(['fay', 'gus']).toContain(driver.drawer('A'))
+    expect(driver.view('fay').round?.mine?.sittingOut).toBeNull()
+    expect(driver.view('gus').round?.mine?.sittingOut).toBeNull()
   })
 
   it('hands a showdown card to the next connected relay drawer', () => {
@@ -509,5 +540,174 @@ describe('a drawer who stays disconnected past the reconnect grace', () => {
     driver.advanceBy(RECONNECT_GRACE_MS)
     expect(driver.drawer('A')).toMatch(/^bot_/)
     wakeUntil(driver, () => driver.state.phase === 'round-results')
+  })
+})
+
+describe('a member who joins mid-turn sits that turn out', () => {
+  /** Ana (drawing) and Ben on A; Cy and Di on B; 40 custom words. */
+  function twoVsTwo(settings: Record<string, unknown> = {}): RoomDriver {
+    const driver = new RoomDriver({ seed: 5 })
+    driver.join('ana', 'Ana', { team: 'A', accountId: 'ana-acct' })
+    driver.join('ben', 'Ben', { team: 'A' })
+    driver.join('cy', 'Cy', { team: 'B' })
+    driver.join('di', 'Di', { team: 'B' })
+    driver.settings('ana', {
+      rounds: 2,
+      showdown: false,
+      customWordsMode: 'only',
+      customWords: customWordList(40),
+      packIds: [],
+      ...settings,
+    })
+    driver.readyAll()
+    driver.ok({ type: 'match.start', actorId: 'ana' })
+    expect(driver.drawer('A')).toBe('ana')
+    return driver
+  }
+
+  it('stops a drawer who left from rejoining as a new seat and guessing their word', () => {
+    const driver = twoVsTwo()
+    driver.pickWords()
+    const term = driver.term('A')
+    driver.ok({ type: 'drawing.ops', actorId: 'ana', ops: STROKE })
+    leave(driver, 'ana')
+    expect(driver.drawer('A')).toBe('ben')
+
+    // Same browser, same name, normal join form: a brand-new seat.
+    driver.join('ana-2', 'Ana', { team: 'A', accountId: 'ana-acct' })
+    expect(driver.view('ana-2').me?.role).toBe('guesser')
+    expect(driver.view('ana-2').round?.mine).toMatchObject({
+      amDrawer: false,
+      canGuess: false,
+      sittingOut: 'joined-mid-turn',
+      word: null,
+    })
+    expect(
+      driver.fail({ type: 'guess.submit', actorId: 'ana-2', text: term })
+        .message,
+    ).toBe('You joined during this turn, so guess from the next one.')
+    expect(driver.teamRound('A').solution).toBeNull()
+
+    const roundEnd = driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    expect(driver.view('ana-2').results?.teams.A).toMatchObject({
+      drawerName: 'Ben',
+      solved: false,
+    })
+    expect(driver.state.match?.stats['ana-2']).toMatchObject({
+      correctGuesses: 0,
+      guessesSubmitted: 0,
+      pointsWon: 0,
+    })
+    // She sat it out, so no "missed" lands on her account for it.
+    expect(wordEventsFor(roundEnd, 'ana-acct')).toEqual([])
+
+    // From the next turn she plays as usual.
+    driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    expect(driver.state.phase).toBe('word-draft')
+    driver.pickWords()
+    const mine = driver.view('ana-2').round?.mine
+    expect(mine?.sittingOut).toBeNull()
+    expect(mine?.amDrawer || mine?.canGuess).toBe(true)
+  })
+
+  it('stops a second tab of the drawer from guessing', () => {
+    const driver = twoVsTwo()
+    driver.pickWords()
+    driver.join('ana-tab', 'Ana', { team: 'A' })
+    expect(driver.view('ana-tab').round?.mine).toMatchObject({
+      canGuess: false,
+      sittingOut: 'joined-mid-turn',
+    })
+    expect(
+      driver.fail({
+        type: 'guess.submit',
+        actorId: 'ana-tab',
+        text: driver.term('A'),
+      }).code,
+    ).toBe('NOT_ALLOWED')
+    // The rest of the team is unaffected.
+    expect(driver.view('ben').round?.mine).toMatchObject({
+      canGuess: true,
+      sittingOut: null,
+    })
+    driver.solve('A', 'ben')
+    expect(driver.teamRound('A').solution?.guesserId).toBe('ben')
+  })
+
+  it('covers the whole turn for someone who joins during the draft', () => {
+    const driver = twoVsTwo()
+    leave(driver, 'ana')
+    expect(driver.drawer('A')).toBe('ben')
+    driver.join('ana-2', 'Ana', { team: 'A' })
+    expect(driver.view('ana-2').round?.mine).toMatchObject({
+      options: null,
+      sittingOut: 'joined-mid-turn',
+    })
+    driver.pickWords()
+    expect(driver.state.phase).toBe('drawing')
+    expect(driver.view('ana-2').round?.mine).toMatchObject({
+      canGuess: false,
+      sittingOut: 'joined-mid-turn',
+    })
+  })
+
+  it('only marks the team the newcomer joins, and not one that already solved', () => {
+    const driver = twoVsTwo()
+    driver.pickWords()
+    driver.solve('B', 'di')
+    driver.join('fay', 'Fay', { team: 'B' })
+    driver.join('gus', 'Gus', { team: 'A' })
+    expect(driver.teamRound('B').lateJoinerIds ?? []).toEqual([])
+    expect(driver.teamRound('A').lateJoinerIds).toEqual(['gus'])
+    expect(driver.view('fay').round?.mine).toMatchObject({
+      solved: true,
+      sittingOut: null,
+    })
+  })
+
+  it('keeps late joiners out of the hint vote and its electorate', () => {
+    const driver = twoVsTwo({ wordLengthMode: 'hidden-vote' })
+    driver.pickWords()
+    driver.join('eve', 'Eve', { team: 'A' })
+    driver.advanceBy(driver.state.settings.hintUnlockSeconds * 1000)
+    expect(driver.view('eve').round?.mine?.hint).toMatchObject({
+      canVote: false,
+      votesNeeded: 1,
+    })
+    expect(
+      driver.fail({ type: 'hint.vote', actorId: 'eve', approve: true }).message,
+    ).toBe('You joined during this turn.')
+    driver.ok({ type: 'hint.vote', actorId: 'ben', approve: true })
+    expect(driver.teamRound('A').hint.revealed).toBe(true)
+  })
+
+  it('sits out the active showdown card only', () => {
+    const driver = threeVsTwo({ showdown: true })
+    for (let round = 0; round < 2; round += 1) {
+      driver.pickWords()
+      driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+      driver.advanceTo(driver.state.phaseDeadlineAtMs!)
+    }
+    expect(driver.state.phase).toBe('showdown')
+    driver.join('fay', 'Fay', { team: 'A' })
+    expect(driver.view('fay').showdown?.mine).toMatchObject({
+      canGuess: false,
+      sittingOut: 'joined-mid-turn',
+    })
+    expect(
+      driver.fail({
+        type: 'guess.submit',
+        actorId: 'fay',
+        text: driver.showdownTerm('A'),
+      }).code,
+    ).toBe('NOT_ALLOWED')
+    driver.solve('A')
+    const teamA = driver.state.match!.showdown!.teams.A
+    expect(teamA.cardIndex).toBe(1)
+    expect(teamA.lateJoinerIds).toEqual([])
+    expect(driver.view('fay').showdown?.mine).toMatchObject({
+      sittingOut: null,
+      canGuess: teamA.drawerId !== 'fay',
+    })
   })
 })

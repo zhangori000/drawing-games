@@ -29,13 +29,20 @@ const MIN_DEFINITION_LENGTH = 12
 const MAX_DEFINITION_LENGTH = 140
 const MIN_PACK_WORDS = 60
 const MIN_DIFFICULTY_SHARE = 0.15
+/**
+ * Enough of every difficulty that a pack used alone keeps dealing Balanced
+ * hands (one easy, one medium, one hard per team, and same-difficulty
+ * swaps) round after round, instead of running out of one difficulty after
+ * the first round (as Phrases & Idioms once did with two easy words).
+ */
+const MIN_WORDS_PER_DIFFICULTY = 15
 
 /** Per-pack overrides of the minimum share of each difficulty. */
 const DIFFICULTY_SHARE_OVERRIDES: Readonly<
   Record<string, Partial<Record<WordDifficulty, number>>>
 > = {
-  // Idioms are rarely easy to draw; they need a real medium tier instead.
-  phrases: { easy: 0, medium: 0.2 },
+  // Idioms need a real medium tier too.
+  phrases: { medium: 0.2 },
 }
 
 /** Brands and characters: drawable, but not ours to put in a word list. */
@@ -394,6 +401,18 @@ describe.each(CURATED_PACKS.map((pack) => [pack.id, pack] as const))(
         }
       }
       expect(shortfalls).toEqual([])
+    })
+
+    it(`can deal Balanced hands on its own (${MIN_WORDS_PER_DIFFICULTY}+ of each difficulty)`, () => {
+      const thin = WORD_DIFFICULTIES.flatMap((difficulty) => {
+        const count = pack.words.filter(
+          (word) => word.difficulty === difficulty,
+        ).length
+        return count < MIN_WORDS_PER_DIFFICULTY
+          ? [`${difficulty}: ${count}`]
+          : []
+      })
+      expect(thin).toEqual([])
     })
   },
 )

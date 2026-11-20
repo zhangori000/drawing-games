@@ -454,7 +454,7 @@ export function WordLibraryClient() {
                 placeholder="Game night"
                 required
                 maxLength={80}
-                className="min-h-11 rounded-xl border-2 border-[#181713] bg-white px-3 text-sm outline-none focus:ring-4 focus:ring-[#5c4cf2]/20"
+                className="min-h-11 rounded-xl border-2 border-[#181713] bg-white px-3 text-base outline-none focus:ring-4 focus:ring-[#5c4cf2]/20"
               />
               <button
                 type="submit"
@@ -529,7 +529,7 @@ export function WordLibraryClient() {
                     required
                     maxLength={1000}
                     rows={3}
-                    className="rounded-xl border-2 border-[#181713] bg-white px-3 py-2.5 text-sm font-normal outline-none focus:ring-4 focus:ring-[#5c4cf2]/20"
+                    className="rounded-xl border-2 border-[#181713] bg-white px-3 py-2.5 text-base font-normal outline-none focus:ring-4 focus:ring-[#5c4cf2]/20"
                   />
                 </label>
                 <label className="grid gap-1.5 text-xs font-bold">
@@ -537,7 +537,7 @@ export function WordLibraryClient() {
                   <select
                     name="difficulty"
                     defaultValue="medium"
-                    className="min-h-11 rounded-xl border-2 border-[#181713] bg-white px-3 text-sm font-normal"
+                    className="min-h-11 rounded-xl border-2 border-[#181713] bg-white px-3 text-base font-normal"
                   >
                     <option value="easy">Easy</option>
                     <option value="medium">Medium</option>
@@ -591,7 +591,7 @@ export function WordLibraryClient() {
                   placeholder={
                     '[{"term":"Kite","definition":"A light frame flown in the wind.","difficulty":"easy"}]'
                   }
-                  className="rounded-xl border border-white/25 bg-white/10 px-3 py-3 font-mono text-xs font-normal leading-5 text-white outline-none placeholder:text-white/30 focus:ring-4 focus:ring-[#f8ff80]/20"
+                  className="rounded-xl border border-white/25 bg-white/10 px-3 py-3 font-mono text-base font-normal leading-6 text-white outline-none placeholder:text-white/30 focus:ring-4 focus:ring-[#f8ff80]/20"
                 />
               </label>
               <button
@@ -613,7 +613,7 @@ export function WordLibraryClient() {
                 Existing word
                 <select
                   name="wordId"
-                  className="min-h-11 rounded-xl border-2 border-[#181713] bg-white px-3 text-sm font-normal"
+                  className="min-h-11 rounded-xl border-2 border-[#181713] bg-white px-3 text-base font-normal"
                 >
                   {words.map((word) => (
                     <option key={word.id} value={word.id}>
@@ -626,7 +626,7 @@ export function WordLibraryClient() {
                 Custom collection
                 <select
                   name="collectionId"
-                  className="min-h-11 rounded-xl border-2 border-[#181713] bg-white px-3 text-sm font-normal"
+                  className="min-h-11 rounded-xl border-2 border-[#181713] bg-white px-3 text-base font-normal"
                 >
                   {customCollections.map((collection) => (
                     <option key={collection.id} value={collection.id}>
@@ -730,7 +730,7 @@ function Field({
         defaultValue={defaultValue}
         placeholder={placeholder}
         required={required}
-        className="min-h-11 rounded-xl border-2 border-[#181713] bg-white px-3 text-sm font-normal outline-none focus:ring-4 focus:ring-[#5c4cf2]/20"
+        className="min-h-11 rounded-xl border-2 border-[#181713] bg-white px-3 text-base font-normal outline-none focus:ring-4 focus:ring-[#5c4cf2]/20"
       />
     </label>
   )
@@ -839,7 +839,7 @@ function WordCard({
               defaultValue={word.definition}
               required
               rows={3}
-              className="rounded-xl border-2 border-[#181713] bg-white px-3 py-2 text-sm font-normal"
+              className="rounded-xl border-2 border-[#181713] bg-white px-3 py-2 text-base font-normal"
             />
           </label>
           <label className="grid gap-1.5 text-xs font-bold">
@@ -847,7 +847,7 @@ function WordCard({
             <select
               name="difficulty"
               defaultValue={word.difficulty}
-              className="min-h-11 rounded-xl border-2 border-[#181713] bg-white px-3 text-sm font-normal"
+              className="min-h-11 rounded-xl border-2 border-[#181713] bg-white px-3 text-base font-normal"
             >
               <option value="easy">Easy</option>
               <option value="medium">Medium</option>

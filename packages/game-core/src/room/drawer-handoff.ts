@@ -5,7 +5,7 @@ import { RECONNECT_GRACE_MS, SHOWDOWN_BOT_CARD_BUDGET_MS } from './constants'
 import type { RoomContext } from './context'
 import { updateShowdownTeam, updateStats, updateTeamRound } from './context'
 import { findMember, nextTeammate, teamRoster } from './members'
-import { chosenOption } from './selectors'
+import { chosenOption, sitOutIds } from './selectors'
 import type { RoomMember, RoomState } from './types'
 
 function withFormer(
@@ -121,9 +121,34 @@ export function handOffDrawerTurn(ctx: RoomContext, leaverId: string): void {
   if (next !== null) handOff(ctx, leaver.team, leaverId, next)
 }
 
+/**
+ * A member who joins while their team's turn is under way (the draft, the
+ * drawing, or an active showdown card the team has not cleared) sits that
+ * turn out. The server cannot tell a new seat from a drawer of this turn
+ * who left and came back, or from a second tab, and either has seen the
+ * cards, so every late joiner watches the rest of the turn and guesses from
+ * the next one. A team that already solved has nothing left to guess.
+ */
+export function markLateJoiner(ctx: RoomContext, member: RoomMember): void {
+  const turn = liveTurn(ctx.state, member.team)
+  if (turn === null || turn.sitOutIds.includes(member.id)) return
+  const withJoiner = <T extends { readonly lateJoinerIds?: readonly string[] }>(
+    current: T,
+  ): T => ({
+    ...current,
+    lateJoinerIds: [...(current.lateJoinerIds ?? []), member.id],
+  })
+  if (ctx.state.phase === 'showdown') {
+    updateShowdownTeam(ctx, member.team, withJoiner)
+  } else {
+    updateTeamRound(ctx, member.team, withJoiner)
+  }
+}
+
 interface LiveTurn {
   readonly drawerId: string
-  readonly formerDrawerIds: readonly string[]
+  /** Earlier drawers and late joiners: they may not guess this turn. */
+  readonly sitOutIds: readonly string[]
 }
 
 /** `team`'s turn while it is still being played, if any. */
@@ -136,20 +161,14 @@ function liveTurn(state: RoomState, team: TeamId): LiveTurn | null {
   ) {
     const teamRound = match.round.teams[team]
     if (teamRound.solution !== null) return null
-    return {
-      drawerId: teamRound.drawerId,
-      formerDrawerIds: teamRound.formerDrawerIds ?? [],
-    }
+    return { drawerId: teamRound.drawerId, sitOutIds: sitOutIds(teamRound) }
   }
   if (state.phase === 'showdown' && match.showdown !== null) {
     const teamState = match.showdown.teams[team]
     if (teamState.finishedAtMs !== null || teamState.drawerId === null) {
       return null
     }
-    return {
-      drawerId: teamState.drawerId,
-      formerDrawerIds: teamState.formerDrawerIds ?? [],
-    }
+    return { drawerId: teamState.drawerId, sitOutIds: sitOutIds(teamState) }
   }
   return null
 }
@@ -175,7 +194,8 @@ function takeoverFor(state: RoomState, team: TeamId): DrawerTakeover | null {
   // The dropped drawer saw the cards and may not guess them, so a takeover
   // only helps if someone else could still guess (in a pair, or a human
   // with one bot, the drawer is better off finishing when they are back).
-  const sittingOut = new Set([...turn.formerDrawerIds, drawerId, next.id])
+  // Late joiners sit the turn out too, so they never count as that guesser.
+  const sittingOut = new Set([...turn.sitOutIds, drawerId, next.id])
   const guesserLeft = teamRoster(state, team).some(
     (member) => !sittingOut.has(member.id),
   )

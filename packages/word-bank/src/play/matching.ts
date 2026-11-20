@@ -1,4 +1,10 @@
-import { pluralForms, singularForms, verbFormKeys } from './inflection'
+import {
+  nounPluralKeys,
+  nounSingularKeys,
+  pluralForms,
+  singularForms,
+  verbFormKeys,
+} from './inflection'
 import { getAllPlayableWords } from './pool'
 import { STOP_WORDS, answerTokens, normalizeAnswer } from './text'
 import type {
@@ -54,10 +60,11 @@ export function closeThreshold(answerKey: string): number {
 }
 
 /**
- * Every key accepted as exactly `answer`: itself, simple plurals/singulars,
- * and `-ing` ↔ base verb spellings (`juggling` ↔ `juggle`, `tightrope
- * walking` ↔ `tightrope walk`, see `verbFormKeys`). A verb spelling is
- * dropped when `namesOtherWord` says it is a different playable word.
+ * Every key accepted as exactly `answer`: itself, simple plurals/singulars
+ * (on X in an "X of Y" phrase, see `nounPluralKeys`), and `-ing` ↔ base
+ * verb spellings (`juggling` ↔ `juggle`, `tightrope walking` ↔ `tightrope
+ * walk`, see `verbFormKeys`). A verb spelling is dropped when
+ * `namesOtherWord` says it is a different playable word.
  */
 function exactKeys(
   answer: string,
@@ -68,8 +75,8 @@ function exactKeys(
   const keys = new Set<string>()
   if (key.length === 0) return keys
   keys.add(key)
-  for (const form of pluralForms(key)) keys.add(form)
-  for (const form of singularForms(key)) keys.add(form)
+  for (const form of nounPluralKeys(tokens)) keys.add(form)
+  for (const form of nounSingularKeys(tokens)) keys.add(form)
   for (const form of verbFormKeys(tokens)) {
     if (!namesOtherWord(form)) keys.add(form)
   }
@@ -140,11 +147,27 @@ export function acceptedGuessKeys(target: GuessMatchTarget): Set<string> {
   return accepted
 }
 
-function isCloseMatch(guessKey: string, answerKey: string): boolean {
+function isCloseMatch(guessKey: string, answer: string): boolean {
+  const tokens = answerTokens(answer)
+  const answerKey = tokens.join('')
   const threshold = closeThreshold(answerKey)
   if (threshold === 0) return false
-  return [answerKey, ...pluralForms(answerKey)].some(
+  return [answerKey, ...nounPluralKeys(tokens)].some(
     (form) => editDistance(guessKey, form, threshold) <= threshold,
+  )
+}
+
+/**
+ * Verb spellings of the answers that are not accepted only because they
+ * name another word in play (`sneeze` for `sneezing` beside a `sneeze`
+ * card). The guesser clearly has the idea, so they hear "close".
+ */
+function isBlockedVerbForm(
+  guessKey: string,
+  answers: readonly string[],
+): boolean {
+  return answers.some((answer) =>
+    verbFormKeys(answerTokens(answer)).includes(guessKey),
   )
 }
 
@@ -162,14 +185,15 @@ function partialWords(answers: readonly string[]): string[] {
 
 /**
  * Server-side guess verdict. Case, accents, spacing (including none),
- * hyphens, punctuation, leading articles, simple plurals, `-ing` ↔ base
- * verb forms of the last word (or of a leading verb before an article or
- * preposition), and aliases never cost a player a correct answer. A verb
- * form that is itself a different word in play (`otherWords`, else the
- * curated catalog) is not accepted (`wave` for `waving`). A guess that merely contains the answer
- * among other words is not correct; it earns `partial` for a multi-word
- * answer and `wrong` otherwise. `close` compares only against the answer and
- * its plurals.
+ * hyphens, punctuation, leading articles, simple plurals (on X of an "X of
+ * Y" phrase: `pots of gold`, not `pot of golds`), `-ing` ↔ base verb forms
+ * of the last word (or of a leading verb before an article or preposition),
+ * and aliases never cost a player a correct answer. A verb form that is
+ * itself a different word in play (`otherWords`, else the curated catalog)
+ * is not accepted (`wave` for `waving`) but earns `close`. A guess that
+ * merely contains the answer among other words is not correct; it earns
+ * `partial` for a multi-word answer and `wrong` otherwise. `close` otherwise
+ * compares only against the answer and its plurals.
  */
 export function matchGuess(
   guess: string,
@@ -187,7 +211,15 @@ export function matchGuess(
   if (answerKeys.length === 0) return 'wrong'
 
   if (acceptedGuessKeys(target).has(guessKey)) return 'correct'
-  if (answerKeys.some((key) => isCloseMatch(guessKey, key))) return 'close'
+  if (isBlockedVerbForm(guessKey, answers)) return 'close'
+  if (
+    answers.some(
+      (answer) =>
+        normalizeAnswer(answer).length > 0 && isCloseMatch(guessKey, answer),
+    )
+  ) {
+    return 'close'
+  }
 
   // One right word is feedback, not an answer, so no other-word check here.
   const words = partialWords(answers).map((word) => exactKeys(word))

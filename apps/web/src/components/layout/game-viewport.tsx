@@ -25,11 +25,24 @@ export interface GameViewportState {
   readonly keyboardShown: boolean
   /** Visible height in CSS pixels (0 before the first measurement). */
   readonly height: number
+  /** Viewport width in CSS pixels (0 before the first measurement). */
+  readonly width: number
+  /**
+   * The height to plan a layout for: the visible height, except while the
+   * device keyboard is open, when it is the keyboard-closed height for this
+   * width. A keyboard opening (on browsers that shrink the layout viewport
+   * for it, or a desktop window resized while typing) therefore never
+   * switches a screen to another layout, which would rebuild its inputs and
+   * close the keyboard again. 0 before the first measurement.
+   */
+  readonly layoutHeight: number
 }
 
 interface MeasuredViewport {
   readonly keyboardOpen: boolean
   readonly height: number
+  readonly width: number
+  readonly layoutHeight: number
 }
 
 const GameViewportContext = createContext<GameViewportState>({
@@ -37,6 +50,8 @@ const GameViewportContext = createContext<GameViewportState>({
   inAppKeyboard: false,
   keyboardShown: false,
   height: 0,
+  width: 0,
+  layoutHeight: 0,
 })
 
 /** Registers one on-screen in-app keyboard; returns its unregister. */
@@ -92,6 +107,8 @@ export function GameViewport({ children, className }: GameViewportProps) {
   const [measured, setMeasured] = useState<MeasuredViewport>({
     keyboardOpen: false,
     height: 0,
+    width: 0,
+    layoutHeight: 0,
   })
   const [inAppKeyboards, setInAppKeyboards] = useState(0)
   const registerInAppKeyboard = useCallback(() => {
@@ -104,6 +121,8 @@ export function GameViewport({ children, className }: GameViewportProps) {
       inAppKeyboard: inAppKeyboards > 0,
       keyboardShown: measured.keyboardOpen || inAppKeyboards > 0,
       height: measured.height,
+      width: measured.width,
+      layoutHeight: measured.layoutHeight,
     }),
     [measured, inAppKeyboards],
   )
@@ -168,21 +187,31 @@ function useVisualViewportPin(
         ? `translate3d(0, ${offsetTop}px, 0)`
         : ''
 
-      // Track the tallest height per width: rotation resets the baseline.
-      if (window.innerWidth !== baselineWidth) {
-        baselineWidth = window.innerWidth
+      // The keyboard-closed height for this width: rotation resets it, and
+      // with nothing to type into (so no soft keyboard) it is simply the
+      // current height, so a window resized smaller is not mistaken for a
+      // keyboard later. While typing, keep the tallest height seen.
+      const editable = isEditableElement(document.activeElement)
+      const width = window.innerWidth
+      if (width !== baselineWidth) {
+        baselineWidth = width
+        baselineHeight = height
+      } else if (!editable) {
         baselineHeight = height
       } else {
         baselineHeight = Math.max(baselineHeight, height)
       }
       const keyboardOpen =
-        isEditableElement(document.activeElement) &&
-        height < baselineHeight * KEYBOARD_HEIGHT_RATIO
+        editable && height < baselineHeight * KEYBOARD_HEIGHT_RATIO
+      const layoutHeight = keyboardOpen ? baselineHeight : height
 
       setState((previous) =>
-        previous.height === height && previous.keyboardOpen === keyboardOpen
+        previous.height === height &&
+        previous.keyboardOpen === keyboardOpen &&
+        previous.width === width &&
+        previous.layoutHeight === layoutHeight
           ? previous
-          : { height, keyboardOpen },
+          : { height, keyboardOpen, width, layoutHeight },
       )
     }
     const schedule = () => {

@@ -20,6 +20,11 @@ export interface OpponentTileProps {
   /** Showing the opponent's canvas in the main pane. */
   readonly watching: boolean
   readonly onToggleWatch: () => void
+  /**
+   * Why the real canvas is open, e.g. "You solved it" for the guesser who
+   * got it and "Your team solved it" for everyone else (the default).
+   */
+  readonly unlockedLabel?: string
 }
 
 /**
@@ -35,6 +40,7 @@ export function OpponentTile({
   done,
   watching,
   onToggleWatch,
+  unlockedLabel = 'Your team solved it',
 }: OpponentTileProps) {
   const layout = usePlayLayout()
   const name = TEAM_NAMES[team]
@@ -154,7 +160,7 @@ export function OpponentTile({
       {full ? (
         <div className="mt-2 flex items-center justify-between gap-2">
           <p className="text-xs font-bold text-black/60">
-            You solved it — watch {name}
+            {unlockedLabel} — watch {name}
           </p>
           <button
             type="button"
@@ -183,11 +189,11 @@ export interface OpponentChipProps {
 /**
  * The other team's progress as a one-line chip for the guess dock's status
  * line. It only shows while a keyboard has pushed the opponent tile off a
- * phone screen (`feedInDock`), so the race stays visible while typing.
+ * phone screen (`opponentInDock`), so the race stays visible while typing.
  */
 export function OpponentChip({ team, status, done }: OpponentChipProps) {
-  const { feedInDock } = usePlayChrome()
-  if (!feedInDock) return null
+  const { opponentInDock } = usePlayChrome()
+  if (!opponentInDock) return null
   const name = TEAM_NAMES[team]
   return (
     <span

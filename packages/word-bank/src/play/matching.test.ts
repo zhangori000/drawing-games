@@ -320,13 +320,18 @@ describe('matchGuess with verb forms', () => {
     // A leading -ing modifier of a noun compound is not a verb.
     ['swim pool', { term: 'swimming pool' }, 'partial'],
     ['shoot star', { term: 'shooting star' }, 'partial'],
-    // A verb form that is another curated word is that word, not this one.
-    ['wave', { term: 'waving' }, 'wrong'],
-    ['waving', { term: 'wave' }, 'wrong'],
-    ['whistle', { term: 'whistling' }, 'wrong'],
-    ['whistling', { term: 'whistle' }, 'wrong'],
-    ['cook', { term: 'cooking' }, 'wrong'],
-    ['cooking', { term: 'chef', aliases: ['cook'] }, 'wrong'],
+    // A verb form that is another curated word is that word, not this one,
+    // but the guesser clearly has the idea: close, never correct.
+    ['wave', { term: 'waving' }, 'close'],
+    ['waving', { term: 'wave' }, 'close'],
+    ['whistle', { term: 'whistling' }, 'close'],
+    ['whistling', { term: 'whistle' }, 'close'],
+    ['cook', { term: 'cooking' }, 'close'],
+    ['cooking', { term: 'chef', aliases: ['cook'] }, 'close'],
+    ['sneeze', { term: 'sneezing' }, 'close'],
+    // Unrelated words stay wrong, verb-shaped or not.
+    ['sneezing', { term: 'waving' }, 'wrong'],
+    ['cook', { term: 'waving' }, 'wrong'],
     // Close and partial feedback keep their rules.
     ['jugglin', { term: 'juggling' }, 'close'],
     ['dancng', { term: 'dancing' }, 'close'],
@@ -344,8 +349,9 @@ describe('matchGuess with verb forms', () => {
   it('never accepts a verb form that names another word in play', () => {
     const pool = customPlayableWords(['dig', 'digging', 'juggling'])
     const otherWords = pool
-    expect(matchGuess('dig', { term: 'digging', otherWords })).toBe('wrong')
-    expect(matchGuess('digging', { term: 'dig', otherWords })).toBe('wrong')
+    // Close (the guesser has the idea), never correct.
+    expect(matchGuess('dig', { term: 'digging', otherWords })).toBe('close')
+    expect(matchGuess('digging', { term: 'dig', otherWords })).toBe('close')
     expect(matchGuess('juggle', { term: 'juggling', otherWords })).toBe(
       'correct',
     )
@@ -354,9 +360,10 @@ describe('matchGuess with verb forms', () => {
   })
 
   it('defaults to the curated catalog as the words in play', () => {
-    // `juggling` and `running` are curated actions, so they stay distinct.
-    expect(matchGuess('juggling', { term: 'juggle' })).toBe('wrong')
-    expect(matchGuess('running', { term: 'run' })).toBe('wrong')
+    // `juggling` and `running` are curated actions, so they stay distinct
+    // (close, not correct).
+    expect(matchGuess('juggling', { term: 'juggle' })).toBe('close')
+    expect(matchGuess('running', { term: 'run' })).toBe('close')
     // A curated word's own aliases are never "another word".
     expect(matchGuess('tap dance', { term: 'tap dancing' })).toBe('correct')
   })
@@ -372,10 +379,10 @@ describe('matchGuess with verb forms', () => {
   it('reuses keys per otherWords array and picks up a new array', () => {
     const first = customPlayableWords(['surf'])
     expect(matchGuess('surf', { term: 'surfing', otherWords: first })).toBe(
-      'wrong',
+      'close',
     )
     expect(matchGuess('surf', { term: 'surfing', otherWords: first })).toBe(
-      'wrong',
+      'close',
     )
     const second = customPlayableWords(['kite'])
     expect(matchGuess('surf', { term: 'surfing', otherWords: second })).toBe(
@@ -404,5 +411,24 @@ describe('wordPattern / letterCount', () => {
   ])('%j', (term, pattern, count) => {
     expect(wordPattern(term)).toBe(pattern)
     expect(letterCount(term)).toBe(count)
+  })
+})
+
+describe('matchGuess with "X of Y" phrases', () => {
+  const cases: [string, GuessMatchTarget, string][] = [
+    // The plural goes on X, the head noun.
+    ['pots of gold', { term: 'pot of gold' }, 'correct'],
+    ['bags of chips', { term: 'bag of chips' }, 'correct'],
+    ['cups of tea', { term: 'cup of tea' }, 'correct'],
+    ['pot of gold', { term: 'pots of gold' }, 'correct'],
+    // Not on Y: a near miss, not the answer.
+    ['pot of golds', { term: 'pot of gold' }, 'close'],
+    ['bag of chip', { term: 'bag of chips' }, 'close'],
+    // Other phrases keep the plural on the last word.
+    ['hermit crabs', { term: 'hermit crab' }, 'correct'],
+  ]
+
+  it.each(cases)('%j vs %j → %s', (guess, target, verdict) => {
+    expect(matchGuess(guess, target)).toBe(verdict)
   })
 })

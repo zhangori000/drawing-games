@@ -163,6 +163,11 @@ export function DrawingScreen({ round }: { readonly round: RoundView }) {
           status={opponentStatus}
           watching={watchingOpponent}
           onToggleWatch={() => setWatching((value) => !value)}
+          unlockedLabel={
+            solution?.guesserId === me.memberId
+              ? 'You solved it'
+              : 'Your team solved it'
+          }
         />
       }
       aside={<Scoreboard />}

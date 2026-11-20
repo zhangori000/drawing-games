@@ -9,7 +9,7 @@ import { calculateShutdownBounty, updateWinStreak } from '../scoring'
 import type { TeamId } from '../types'
 import { TEAM_IDS } from '../types'
 import { emitWordEvents, roundWordEvents } from './account-effects'
-import { clearBots, planBotsForCanvas } from './bots'
+import { clearBots, planBotOutlineOnReveal, planBotsForCanvas } from './bots'
 import { MAX_OPS_PER_BATCH, MAX_POINTS_PER_APPEND } from './constants'
 import type { RoomContext } from './context'
 import {
@@ -245,6 +245,9 @@ export function handleHintVote(
   if (teamRound.formerDrawerIds?.includes(actor.id) === true) {
     reject('NOT_ALLOWED', 'You saw this word as the drawer.')
   }
+  if (teamRound.lateJoinerIds?.includes(actor.id) === true) {
+    reject('NOT_ALLOWED', 'You joined during this turn.')
+  }
   if (teamRound.solution !== null) {
     reject('NOT_ALLOWED', 'Your team already solved it.')
   }
@@ -271,6 +274,8 @@ export function handleHintVote(
       revealedAtMs: revealed ? ctx.now : null,
     },
   }))
+  // A practice bot drawing for the team now draws the blanks it paid for.
+  if (revealed) planBotOutlineOnReveal(ctx, actor.team)
 }
 
 /* ------------------------------------------------------------------------ */

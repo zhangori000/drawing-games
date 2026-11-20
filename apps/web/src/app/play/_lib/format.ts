@@ -194,3 +194,55 @@ export function votesLabel(votesFor: number, votesNeeded: number): string {
 export function plural(count: number, one: string, many = `${one}s`): string {
   return `${count} ${count === 1 ? one : many}`
 }
+
+/** A final margin this small (points) is "so close": under one solve. */
+export const CLOSE_FINISH_POINTS = 30
+
+/**
+ * The final banner's line for a player who played the match, by result and
+ * margin, so a 130-point loss is not called "so close".
+ */
+export function finalResultLine(
+  outcome: 'won' | 'lost',
+  margin: number,
+): string {
+  const gap = Math.abs(margin)
+  if (outcome === 'won') {
+    return gap <= CLOSE_FINISH_POINTS
+      ? 'Down to the wire. Nicely drawn.'
+      : 'Your team took it. Nicely drawn.'
+  }
+  if (gap <= CLOSE_FINISH_POINTS) return 'So close. Run it back?'
+  if (gap <= 100) return 'Not this time. Run it back?'
+  return 'Their match. Shake it off and run it back?'
+}
+
+/**
+ * What leaving does, for the leave dialog. Mid-match, a room whose other
+ * players are all bots (a solo practice match) ends the match at once when
+ * the last human leaves; a room whose other humans are all disconnected
+ * ends it unless one comes back; otherwise play goes on.
+ */
+export function leaveRoomDescription(view: RoomView): string {
+  const midMatch = view.phase !== 'lobby' && view.phase !== 'stats'
+  if (!midMatch) return 'You can come back any time with the room code.'
+  const meId = view.me?.memberId ?? null
+  const others = view.members.filter(
+    (member) => member.kind === 'human' && member.id !== meId,
+  )
+  if (others.length === 0) {
+    return 'This practice match ends when you leave, and your seat is given up.'
+  }
+  if (!others.some((member) => member.connected)) {
+    // game-core abandons a match a minute (ABANDON_MATCH_MS) after the last
+    // connected human drops.
+    return 'Nobody else is connected, so the match ends unless someone comes back within a minute. Your seat is given up.'
+  }
+  const myTeam = view.me?.team
+  const teammates = view.members.some(
+    (member) => member.id !== meId && member.team === myTeam,
+  )
+  return teammates
+    ? 'Your team keeps playing without you, and your seat is given up.'
+    : 'The match goes on without you, and your seat is given up.'
+}
