@@ -59,6 +59,7 @@ export function parseStoredStats(json: string): AccountStats {
 	return merged as unknown as AccountStats;
 }
 
+/** Roles whose words go on the never-again list (kept in lifetime sets). */
 const AVOID_ROLES: ReadonlySet<WordHistoryRole> = new Set<WordHistoryRole>(['drew', 'seen-report']);
 
 export interface WordRoleEntry {
@@ -68,18 +69,17 @@ export interface WordRoleEntry {
 
 /**
  * `avoid` = words the player drew or reported as seen (never offer to them
- * as drawer again); `soft` = everything else they met. Both are
- * de-duplicated, keep the input order (pass newest first), and are capped.
+ * as drawer again), from the lifetime sets (`avoidedWordIds`), not the
+ * trimmed event log; `soft` = every other word they met in the event log.
+ * Both are de-duplicated, keep the input order (pass newest first), and
+ * are capped at `WORD_MEMORY_LIMITS`.
  */
-export function deriveWordMemory(newestFirst: readonly WordRoleEntry[]): PlayerWordMemory {
-	const avoid = new Set<string>();
+export function deriveWordMemory(avoidNewestFirst: readonly string[], eventsNewestFirst: readonly WordRoleEntry[]): PlayerWordMemory {
+	const avoid = [...new Set(avoidNewestFirst)].slice(0, WORD_MEMORY_LIMITS.avoid);
 	const soft = new Set<string>();
-	for (const { wordId, role } of newestFirst) {
-		if (AVOID_ROLES.has(role)) {
-			if (avoid.size < WORD_MEMORY_LIMITS.avoid) avoid.add(wordId);
-		} else if (soft.size < WORD_MEMORY_LIMITS.soft) {
-			soft.add(wordId);
-		}
+	for (const { wordId, role } of eventsNewestFirst) {
+		if (soft.size >= WORD_MEMORY_LIMITS.soft) break;
+		if (!AVOID_ROLES.has(role)) soft.add(wordId);
 	}
-	return { avoid: [...avoid], soft: [...soft] };
+	return { avoid, soft: [...soft] };
 }

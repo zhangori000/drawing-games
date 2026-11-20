@@ -3,6 +3,7 @@ import {
   type CustomWordsMode,
   type DifficultyMix,
   type OpponentDraftVisibility,
+  type RoomSettings,
   type WordLengthMode,
 } from '@drawing-games/game-core'
 
@@ -147,4 +148,36 @@ export function stepValue(
 /** "Use only my words" needs two full drafts' worth of custom words. */
 export function minimumCustomWordsForOnly(wordChoiceCount: number): number {
   return wordChoiceCount * 2
+}
+
+export type PackToggle =
+  { readonly packIds: readonly string[] } | { readonly refused: string }
+
+/**
+ * The packs after the host taps one, or why the tap is refused. The room
+ * needs a pack on unless it plays only custom words and has two drafts'
+ * worth (game-core's settings rule), so switching off the last pack is
+ * refused here rather than sent: quick taps go out as one patch, and a
+ * refused patch would undo every tap in it.
+ */
+export function togglePackIds(
+  settings: Pick<
+    RoomSettings,
+    'packIds' | 'customWords' | 'customWordsMode' | 'wordChoiceCount'
+  >,
+  packId: string,
+): PackToggle {
+  if (!settings.packIds.includes(packId)) {
+    return { packIds: [...settings.packIds, packId] }
+  }
+  const packIds = settings.packIds.filter((id) => id !== packId)
+  const needed = minimumCustomWordsForOnly(settings.wordChoiceCount)
+  const customOnlyIsEnough =
+    settings.customWordsMode === 'only' && settings.customWords.length >= needed
+  if (packIds.length === 0 && !customOnlyIsEnough) {
+    return {
+      refused: `Keep at least one word pack on, or use only your own words (at least ${needed}).`,
+    }
+  }
+  return { packIds }
 }

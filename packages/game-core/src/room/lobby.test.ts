@@ -351,14 +351,86 @@ describe('lobby controls', () => {
       minPerTeam: 2,
       maxPerTeam: 8,
     })
+    // Offline, Theo no longer counts toward Moon's minimum.
     driver.ok({ type: 'member.presence', memberId: 'theo', connected: false })
-    expect(driver.view('host').lobby?.canStart).toBe(true)
+    expect(driver.view('host').lobby).toMatchObject({
+      canStart: false,
+      blockers: ['Theo is offline, so Moon would start with 1 player'],
+    })
     driver.ok({ type: 'member.presence', memberId: 'theo', connected: true })
     driver.ok({ type: 'lobby.set-ready', actorId: 'theo', ready: true })
     expect(driver.fail({ type: 'match.start', actorId: 'theo' }).code).toBe(
       'NOT_ALLOWED',
     )
     driver.ok({ type: 'match.start', actorId: 'host' })
+    expect(driver.state.phase).toBe('word-draft')
+  })
+
+  it('clears Ready when a player drops out of the lobby, not mid-match', () => {
+    const driver = lobbyWithHost()
+    driver.join('ben', 'Ben', { team: 'A' })
+    driver.join('cleo', 'Cleo', { team: 'B' })
+    driver.join('dev', 'Dev', { team: 'B' })
+    for (const id of ['ben', 'cleo', 'dev']) {
+      driver.ok({ type: 'lobby.set-ready', actorId: id, ready: true })
+    }
+    driver.ok({ type: 'member.presence', memberId: 'dev', connected: false })
+    expect(driver.state.members.find((m) => m.id === 'dev')).toMatchObject({
+      connected: false,
+      ready: false,
+    })
+    // Back within the grace or not, they ready up again before the start.
+    driver.ok({ type: 'member.presence', memberId: 'dev', connected: true })
+    expect(driver.view('host').lobby?.blockers).toEqual([
+      'Waiting for Dev to ready up',
+    ])
+    driver.ok({ type: 'lobby.set-ready', actorId: 'dev', ready: true })
+    driver.ok({ type: 'match.start', actorId: 'host' })
+    // A mid-match drop leaves the flag alone (the lobby resets it later).
+    driver.ok({ type: 'member.presence', memberId: 'ben', connected: false })
+    expect(driver.state.members.find((m) => m.id === 'ben')?.ready).toBe(true)
+  })
+
+  it('counts only players who are here toward a team minimum', () => {
+    // The playtest room: Sun is Ana, Ben and Eve; Moon is Cleo and Dev.
+    const driver = new RoomDriver()
+    driver.join('ana', 'Ana')
+    driver.join('ben', 'Ben', { team: 'A' })
+    driver.join('eve', 'Eve', { team: 'A' })
+    driver.join('cleo', 'Cleo', { team: 'B' })
+    driver.join('dev', 'Dev', { team: 'B' })
+    for (const id of ['ben', 'eve', 'cleo', 'dev']) {
+      driver.ok({ type: 'lobby.set-ready', actorId: id, ready: true })
+    }
+    expect(driver.view('ana').lobby?.canStart).toBe(true)
+
+    driver.ok({ type: 'member.presence', memberId: 'dev', connected: false })
+    driver.advanceBy(17_000)
+    expect(driver.view('ana').lobby).toMatchObject({
+      canStart: false,
+      blockers: ['Dev is offline, so Moon would start with 1 player'],
+    })
+    expect(driver.fail({ type: 'match.start', actorId: 'ana' }).message).toBe(
+      'Dev is offline, so Moon would start with 1 player.',
+    )
+    // Sun still has two here without Eve, so her absence does not block.
+    driver.ok({ type: 'member.presence', memberId: 'eve', connected: false })
+    expect(driver.view('ana').lobby?.blockers).toEqual([
+      'Dev is offline, so Moon would start with 1 player',
+    ])
+    driver.ok({ type: 'member.presence', memberId: 'cleo', connected: false })
+    expect(driver.view('ana').lobby?.blockers).toEqual([
+      'Cleo and Dev are offline, so Moon would start with nobody',
+    ])
+
+    // A practice bot fills the gap like any player who is here.
+    driver.ok({ type: 'member.presence', memberId: 'cleo', connected: true })
+    driver.ok({ type: 'lobby.add-bot', actorId: 'ana', team: 'B' })
+    expect(driver.view('ana').lobby?.blockers).toEqual([
+      'Waiting for Cleo to ready up',
+    ])
+    driver.ok({ type: 'lobby.set-ready', actorId: 'cleo', ready: true })
+    driver.ok({ type: 'match.start', actorId: 'ana' })
     expect(driver.state.phase).toBe('word-draft')
   })
 

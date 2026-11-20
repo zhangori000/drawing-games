@@ -259,7 +259,7 @@ test('a drawer who leaves mid-draft hands the pick over, and the teammate is tol
   }
 })
 
-test('a player the host removes sees the removed screen and can join again', async ({
+test('the host confirms a removal; the removed player sees the removed screen and can join again', async ({
   browser,
 }) => {
   const ari = await newPlayer(browser)
@@ -273,10 +273,19 @@ test('a player the host removes sees the removed screen and can join again', asy
       ari.getByRole('list', { name: 'Moon players' }).getByText('Theo'),
     ).toBeVisible()
 
+    // One tap only asks: "Keep" leaves Theo in the room.
+    const moon = ari.getByRole('list', { name: 'Moon players' })
     await ari.getByRole('button', { name: 'Remove Theo' }).click()
-    await expect(
-      ari.getByRole('list', { name: 'Moon players' }).getByText('Theo'),
-    ).toHaveCount(0)
+    const dialog = ari.getByRole('dialog', { name: 'Remove Theo?' })
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole('button', { name: 'Keep' }).click()
+    await expect(dialog).toBeHidden()
+    await expect(moon.getByText('Theo')).toBeVisible()
+    await expect(theo.getByTestId('room-code')).toBeVisible()
+
+    await ari.getByRole('button', { name: 'Remove Theo' }).click()
+    await dialog.getByRole('button', { name: 'Remove', exact: true }).click()
+    await expect(moon.getByText('Theo')).toHaveCount(0)
 
     // Close 4003: a terminal screen, not a reconnect loop.
     await expect(
@@ -293,6 +302,56 @@ test('a player the host removes sees the removed screen and can join again', asy
   } finally {
     await ari.context().close()
     await theo.context().close()
+  }
+})
+
+test('players hear when their turn partner is offline, since the clock keeps running', async ({
+  browser,
+}) => {
+  const ari = await newPlayer(browser)
+  const mina = await newPlayer(browser)
+  try {
+    const code = await createRoomFromHome(ari, 'Create a room')
+    await joinRoom(ari, 'Ari', 'Sun')
+    await mina.goto(`/play/${code}`)
+    await joinRoom(mina, 'Mina', 'Sun')
+    await addBots(ari, 'Moon', 2)
+    await mina.getByTestId('lobby-ready').click()
+    await expect(ari.getByTestId('lobby-start')).toBeEnabled({
+      timeout: 15_000,
+    })
+    await ari.getByTestId('lobby-start').click()
+
+    // Ari joined first, so Ari draws and Mina guesses.
+    await pickFirstCard(ari)
+    await waitForDrawing(ari)
+    const input = mina.getByLabel('Your guess')
+    await expect(input).toBeEnabled({ timeout: PHASE_TIMEOUT })
+    const feed = ari.getByRole('region', { name: 'Team guesses' })
+    await expect(feed).not.toContainText('Nobody on your team is online')
+
+    // Mina's tab goes away: Ari is told nobody can guess right now.
+    await mina.goto('about:blank')
+    await expect(feed).toContainText(
+      'Nobody on your team is online to guess right now.',
+    )
+
+    // Mina comes back to the same seat; the note goes away.
+    await mina.goto(`/play/${code}`)
+    await expect(input).toBeEnabled({ timeout: 30_000 })
+    await expect(feed).not.toContainText('Nobody on your team is online')
+
+    // Ari's browser closes: Mina is told why the drawing stopped.
+    await ari.context().close()
+    await expect(mina.getByTestId('drawer-notice')).toHaveText(
+      'Ari lost connection',
+    )
+    await expect(mina.getByTestId('guess-dock').getByRole('status')).toHaveText(
+      'Ari lost connection. Waiting for them to come back.',
+    )
+  } finally {
+    await ari.context().close()
+    await mina.context().close()
   }
 })
 

@@ -169,7 +169,7 @@ export const SPACE_SCIENCE_PACK: WordPackData = {
       definition: 'A flat dark sheet that turns sunlight into electricity.',
     },
     {
-      term: 'x-ray',
+      term: 'X-ray',
       difficulty: 'medium',
       definition: 'A see-through picture of the bones inside your body.',
     },
@@ -181,7 +181,7 @@ export const SPACE_SCIENCE_PACK: WordPackData = {
       aliases: ['microbe', 'bacteria'],
     },
     {
-      term: 'dna',
+      term: 'DNA',
       difficulty: 'medium',
       definition:
         'The twisted ladder-shaped code inside every cell that makes you who you are.',

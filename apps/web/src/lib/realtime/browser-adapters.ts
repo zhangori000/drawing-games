@@ -55,12 +55,29 @@ export function defaultSocketUrl(roomCode: string, sessionId: string): string {
   )
 }
 
-/** Adapts a real WebSocket to the narrow, test-friendly interface. */
+const WS_CONNECTING = 0
+const WS_CLOSING = 2
+
+/**
+ * Adapts a real WebSocket to the narrow, test-friendly interface.
+ *
+ * Closing a socket that is still connecting makes browsers log "WebSocket is
+ * closed before the connection is established". That happens on every room
+ * entry under `pnpm dev` (React StrictMode mounts, unmounts and mounts the
+ * room screen at once) and whenever a connecting socket is replaced, so a
+ * close asked for while connecting is held until the socket opens and done
+ * then. From the moment it is asked for, the adapter reports `CLOSING` and
+ * forwards no `open` or message, as if the close had happened; a failed
+ * connection still ends with the socket's own `close` event.
+ */
 export function createBrowserSocket(url: string): WebSocketLike {
   const socket = new WebSocket(url)
+  let pendingClose: { code?: number; reason?: string } | null = null
   const adapter: WebSocketLike = {
     get readyState() {
-      return socket.readyState
+      return pendingClose !== null && socket.readyState < WS_CLOSING
+        ? WS_CLOSING
+        : socket.readyState
     },
     get bufferedAmount() {
       return socket.bufferedAmount
@@ -70,10 +87,26 @@ export function createBrowserSocket(url: string): WebSocketLike {
     onclose: null,
     onerror: null,
     send: (data) => socket.send(data),
-    close: (code, reason) => socket.close(code, reason),
+    close: (code, reason) => {
+      if (pendingClose !== null) return
+      if (socket.readyState === WS_CONNECTING) {
+        pendingClose = { code, reason }
+        return
+      }
+      socket.close(code, reason)
+    },
   }
-  socket.onopen = (event) => adapter.onopen?.(event)
-  socket.onmessage = (event) => adapter.onmessage?.({ data: event.data })
+  socket.onopen = (event) => {
+    if (pendingClose !== null) {
+      socket.close(pendingClose.code, pendingClose.reason)
+      return
+    }
+    adapter.onopen?.(event)
+  }
+  socket.onmessage = (event) => {
+    if (pendingClose !== null) return
+    adapter.onmessage?.({ data: event.data })
+  }
   socket.onclose = (event) =>
     adapter.onclose?.({ code: event.code, reason: event.reason })
   socket.onerror = (event) => adapter.onerror?.(event)

@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import { pluralForms, singularForms, verbFormKeys } from '../play/inflection'
 import { acceptedGuessKeys } from '../play/matching'
-import { getAllPlayableWords, playableWordsForPack } from '../play/pool'
+import {
+  getAllPlayableWords,
+  getPlayableWordById,
+  playableWordsForPack,
+} from '../play/pool'
 import { answerTokens, normalizeAnswer } from '../play/text'
 import type { PlayableWord, WordPackData } from '../play/types'
 import { WORD_DIFFICULTIES, type WordDifficulty } from '../types'
@@ -21,7 +25,37 @@ import {
 
 const PLAYABLE_ID = /^[a-z0-9-]+\/[a-z0-9-]+$/
 const PACK_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
-const TERM_CHARS = /^[\p{Ll}' -]+$/u
+const TERM_CHARS = /^[\p{L}' -]+$/u
+/**
+ * Each space- or hyphen-separated piece is lowercase, or all capitals for an
+ * acronym or a letter name (`DNA`, `watching TV`, `T-shirt`, `X-ray`).
+ * Cards show terms as written; matching folds case.
+ */
+const TERM_PIECE_CASE = /^(?:[\p{Ll}']+|\p{Lu}+)$/u
+/**
+ * Acronyms and initialisms that read wrong in lowercase on a card. A term
+ * must spell them in capitals (aliases are matching-only and may not).
+ */
+const LOWERCASE_ACRONYMS: ReadonlySet<string> = new Set([
+  'atm',
+  'bbq',
+  'cd',
+  'diy',
+  'dj',
+  'dna',
+  'dvd',
+  'gps',
+  'mri',
+  'pc',
+  'rv',
+  'sos',
+  'suv',
+  'tnt',
+  'tv',
+  'ufo',
+  'usb',
+  'vr',
+])
 const MIN_TERM_LENGTH = 2
 const MAX_TERM_LENGTH = 28
 const MAX_TERM_WORDS = 3
@@ -150,7 +184,10 @@ function spellingProblem(
   }
   if (text !== text.normalize('NFC')) return 'not NFC-normalized'
   if (!TERM_CHARS.test(text)) {
-    return 'only lowercase letters, spaces, hyphens, apostrophes'
+    return 'only letters, spaces, hyphens, apostrophes'
+  }
+  if (!text.split(/[ -]/).every((piece) => TERM_PIECE_CASE.test(piece))) {
+    return 'lowercase, or all capitals for an acronym or letter name'
   }
   if (/^[ '-]|[ -]$/.test(text)) return 'starts or ends with a separator'
   if (/ {2}|--|- | -/.test(text)) return 'doubled separator'
@@ -326,12 +363,38 @@ describe('answers across all packs', () => {
 })
 
 describe('terms', () => {
-  it('are 2-28 lowercase letters with at most 3 words', () => {
+  it('are 2-28 letters with at most 3 words', () => {
     const problems = PACK_WORDS.flatMap((entry) => {
       const problem = spellingProblem(entry.word.term, MAX_TERM_WORDS)
       return problem === null ? [] : [`${label(entry)}: ${problem}`]
     })
     expect(problems).toEqual([])
+  })
+
+  it('spell acronyms and letter names in capitals (DNA, TV, T-shirt)', () => {
+    const problems = PACK_WORDS.filter(({ word }) => {
+      const pieces = word.term.split(/[ -]/)
+      return (
+        pieces.some((piece) => LOWERCASE_ACRONYMS.has(piece)) ||
+        // A lone letter before a hyphen names the letter: T-shirt, U-turn.
+        /^\p{Ll}-/u.test(word.term)
+      )
+    }).map(label)
+    expect(problems).toEqual([])
+  })
+
+  it('keep their lowercase ids when a term is capitalized', () => {
+    // Histories and memories saved before the recasing still name them.
+    expect(
+      [
+        'space-science/dna',
+        'space-science/x-ray',
+        'actions/watching-tv',
+        'everyday/t-shirt',
+        'vehicles/u-turn',
+        'animals/t-rex',
+      ].map((id) => getPlayableWordById(id)?.term),
+    ).toEqual(['DNA', 'X-ray', 'watching TV', 'T-shirt', 'U-turn', 'T-rex'])
   })
 
   it('use a known difficulty', () => {

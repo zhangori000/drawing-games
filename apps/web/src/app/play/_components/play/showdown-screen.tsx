@@ -8,11 +8,12 @@ import { GuessDock } from '@/components/guess/guess-dock'
 import { cx } from '@/components/ui/cx'
 
 import { showdownGuessClosedReason } from '../../_lib/guess-closed'
+import { turnPresenceNotice } from '../../_lib/presence'
 import { useRoomSession } from '../room-session'
 import { DrawerCanvas, ReadOnlyCanvas } from '../shared/room-canvas'
 import { BannerDetail, NoteBanner, WordBanner } from './banners'
 import { DrawerToolbar } from './drawer-toolbar'
-import { GuessFeed, LatestTeamGuess } from './guess-feed'
+import { GuessFeed, LatestTeamGuess, PresenceNote } from './guess-feed'
 import { OpponentChip, OpponentTile } from './opponent-tile'
 import { PlayLayout } from './play-layout'
 import { Scoreboard } from './scoreboard'
@@ -24,7 +25,7 @@ export function ShowdownScreen({
 }: {
   readonly showdown: ShowdownView
 }) {
-  const { actions } = useRoomSession()
+  const { me, view, actions } = useRoomSession()
   const [watching, setWatching] = useState(false)
   const feedback = useFreshFeedback()
   const tools = useDrawingTools()
@@ -38,6 +39,15 @@ export function ShowdownScreen({
   const drawing = mine.canDraw && !watchingOpponent
   const firstClear = showdown.firstClearTeam === mine.team
   const opponentStatus = `${opponent.cleared}/${opponent.cardCount} cards`
+  // The clock keeps running while the drawer or every guesser is offline.
+  const presence = turnPresenceNotice({
+    members: view.members,
+    team: mine.team,
+    meId: me.memberId,
+    drawerId: mine.drawerId,
+    amDrawer: mine.amDrawer,
+    done: mine.finished,
+  })
 
   const banner =
     mine.amDrawer && mine.word && !mine.finished ? (
@@ -58,7 +68,7 @@ export function ShowdownScreen({
             <span className="truncate" data-testid="showdown-progress">
               {mine.finished
                 ? `All ${mine.cardCount} cards cleared!${firstClear ? ` +${showdown.finishBonus} for finishing first` : ''}`
-                : `Card ${mine.cardIndex + 1} of ${mine.cardCount} · ${mine.drawerName ?? 'Someone'} is drawing`}
+                : `Card ${mine.cardIndex + 1} of ${mine.cardCount} · ${presence?.short ?? `${mine.drawerName ?? 'Someone'} is drawing`}`}
             </span>
           </p>
           <BannerDetail
@@ -115,7 +125,13 @@ export function ShowdownScreen({
             <GuessDock
               onGuess={actions.guess}
               feedback={feedback}
-              idleStatus={<LatestTeamGuess guesses={mine.guesses} />}
+              idleStatus={
+                presence ? (
+                  <PresenceNote text={presence.message} />
+                ) : (
+                  <LatestTeamGuess guesses={mine.guesses} />
+                )
+              }
               statusAside={
                 <OpponentChip
                   team={opponent.team}
@@ -132,6 +148,7 @@ export function ShowdownScreen({
         <GuessFeed
           guesses={mine.guesses}
           label="Guesses for this card"
+          notice={mine.amDrawer ? presence?.message : null}
           emptyText={
             mine.amDrawer
               ? 'Your team’s guesses show up here.'

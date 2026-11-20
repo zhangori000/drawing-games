@@ -379,7 +379,7 @@ export const ANIMALS_PACK: WordPackData = {
         'A green insect with long, bent back legs that jumps through fields.',
     },
     {
-      term: 't-rex',
+      term: 'T-rex',
       difficulty: 'medium',
       definition:
         'A huge meat-eating dinosaur with giant jaws, sharp teeth, and tiny arms.',

@@ -34,8 +34,11 @@ Worker.
   authority.
 - **Data minimization:** no email or other personal data. History is bounded
   to the newest 1,000 word events and 50 match summaries; stats are
-  aggregates. Drawings, guesses, and resume tokens are never stored on the
-  account.
+  aggregates. The never-again list comes from two bounded id sets that
+  outlive that log (up to 5,000 drawn words and the newest 600 "Seen it"
+  reports), so trimming old events never puts a drawn word back in the
+  player's drafts; rooms receive the newest 600 of them. Drawings, guesses,
+  and resume tokens are never stored on the account.
 - **Room integration:** a room verifies an optional account token on join or
   resume through an in-Worker RPC and receives only the account id, display
   name, and word memory. Rooms report word events at round end and a match

@@ -8,11 +8,12 @@ import {
   type MemberView,
   type TeamId,
 } from '@drawing-games/game-core'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { cx } from '@/components/ui/cx'
 import { IconButton } from '@/components/ui/icon-button'
+import { Modal } from '@/components/ui/modal'
 import { TEAM_COLORS, TeamBadge } from '@/components/ui/team-badge'
 
 import { useMembers, useRoomSession } from '../room-session'
@@ -24,6 +25,15 @@ export function TeamPanel({ team }: { readonly team: TeamId }) {
   const full = members.length >= MAX_MEMBERS_PER_TEAM
   const mine = me.team === team
   const headingId = `team-${team}-heading`
+  // A person removed by mistake has to join again and ready up, so the host
+  // confirms first; a bot goes at once (adding one back is a single tap).
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null)
+  const confirmRemove =
+    members.find((member) => member.id === confirmRemoveId) ?? null
+  const remove = (member: MemberView) =>
+    void pending.run(`remove-${member.id}`, () =>
+      actions.removeMember(member.id),
+    )
 
   return (
     <section
@@ -75,7 +85,15 @@ export function TeamPanel({ team }: { readonly team: TeamId }) {
       </header>
       <ul className="grid gap-1 p-2" aria-label={`${TEAM_NAMES[team]} players`}>
         {members.map((member) => (
-          <MemberRow key={member.id} member={member} />
+          <MemberRow
+            key={member.id}
+            member={member}
+            onRemove={() =>
+              member.kind === 'bot'
+                ? remove(member)
+                : setConfirmRemoveId(member.id)
+            }
+          />
         ))}
         {members.length < MIN_MEMBERS_PER_TEAM ? (
           <li className="rounded-2xl border-2 border-dashed border-black/20 px-3 py-3 text-sm text-black/50">
@@ -86,11 +104,49 @@ export function TeamPanel({ team }: { readonly team: TeamId }) {
           </li>
         ) : null}
       </ul>
+      {me.isHost ? (
+        <Modal
+          open={confirmRemove !== null}
+          onClose={() => setConfirmRemoveId(null)}
+          title={`Remove ${confirmRemove?.displayName ?? 'this player'}?`}
+          description={
+            confirmRemove
+              ? `${confirmRemove.displayName} leaves the room at once. To come back, they join again with the room code and ready up.`
+              : undefined
+          }
+          footer={
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => setConfirmRemoveId(null)}
+              >
+                Keep
+              </Button>
+              <Button
+                variant="accent"
+                onClick={() => {
+                  setConfirmRemoveId(null)
+                  if (confirmRemove) remove(confirmRemove)
+                }}
+              >
+                Remove
+              </Button>
+            </>
+          }
+        />
+      ) : null}
     </section>
   )
 }
 
-function MemberRow({ member }: { readonly member: MemberView }) {
+function MemberRow({
+  member,
+  onRemove,
+}: {
+  readonly member: MemberView
+  /** Removes a bot at once; asks first for a person. */
+  readonly onRemove: () => void
+}) {
   const { me, actions, pending } = useRoomSession()
   const isMe = member.id === me.memberId
   const bot = member.kind === 'bot'
@@ -159,11 +215,7 @@ function MemberRow({ member }: { readonly member: MemberView }) {
           <IconButton
             label={`Remove ${member.displayName}`}
             disabled={pending.has(`remove-${member.id}`)}
-            onClick={() =>
-              void pending.run(`remove-${member.id}`, () =>
-                actions.removeMember(member.id),
-              )
-            }
+            onClick={onRemove}
           >
             <span
               aria-hidden="true"

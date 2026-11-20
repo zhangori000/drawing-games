@@ -59,7 +59,7 @@ export const EVERYDAY_PACK: WordPackData = {
         'Something you wear on top of your head, sometimes with a brim.',
     },
     {
-      term: 't-shirt',
+      term: 'T-shirt',
       difficulty: 'easy',
       definition:
         'A short-sleeved top with no collar that pulls on over your head.',

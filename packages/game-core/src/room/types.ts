@@ -37,7 +37,10 @@ export interface RoomMember {
   /** Presence only. Bots are always connected. */
   readonly connected: boolean
   readonly lastSeenAtMs: number
-  /** Lobby readiness. Bots are always ready. Cleared by settings changes. */
+  /**
+   * Lobby readiness. Bots are always ready. Cleared by settings changes and
+   * when a human drops offline in the lobby.
+   */
   readonly ready: boolean
   /** Linked quick-account id (normalized username), or null for guests. */
   readonly accountId: string | null

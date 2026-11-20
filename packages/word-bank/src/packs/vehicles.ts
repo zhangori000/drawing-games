@@ -495,7 +495,7 @@ export const VEHICLES_PACK: WordPackData = {
         "A pair of clamped wires used to restart one car's dead battery from another's.",
     },
     {
-      term: 'u-turn',
+      term: 'U-turn',
       difficulty: 'hard',
       definition:
         'Turning a vehicle completely around to head back the way you came.',

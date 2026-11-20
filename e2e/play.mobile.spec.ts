@@ -12,8 +12,9 @@ import {
  * - keyboard stability: focusing the guess input and submitting a wrong
  *   guess must not move the canvas or scroll the document;
  * - on an iPhone-sized screen the guesser's drawing stays large while the
- *   compact keyboard is up, every draft card fits, and every drawing tool is
- *   on screen (portrait and landscape);
+ *   compact keyboard is up (its "123" layer types digits), tapping the reveal
+ *   vote never closes the phone keyboard, every draft card fits, and every
+ *   drawing tool is on screen (portrait and landscape);
  * - with the phone's own keyboard on a landscape phone (about 148 px left)
  *   the guess box, its feedback, the clue and a usable drawing stay on
  *   screen, and rotating or a tablet keyboard never rebuilds the guess box;
@@ -166,6 +167,33 @@ test.describe('iPhone-sized screen (390 x 664)', () => {
       expect(Math.abs(after.width - before.width)).toBeLessThanOrEqual(4)
       expect(await documentScroll(page)).toBe(0)
 
+      // Custom words may hold digits ("Catch 22"). "123" swaps the letter
+      // rows for digits and symbols at the same height, "ABC" swaps back,
+      // and sending a guess returns to the letters.
+      const letterQ = keyboard.getByRole('button', { name: 'q', exact: true })
+      const keysHeight = (await boxOf(keyboard)).height
+      await keyboard.getByRole('button', { name: 'Numbers and symbols' }).tap()
+      await expect(letterQ).toBeHidden()
+      for (const key of ['2', '2']) {
+        await keyboard.getByRole('button', { name: key, exact: true }).tap()
+      }
+      await expect(input).toHaveValue('22')
+      await expect(input).toBeFocused()
+      expect(
+        Math.abs((await boxOf(keyboard)).height - keysHeight),
+      ).toBeLessThan(1)
+      expect((await boxOf(canvas)).width).toBeGreaterThanOrEqual(250)
+      await keyboard.getByRole('button', { name: 'Letters' }).tap()
+      await letterQ.tap()
+      await expect(input).toHaveValue('22q')
+      await keyboard.getByRole('button', { name: 'Numbers and symbols' }).tap()
+      await page.getByRole('button', { name: 'Send', exact: true }).tap()
+      await expect(
+        page.getByTestId('guess-dock').getByRole('status'),
+      ).toContainText('22q')
+      await expect(letterQ).toBeVisible()
+      await expect(input).toBeFocused()
+
       // The keys can be tucked away; tapping the input brings them back.
       await page.getByRole('button', { name: 'Hide keyboard' }).tap()
       await expect(keyboard).toBeHidden()
@@ -216,6 +244,64 @@ test.describe('iPhone-sized screen (390 x 664)', () => {
           keyboard.getByRole('button', { name: 'Send' }),
         )
       }
+    } finally {
+      await host.context.close()
+    }
+  })
+
+  test('guesser: tapping the reveal vote keeps the phone keyboard up', async ({
+    page,
+    browser,
+  }) => {
+    const host = await desktopPlayer(browser)
+    try {
+      const code = await createRoom(host.page)
+      await join(host.page, 'Ari')
+      // The vote opens 20 s into the round, so it can be tapped both while
+      // still locked and once open.
+      await host.page
+        .getByRole('button', { name: 'Less vote opens after' })
+        .click()
+      await expect(
+        host.page.getByRole('group', { name: 'Vote opens after' }),
+      ).toContainText('20s')
+      await page.goto(`/play/${code}`)
+      await join(page, 'Mina')
+      await startWithMoonBots(host.page, page)
+      await pickFirstCard(host.page)
+
+      const input = page.getByLabel('Your guess')
+      await expect(input).toBeEnabled({ timeout: PHASE_TIMEOUT })
+      await page.getByRole('button', { name: 'Use phone keyboard' }).tap()
+      await input.tap()
+      await page.keyboard.type('half')
+      // The phone keyboard takes 45% of the screen; the clue goes one line.
+      const { width, height } = page.viewportSize() ?? { width: 0, height: 0 }
+      await page.setViewportSize({ width, height: Math.round(height * 0.55) })
+      const banner = page.getByTestId('clue-banner')
+      await expect(banner).toHaveAttribute('data-compact', '')
+
+      const reveal = banner.getByRole('button', { name: /^Reveal letters/ })
+      const tapReveal = async () => {
+        const box = await boxOf(reveal)
+        await page.touchscreen.tap(
+          box.x + box.width / 2,
+          box.y + box.height / 2,
+        )
+      }
+      // Still locked: the tap does nothing, and the keyboard stays up.
+      await expect(reveal).toBeDisabled()
+      await tapReveal()
+      await expect(input).toBeFocused()
+      await expect(banner).toHaveAttribute('data-compact', '')
+
+      // Open: Mina's vote reveals the letters, and the keyboard stays up.
+      await expect(reveal).toBeEnabled({ timeout: 30_000 })
+      await tapReveal()
+      await expect(banner.getByTestId('word-pattern')).toContainText('_')
+      await expect(input).toBeFocused()
+      await expect(input).toHaveValue('half')
+      await expect(banner).toHaveAttribute('data-compact', '')
     } finally {
       await host.context.close()
     }

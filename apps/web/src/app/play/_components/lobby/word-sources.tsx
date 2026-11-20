@@ -14,7 +14,10 @@ import {
   type SkippedCustomWord,
 } from '../../_lib/custom-words'
 import { plural } from '../../_lib/format'
-import { minimumCustomWordsForOnly } from '../../_lib/settings-options'
+import {
+  minimumCustomWordsForOnly,
+  togglePackIds,
+} from '../../_lib/settings-options'
 import type { SettingsDraft } from '../../_lib/use-settings-draft'
 import { useRoomSession } from '../room-session'
 import { Toggle } from '../shared/controls'
@@ -35,11 +38,20 @@ export function WordSources({
   const lobby = view.lobby
   const onlyCustom = settings.customWordsMode === 'only'
 
+  // Why the last tap on a pack did nothing (switching off the last pack),
+  // shown while that is still the only pack on.
+  const [refusal, setRefusal] = useState<string | null>(null)
+  const packRefusal = settings.packIds.length <= 1 ? refusal : null
+  const packsHintId = useId()
+
   const togglePack = (packId: string) => {
-    const next = enabled.has(packId)
-      ? settings.packIds.filter((id) => id !== packId)
-      : [...settings.packIds, packId]
-    draft.update({ packIds: next })
+    const result = togglePackIds(settings, packId)
+    if ('refused' in result) {
+      setRefusal(result.refused)
+      return
+    }
+    setRefusal(null)
+    draft.update({ packIds: result.packIds })
   }
 
   return (
@@ -95,7 +107,10 @@ export function WordSources({
         </p>
       ) : null}
 
-      <fieldset className={cx('grid gap-2', onlyCustom && 'opacity-60')}>
+      <fieldset
+        className={cx('grid gap-2', onlyCustom && 'opacity-60')}
+        aria-describedby={packsHintId}
+      >
         <legend className="mb-2 text-sm font-black">
           Word packs
           {onlyCustom ? (
@@ -155,6 +170,17 @@ export function WordSources({
             )
           })}
         </div>
+        <p
+          id={packsHintId}
+          role="status"
+          data-testid="packs-hint"
+          className={cx(
+            packRefusal &&
+              'mt-1 rounded-xl bg-[#ffd9cf] px-3 py-1.5 text-sm font-semibold leading-6',
+          )}
+        >
+          {packRefusal}
+        </p>
       </fieldset>
 
       <CustomWords draft={draft} editable={editable} />

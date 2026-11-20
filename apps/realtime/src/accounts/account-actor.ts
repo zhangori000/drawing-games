@@ -1,4 +1,11 @@
-import { EMPTY_ACCOUNT_STATS, type AccountProfileView, type MatchSummaryRecord, type WordHistoryEvent } from '@drawing-games/game-core';
+import {
+	EMPTY_ACCOUNT_STATS,
+	WORD_MEMORY_LIMITS,
+	type AccountProfileView,
+	type MatchSummaryRecord,
+	type PlayerWordMemory,
+	type WordHistoryEvent,
+} from '@drawing-games/game-core';
 import { accountIdFromToken, loginRequestSchema, signupRequestSchema } from '@drawing-games/protocol';
 import { DurableObject } from 'cloudflare:workers';
 
@@ -7,10 +14,10 @@ import { accountActorName } from './actor-name';
 import { insertAccount, readAccount, writeDisplayName, writeStats, type AccountRecord } from './account-store';
 import type { VerifiedAccount } from './client';
 import { createSessionToken, hashPassword, hashSessionToken, verifyPassword } from './crypto';
-import { insertMatch, insertWordEvents, recentMatches, recentWordEvents, wordRoleEntries } from './history-store';
+import { avoidedWordIds, insertMatch, insertWordEvents, recentMatches, recentWordEvents, wordRoleEntries } from './history-store';
 import { ACCOUNT_LIMITS } from './limits';
 import { ACCOUNT_MESSAGES, accountFailure, rateLimitedMessage, type AccountProfileResult, type AccountSessionResult } from './results';
-import { accountSchemaExists, createAccountSchema } from './schema';
+import { accountSchemaExists, createAccountSchema, migrateAccountSchema } from './schema';
 import { clearFailedLogins, deleteSession, insertSession, lockoutRemainingMs, recordFailedLogin, touchSession } from './session-store';
 import { deriveWordMemory, foldMatchIntoStats } from './stats';
 import { sanitizeDisplayName, sanitizeMatchSummary, sanitizeWordEvent } from './validate';
@@ -120,7 +127,7 @@ export class AccountActor extends DurableObject<Env> {
 		return {
 			accountId: account.username,
 			displayName: account.displayName,
-			memory: deriveWordMemory(wordRoleEntries(this.sql)),
+			memory: this.wordMemory(),
 		};
 	}
 
@@ -159,8 +166,16 @@ export class AccountActor extends DurableObject<Env> {
 	}
 
 	private account(): AccountRecord | null {
-		if (!this.schemaReady) this.schemaReady = accountSchemaExists(this.sql);
+		if (!this.schemaReady) {
+			this.schemaReady = accountSchemaExists(this.sql);
+			if (this.schemaReady) migrateAccountSchema(this.sql);
+		}
 		return this.schemaReady ? readAccount(this.sql) : null;
+	}
+
+	/** What a room gets at join: the never-again list from lifetime sets, the rest from recent events. */
+	private wordMemory(): PlayerWordMemory {
+		return deriveWordMemory(avoidedWordIds(this.sql, WORD_MEMORY_LIMITS.avoid), wordRoleEntries(this.sql));
 	}
 
 	/** Guards against a caller routing one username's signup to another actor. */
@@ -186,7 +201,8 @@ export class AccountActor extends DurableObject<Env> {
 			stats: account.stats,
 			recentWords: recentWordEvents(this.sql, ACCOUNT_LIMITS.profileWordEvents),
 			recentMatches: recentMatches(this.sql, ACCOUNT_LIMITS.profileMatches),
-			avoidedWordCount: deriveWordMemory(wordRoleEntries(this.sql)).avoid.length,
+			// Exactly the words a room keeps out of this player's drafts.
+			avoidedWordCount: avoidedWordIds(this.sql, WORD_MEMORY_LIMITS.avoid).length,
 		};
 	}
 }

@@ -119,7 +119,9 @@ export function handleJoin(
 /**
  * For connected members `lastSeenAtMs` is when they (re)connected; for
  * disconnected members it is when they dropped (reconnect grace, host
- * transfer).
+ * transfer). Dropping out of the lobby clears Ready: the host should never
+ * start on a tick from someone who is not there, so a returning player
+ * readies up again.
  */
 export function handlePresence(
   ctx: RoomContext,
@@ -130,10 +132,12 @@ export function handlePresence(
     reject('BAD_COMMAND', 'Presence must be connected or not.')
   }
   if (member.connected === command.connected) return
+  const clearReady = !command.connected && ctx.state.phase === 'lobby'
   updateMember(ctx, member.id, (current) => ({
     ...current,
     connected: command.connected,
     lastSeenAtMs: ctx.now,
+    ready: clearReady ? false : current.ready,
   }))
 }
 
@@ -319,18 +323,44 @@ export function handleRemoveMember(
   })
 }
 
-/** Plain-language reasons the host cannot start yet. */
+/** "Dev", "Dev and Eve", "Dev, Eve and Fay". */
+function listNames(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? ''
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+}
+
+function playerCount(count: number): string {
+  if (count === 0) return 'nobody'
+  return count === 1 ? '1 player' : `${count} players`
+}
+
+/**
+ * Plain-language reasons the host cannot start yet. Only players who are
+ * here count toward a team's minimum (bots always are): a match started on
+ * an offline teammate leaves the one who is here drawing for nobody, and in
+ * a pair the turn waits for the missing drawer, so that team could not
+ * score until they came back. Offline players who are not needed for the
+ * minimum do not block the start; they rejoin the match when they return.
+ */
 export function lobbyBlockers(state: RoomState): string[] {
   const blockers: string[] = []
   for (const team of TEAM_IDS) {
-    const size = teamRoster(state, team).length
-    if (size < MIN_MEMBERS_PER_TEAM) {
+    const roster = teamRoster(state, team)
+    const offline = roster.filter((member) => !member.connected)
+    const here = roster.length - offline.length
+    if (roster.length < MIN_MEMBERS_PER_TEAM) {
       blockers.push(
         `${TEAM_NAMES[team]} needs at least ${MIN_MEMBERS_PER_TEAM} players`,
       )
-    } else if (size > MAX_MEMBERS_PER_TEAM) {
+    } else if (roster.length > MAX_MEMBERS_PER_TEAM) {
       blockers.push(
         `${TEAM_NAMES[team]} has more than ${MAX_MEMBERS_PER_TEAM} players`,
+      )
+    } else if (here < MIN_MEMBERS_PER_TEAM) {
+      const names = listNames(offline.map((member) => member.displayName))
+      const verb = offline.length === 1 ? 'is' : 'are'
+      blockers.push(
+        `${names} ${verb} offline, so ${TEAM_NAMES[team]} would start with ${playerCount(here)}`,
       )
     }
   }

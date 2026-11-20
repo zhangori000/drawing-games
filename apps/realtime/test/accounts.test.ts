@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { recordAccountMatch, recordAccountWords, verifyAccountToken } from '../src/accounts/client';
 import { MAX_JSON_BODY_BYTES, readJsonBody } from '../src/http';
 import { ACCOUNT_LIMITS } from '../src/accounts/limits';
+import { migrateAccountSchema } from '../src/accounts/schema';
 import { deriveWordMemory, foldMatchIntoStats, parseStoredStats } from '../src/accounts/stats';
 import { sanitizeDisplayName, sanitizeMatchSummary, sanitizeWordEvent } from '../src/accounts/validate';
 import {
@@ -38,7 +39,7 @@ function tableNames(username: string): Promise<string[]> {
 	);
 }
 
-function countRows(username: string, table: 'sessions' | 'word_events' | 'matches' | 'failed_logins'): Promise<number> {
+function countRows(username: string, table: 'sessions' | 'word_events' | 'matches' | 'failed_logins' | 'seen_reports'): Promise<number> {
 	return runInDurableObject(
 		actorStub(username),
 		(_instance, state) => state.storage.sql.exec<{ count: number }>(`SELECT count(*) AS count FROM ${table}`).one().count,
@@ -470,14 +471,79 @@ describe('account history recorded by rooms', () => {
 		expect(profile.recentMatches).toHaveLength(ACCOUNT_LIMITS.profileMatches);
 		expect(profile.recentMatches[0]?.matchNumber).toBe(matches.length);
 		expect(profile.stats.matchesPlayed).toBe(matches.length);
-		// Lifetime stats survive history trimming.
-		expect(profile.stats.distinctWordsDrawn).toBe(Math.ceil(words.length / 2));
-		expect(profile.avoidedWordCount).toBe(ACCOUNT_LIMITS.storedWordEvents / 2);
+		// Lifetime stats and the never-again list survive history trimming.
+		const drawn = Math.ceil(words.length / 2);
+		expect(profile.stats.distinctWordsDrawn).toBe(drawn);
+		expect(profile.avoidedWordCount).toBe(drawn);
 
 		const verified = await verifyAccountToken(env, token);
 		expect(verified?.memory.avoid[0]).toBe(`w-${words.length - 1}`);
-		expect(verified?.memory.avoid).toHaveLength(ACCOUNT_LIMITS.storedWordEvents / 2);
+		expect(verified?.memory.avoid).toHaveLength(drawn);
+		expect(verified?.memory.avoid).toContain('w-0');
+		// Recently met words come from the trimmed log only.
 		expect(verified?.memory.soft).toHaveLength(ACCOUNT_LIMITS.storedWordEvents / 2);
+	});
+
+	it('keeps drawn and "seen it" words out of drafts long after the event log drops them', async () => {
+		const username = uniqueUsername('forgood');
+		const { token } = await signup(username);
+		await recordAccountWords(env, username, [
+			wordEvent({ wordId: 'w-old-drawn', role: 'drew', atMs: 1_000 }),
+			wordEvent({ wordId: 'w-old-seen', role: 'seen-report', atMs: 1_001 }),
+			wordEvent({ wordId: 'w-old-met', role: 'offered', atMs: 1_002 }),
+		]);
+		// About 50 matches of draft cards, guesses and Showdown cards later.
+		const later = Array.from({ length: ACCOUNT_LIMITS.storedWordEvents + 10 }, (_, index) =>
+			wordEvent({ wordId: `w-met-${index}`, role: index % 3 === 0 ? 'guessed' : 'offered', atMs: 10_000 + index }),
+		);
+		await recordAccountWords(env, username, later);
+
+		expect(await countRows(username, 'word_events')).toBe(ACCOUNT_LIMITS.storedWordEvents);
+		const profile = await getMe(token);
+		expect(profile.recentWords.some((event) => event.wordId.startsWith('w-old'))).toBe(false);
+		expect(profile.avoidedWordCount).toBe(2);
+		const verified = await verifyAccountToken(env, token);
+		expect(verified?.memory.avoid).toEqual(['w-old-seen', 'w-old-drawn']);
+		expect(verified?.memory.soft).not.toContain('w-old-met');
+	});
+
+	it('caps the never-again list at the newest drawn or "seen it" words', async () => {
+		const username = uniqueUsername('avoidcap');
+		const { token } = await signup(username);
+		// More "seen it" reports than the lifetime set keeps, too.
+		const total = 2 * ACCOUNT_LIMITS.storedSeenReports + 100;
+		const events = Array.from({ length: total }, (_, index) =>
+			wordEvent({ wordId: `w-${index}`, role: index % 2 === 0 ? 'drew' : 'seen-report', atMs: 1_000 + index }),
+		);
+		await recordAccountWords(env, username, events);
+		// Drawing an old word again makes it recent.
+		await recordAccountWords(env, username, [wordEvent({ wordId: 'w-0', role: 'drew', atMs: 1_000_000, roomCode: 'AGAIN' })]);
+
+		expect(await countRows(username, 'seen_reports')).toBe(ACCOUNT_LIMITS.storedSeenReports);
+		const verified = await verifyAccountToken(env, token);
+		expect(verified?.memory.avoid).toHaveLength(WORD_MEMORY_LIMITS.avoid);
+		expect(verified?.memory.avoid.slice(0, 3)).toEqual(['w-0', `w-${total - 1}`, `w-${total - 2}`]);
+		expect(verified?.memory.avoid).not.toContain('w-1');
+		expect((await getMe(token)).avoidedWordCount).toBe(WORD_MEMORY_LIMITS.avoid);
+	});
+
+	it('seeds "seen it" reports from the event log for accounts made before the lifetime set', async () => {
+		const username = uniqueUsername('migrate');
+		const { token } = await signup(username);
+		await recordAccountWords(env, username, [
+			wordEvent({ wordId: 'w-seen', role: 'seen-report', atMs: 1_000 }),
+			wordEvent({ wordId: 'w-seen', role: 'seen-report', atMs: 3_000, roomCode: 'ROOM2' }),
+			wordEvent({ wordId: 'w-drawn', role: 'drew', atMs: 2_000 }),
+		]);
+		const reports = await runInDurableObject(actorStub(username), (_instance, state) => {
+			const sql = state.storage.sql;
+			sql.exec('DROP TABLE seen_reports');
+			migrateAccountSchema(sql);
+			migrateAccountSchema(sql);
+			return sql.exec<{ word_id: string; last_reported_at_ms: number }>('SELECT word_id, last_reported_at_ms FROM seen_reports').toArray();
+		});
+		expect(reports).toEqual([{ word_id: 'w-seen', last_reported_at_ms: 3_000 }]);
+		expect((await verifyAccountToken(env, token))?.memory.avoid).toEqual(['w-seen', 'w-drawn']);
 	});
 
 	it('returns null from verify for malformed or revoked tokens', async () => {
@@ -544,14 +610,16 @@ describe('account pure helpers', () => {
 	});
 
 	it('caps derived memory lists at WORD_MEMORY_LIMITS', () => {
+		const avoided = Array.from({ length: 700 }, (_, index) => `w-${index}`);
 		const entries = Array.from({ length: 1_400 }, (_, index) => ({
 			wordId: `w-${index}`,
 			role: index < 700 ? ('drew' as const) : ('missed' as const),
 		}));
-		const memory = deriveWordMemory(entries);
+		const memory = deriveWordMemory(['w-0', ...avoided], entries);
 		expect(memory.avoid).toHaveLength(WORD_MEMORY_LIMITS.avoid);
 		expect(memory.soft).toHaveLength(WORD_MEMORY_LIMITS.soft);
-		expect(memory.avoid[0]).toBe('w-0');
+		expect(memory.avoid.slice(0, 2)).toEqual(['w-0', 'w-1']);
+		// Avoid roles in the event log never land in soft.
 		expect(memory.soft[0]).toBe('w-700');
 	});
 

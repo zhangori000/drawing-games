@@ -9,6 +9,11 @@ export interface GuessFeedProps {
   readonly guesses: readonly GuessView[]
   readonly label: string
   readonly emptyText: string
+  /**
+   * Pinned above the guesses, e.g. that nobody on the team is online to
+   * guess (see `turnPresenceNotice`).
+   */
+  readonly notice?: string | null
   /** Smaller rows without a heading; defaults to the phone layout. */
   readonly compact?: boolean
 }
@@ -27,6 +32,7 @@ export function GuessFeed({
   guesses,
   label,
   emptyText,
+  notice = null,
   compact: compactProp,
 }: GuessFeedProps) {
   const layout = usePlayLayout()
@@ -38,14 +44,19 @@ export function GuessFeed({
           {label}
         </h2>
       )}
+      <p role="status" className={cx(notice && 'mb-1 shrink-0')}>
+        {notice ? <PresenceNote text={notice} wrap /> : null}
+      </p>
       <div
         className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto overscroll-contain"
         data-testid="guess-feed"
       >
         {guesses.length === 0 ? (
-          <p className={cx('text-black/45', compact ? 'text-xs' : 'text-sm')}>
-            {emptyText}
-          </p>
+          notice ? null : (
+            <p className={cx('text-black/45', compact ? 'text-xs' : 'text-sm')}>
+              {emptyText}
+            </p>
+          )
         ) : (
           <ol
             aria-live="polite"
@@ -106,6 +117,31 @@ function GuessRow({
         </span>
       ) : null}
     </li>
+  )
+}
+
+/**
+ * A teammate the turn depends on is offline (`turnPresenceNotice`): a
+ * drawer who lost connection, or no guesser online.
+ */
+export function PresenceNote({
+  text,
+  wrap = false,
+}: {
+  readonly text: string
+  /** Wrap instead of truncating (the feed has room; the dock line not). */
+  readonly wrap?: boolean
+}) {
+  return (
+    <span
+      data-testid="presence-note"
+      className={cx(
+        'rounded-lg bg-[#ffd9cf] px-2 py-0.5 text-xs font-bold text-[#181713]',
+        wrap ? 'block leading-4' : 'truncate',
+      )}
+    >
+      {text}
+    </span>
   )
 }
 

@@ -14,7 +14,46 @@ import { BackspaceIcon, KeyboardHideIcon, SendIcon } from '../ui/icons'
 
 export { useCompactKeyboardPreference } from './keyboard-preference'
 
-const LETTER_ROWS = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'] as const
+interface CharKey {
+  readonly char: string
+  /** Spoken name; letters and digits are their own. */
+  readonly label?: string
+}
+
+const LETTER_ROWS: readonly (readonly CharKey[])[] = [
+  'qwertyuiop',
+  'asdfghjkl',
+  'zxcvbnm',
+].map((row) => [...row].map((char) => ({ char })))
+
+/**
+ * The "123" layer, the same shape as the letters (10, 9 and 7 keys) so the
+ * keys never change height. Digits are what answers need (custom words such
+ * as "Catch 22"); the symbols are there because players expect them.
+ */
+const NUMBER_ROWS: readonly (readonly CharKey[])[] = [
+  [...'1234567890'].map((char) => ({ char })),
+  [
+    { char: '&', label: 'Ampersand' },
+    { char: '.', label: 'Period' },
+    { char: ',', label: 'Comma' },
+    { char: '!', label: 'Exclamation mark' },
+    { char: '?', label: 'Question mark' },
+    { char: ':', label: 'Colon' },
+    { char: '/', label: 'Slash' },
+    { char: '(', label: 'Left parenthesis' },
+    { char: ')', label: 'Right parenthesis' },
+  ],
+  [
+    { char: '+', label: 'Plus' },
+    { char: '=', label: 'Equals' },
+    { char: '#', label: 'Number sign' },
+    { char: '%', label: 'Percent' },
+    { char: '*', label: 'Asterisk' },
+    { char: '@', label: 'At sign' },
+    { char: '"', label: 'Quotation mark' },
+  ],
+]
 const REPEAT_DELAY_MS = 400
 const REPEAT_INTERVAL_MS = 70
 
@@ -35,7 +74,9 @@ export interface CompactKeyboardProps {
  * pointer-down with `preventDefault`, so focus and the caret stay in the
  * guess input. Rows are 40 px tall (four rows, about 180 px in all) so the
  * drawing above keeps most of a phone screen; switching to the device
- * keyboard lives in the guess input row.
+ * keyboard lives in the guess input row. The "123" key swaps the letter
+ * rows for digits and symbols (custom words may hold digits) and "ABC"
+ * swaps them back; sending a guess also returns to the letters.
  */
 export function CompactKeyboard({
   onKey,
@@ -46,11 +87,14 @@ export function CompactKeyboard({
   sendDisabled = false,
   className,
 }: CompactKeyboardProps) {
+  const [numbers, setNumbers] = useState(false)
+  const rows = numbers ? NUMBER_ROWS : LETTER_ROWS
   return (
     <div
       role="group"
       aria-label="Compact keyboard"
       data-testid="compact-keyboard"
+      data-layer={numbers ? 'numbers' : 'letters'}
       className={cx(
         'select-none border-t-2 border-[#181713] bg-[#e9e3d8] px-1 pb-1 pt-1',
         disabled && 'opacity-50',
@@ -59,23 +103,23 @@ export function CompactKeyboard({
       style={{ touchAction: 'manipulation', WebkitUserSelect: 'none' }}
     >
       <div className="flex flex-col gap-1">
-        {LETTER_ROWS.map((row, rowIndex) => (
+        {rows.map((row, rowIndex) => (
           <div
-            key={row}
+            key={rowIndex}
             className={cx(
               'flex gap-1',
               rowIndex === 1 && 'px-[5%]',
               rowIndex === 2 && 'px-[15%]',
             )}
           >
-            {[...row].map((letter) => (
+            {row.map(({ char, label }) => (
               <Key
-                key={letter}
-                label={letter}
+                key={char}
+                label={label ?? char}
                 disabled={disabled}
-                onPress={() => onKey(letter)}
+                onPress={() => onKey(char)}
               >
-                {letter}
+                {char}
               </Key>
             ))}
           </div>
@@ -92,6 +136,17 @@ export function CompactKeyboard({
               <KeyboardHideIcon width={20} height={20} />
             </Key>
           ) : null}
+          <Key
+            label={numbers ? 'Letters' : 'Numbers and symbols'}
+            disabled={disabled}
+            onPress={() => setNumbers((value) => !value)}
+            tone="action"
+            className="max-w-12 flex-[1.2]"
+          >
+            <span className="text-xs font-black normal-case">
+              {numbers ? 'ABC' : '123'}
+            </span>
+          </Key>
           <Key
             label="Backspace"
             disabled={disabled}
@@ -129,7 +184,10 @@ export function CompactKeyboard({
           <Key
             label="Send"
             disabled={disabled || sendDisabled}
-            onPress={onSend}
+            onPress={() => {
+              setNumbers(false)
+              onSend()
+            }}
             tone="send"
             className="max-w-24 flex-[1.8]"
           >

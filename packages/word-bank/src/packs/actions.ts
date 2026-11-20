@@ -161,7 +161,7 @@ export const ACTIONS_PACK: WordPackData = {
       aliases: ['washing your hands'],
     },
     {
-      term: 'watching tv',
+      term: 'watching TV',
       difficulty: 'easy',
       definition: 'Sitting on the couch staring at shows on a screen.',
       aliases: ['watching television'],

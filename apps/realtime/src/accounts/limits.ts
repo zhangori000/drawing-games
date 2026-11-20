@@ -1,3 +1,5 @@
+import { WORD_MEMORY_LIMITS } from '@drawing-games/game-core';
+
 const MINUTE_MS = 60 * 1000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 
@@ -17,8 +19,14 @@ export const ACCOUNT_LIMITS = Object.freeze({
 
 	storedWordEvents: 1000,
 	storedMatches: 50,
-	/** Lifetime set of drawn word ids backing `distinctWordsDrawn`. */
+	/** Lifetime set of drawn word ids backing `distinctWordsDrawn` and the avoid list. */
 	storedDrawnWords: 5000,
+	/**
+	 * Lifetime set of "seen it" word ids backing the avoid list. Rooms take at
+	 * most `WORD_MEMORY_LIMITS.avoid` ids (newest first), so older reports
+	 * could never be sent anyway.
+	 */
+	storedSeenReports: WORD_MEMORY_LIMITS.avoid,
 	profileWordEvents: 200,
 	profileMatches: 30,
 

@@ -20,6 +20,8 @@ export interface ClueBannerProps {
   readonly hint: HintView
   readonly solved: boolean
   readonly guessing: boolean
+  /** Replaces "Cleo is drawing", e.g. "Cleo lost connection". */
+  readonly drawerNotice?: string | null
 }
 
 /**
@@ -37,6 +39,7 @@ export function ClueBanner({
   hint,
   solved,
   guessing,
+  drawerNotice = null,
 }: ClueBannerProps) {
   const { serverNow } = useRoomSession()
   const { secondsLeft } = useCountdown(hint.unlocksAtMs, serverNow)
@@ -53,6 +56,10 @@ export function ClueBanner({
       <div
         data-testid="clue-banner"
         data-compact=""
+        // This line only shows while a keyboard is up: a tap on it (the
+        // reveal vote, even while it is still locked, or a chip) must not
+        // take focus from the guess input and close the phone keyboard.
+        onPointerDown={(event) => event.preventDefault()}
         className="flex h-11 shrink-0 items-center gap-1.5 border-b-2 border-[#181713] bg-[#fffdf7] px-2"
       >
         <p
@@ -137,9 +144,18 @@ export function ClueBanner({
         {difficulty ? (
           <DifficultyChip difficulty={difficulty} showBonus />
         ) : null}
-        <span className="min-w-0 truncate font-semibold text-black/55">
-          {drawerName} is drawing
-        </span>
+        {drawerNotice ? (
+          <span
+            data-testid="drawer-notice"
+            className="min-w-0 truncate rounded-full bg-[#ffd9cf] px-2 py-0.5 font-bold text-[#181713]"
+          >
+            {drawerNotice}
+          </span>
+        ) : (
+          <span className="min-w-0 truncate font-semibold text-black/55">
+            {drawerName} is drawing
+          </span>
+        )}
       </div>
     </div>
   )
@@ -187,6 +203,9 @@ function RevealButton({
       type="button"
       disabled={disabled}
       aria-pressed={voted}
+      // Like Send: a tap never takes focus from the guess input, so a phone
+      // keyboard stays up mid-guess. Enter and Space still press it.
+      onPointerDown={(event) => event.preventDefault()}
       onClick={() => void pending.run('hint', () => actions.voteHint(!voted))}
       className={cx(
         'inline-flex shrink-0 items-center rounded-xl border-2 border-[#181713] font-black transition disabled:cursor-not-allowed',

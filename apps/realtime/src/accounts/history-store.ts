@@ -4,7 +4,12 @@ import { ACCOUNT_LIMITS } from './limits';
 import type { WordRoleEntry } from './stats';
 import { sanitizeMatchSummary, sanitizeWordEvent } from './validate';
 
-/** Word events, the lifetime drawn-word set, and match summaries (all bounded). */
+/**
+ * Word events, the lifetime drawn-word and "seen it" sets, and match
+ * summaries (all bounded). The event log is for display and the `soft`
+ * memory; the never-again (`avoid`) list comes from the two lifetime sets,
+ * so trimming old events never lets a drawn or "seen it" word back in.
+ */
 
 export interface WordInsertOutcome {
 	readonly inserted: number;
@@ -31,6 +36,7 @@ export function insertWordEvents(sql: SqlStorage, events: readonly WordHistoryEv
 		if (rows.length === 0) continue;
 		inserted += 1;
 		if (event.role === 'drew' && markDrawn(sql, event.wordId, event.atMs)) newlyDrawn += 1;
+		if (event.role === 'seen-report') markSeenReport(sql, event.wordId, event.atMs);
 	}
 	if (inserted > 0) trimWordHistory(sql);
 	return { inserted, newlyDrawn };
@@ -48,6 +54,15 @@ function markDrawn(sql: SqlStorage, wordId: string, atMs: number): boolean {
 	return !known;
 }
 
+function markSeenReport(sql: SqlStorage, wordId: string, atMs: number): void {
+	sql.exec(
+		`INSERT INTO seen_reports (word_id, last_reported_at_ms) VALUES (?, ?)
+		ON CONFLICT (word_id) DO UPDATE SET last_reported_at_ms = max(last_reported_at_ms, excluded.last_reported_at_ms)`,
+		wordId,
+		atMs,
+	);
+}
+
 function trimWordHistory(sql: SqlStorage): void {
 	sql.exec(
 		`DELETE FROM word_events WHERE id IN (SELECT id FROM word_events ORDER BY at_ms DESC, id DESC LIMIT -1 OFFSET ?)`,
@@ -59,6 +74,32 @@ function trimWordHistory(sql: SqlStorage): void {
 		)`,
 		ACCOUNT_LIMITS.storedDrawnWords,
 	);
+	sql.exec(
+		`DELETE FROM seen_reports WHERE word_id IN (
+			SELECT word_id FROM seen_reports ORDER BY last_reported_at_ms DESC, word_id LIMIT -1 OFFSET ?
+		)`,
+		ACCOUNT_LIMITS.storedSeenReports,
+	);
+}
+
+/**
+ * Word ids the account drew or reported "seen it" on, most recent first
+ * (ties by id), at most `limit`. Read from the lifetime sets, not the
+ * trimmed event log.
+ */
+export function avoidedWordIds(sql: SqlStorage, limit: number): string[] {
+	return sql
+		.exec<{ word_id: string }>(
+			`SELECT word_id FROM (
+				SELECT word_id, last_drawn_at_ms AS at_ms FROM drawn_words
+				UNION ALL
+				SELECT word_id, last_reported_at_ms AS at_ms FROM seen_reports
+			)
+			GROUP BY word_id ORDER BY max(at_ms) DESC, word_id LIMIT ?`,
+			limit,
+		)
+		.toArray()
+		.map((row) => row.word_id);
 }
 
 export function recentWordEvents(sql: SqlStorage, limit: number): WordHistoryEvent[] {
@@ -69,7 +110,7 @@ export function recentWordEvents(sql: SqlStorage, limit: number): WordHistoryEve
 	});
 }
 
-/** Every stored (wordId, role) pair, newest first, for memory derivation. */
+/** Every stored (wordId, role) pair, newest first, for the `soft` memory. */
 export function wordRoleEntries(sql: SqlStorage): WordRoleEntry[] {
 	const rows = sql.exec<{ word_id: string; role: string }>(`SELECT word_id, role FROM word_events ORDER BY at_ms DESC, id DESC`).toArray();
 	return rows.flatMap(({ word_id: wordId, role }) => (isWordHistoryRole(role) ? [{ wordId, role }] : []));

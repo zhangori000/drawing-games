@@ -1,7 +1,14 @@
+/** Lifetime "seen it" reports; with `drawn_words` it backs the avoid list. */
+const SEEN_REPORTS_TABLE = `CREATE TABLE IF NOT EXISTS seen_reports (
+	word_id TEXT PRIMARY KEY,
+	last_reported_at_ms INTEGER NOT NULL
+)`;
+
 /**
  * SQLite schema for one account actor. Tables are created only by a
  * successful signup, so a login or verify against a username that was never
- * registered leaves the actor's storage empty.
+ * registered leaves the actor's storage empty. Tables added after accounts
+ * already existed are also created by `migrateAccountSchema`.
  */
 const SCHEMA_STATEMENTS: readonly string[] = [
 	`CREATE TABLE IF NOT EXISTS account (
@@ -45,12 +52,32 @@ const SCHEMA_STATEMENTS: readonly string[] = [
 		summary_json TEXT NOT NULL,
 		PRIMARY KEY (room_code, match_number)
 	)`,
+	SEEN_REPORTS_TABLE,
 ];
 
+function tableExists(sql: SqlStorage, name: string): boolean {
+	return sql.exec(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`, name).toArray().length > 0;
+}
+
 export function accountSchemaExists(sql: SqlStorage): boolean {
-	return sql.exec(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'account'`).toArray().length > 0;
+	return tableExists(sql, 'account');
 }
 
 export function createAccountSchema(sql: SqlStorage): void {
 	for (const statement of SCHEMA_STATEMENTS) sql.exec(statement);
+}
+
+/**
+ * Brings an existing account up to the current schema; a no-op once it is.
+ * `seen_reports` is seeded from the reports still in the event log (older
+ * ones were already trimmed away). Synchronous, so Durable Object storage
+ * commits it atomically.
+ */
+export function migrateAccountSchema(sql: SqlStorage): void {
+	if (tableExists(sql, 'seen_reports')) return;
+	sql.exec(SEEN_REPORTS_TABLE);
+	sql.exec(
+		`INSERT INTO seen_reports (word_id, last_reported_at_ms)
+		SELECT word_id, max(at_ms) FROM word_events WHERE role = 'seen-report' GROUP BY word_id`,
+	);
 }

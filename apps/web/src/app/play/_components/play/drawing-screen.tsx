@@ -8,12 +8,13 @@ import { GuessDock } from '@/components/guess/guess-dock'
 
 import { plural } from '../../_lib/format'
 import { roundGuessClosedReason } from '../../_lib/guess-closed'
+import { turnPresenceNotice } from '../../_lib/presence'
 import { useRoomSession } from '../room-session'
 import { DrawerCanvas, ReadOnlyCanvas } from '../shared/room-canvas'
 import { SolvedBanner, WordBanner } from './banners'
 import { ClueBanner } from './clue-banner'
 import { DrawerToolbar } from './drawer-toolbar'
-import { GuessFeed, LatestTeamGuess } from './guess-feed'
+import { GuessFeed, LatestTeamGuess, PresenceNote } from './guess-feed'
 import { OpponentChip, OpponentTile } from './opponent-tile'
 import { PlayLayout } from './play-layout'
 import { Scoreboard } from './scoreboard'
@@ -21,7 +22,7 @@ import { useFreshFeedback } from './use-fresh-feedback'
 
 /** Simultaneous drawing and guessing for one normal round. */
 export function DrawingScreen({ round }: { readonly round: RoundView }) {
-  const { me, actions } = useRoomSession()
+  const { me, view, actions } = useRoomSession()
   const mine = round.mine
   const opponent = round.opponent
   const [watching, setWatching] = useState(false)
@@ -36,6 +37,15 @@ export function DrawingScreen({ round }: { readonly round: RoundView }) {
   const opponentStatus = opponent.solved
     ? 'Solved!'
     : plural(opponent.guessCount, 'guess', 'guesses')
+  // The clock keeps running while the drawer or every guesser is offline.
+  const presence = turnPresenceNotice({
+    members: view.members,
+    team: mine.team,
+    meId: me.memberId,
+    drawerId: mine.drawerId,
+    amDrawer: mine.amDrawer,
+    done: mine.solved,
+  })
 
   const watchToggle =
     opponent.canvasAccess === 'full' ? (
@@ -85,6 +95,7 @@ export function DrawingScreen({ round }: { readonly round: RoundView }) {
       hint={mine.hint}
       solved={mine.solved}
       guessing={!mine.amDrawer && mine.canGuess}
+      drawerNotice={presence?.short}
     />
   )
 
@@ -129,7 +140,13 @@ export function DrawingScreen({ round }: { readonly round: RoundView }) {
             <GuessDock
               onGuess={actions.guess}
               feedback={feedback}
-              idleStatus={<LatestTeamGuess guesses={mine.guesses} />}
+              idleStatus={
+                presence ? (
+                  <PresenceNote text={presence.message} />
+                ) : (
+                  <LatestTeamGuess guesses={mine.guesses} />
+                )
+              }
               statusAside={
                 <OpponentChip
                   team={opponent.team}
@@ -146,6 +163,7 @@ export function DrawingScreen({ round }: { readonly round: RoundView }) {
         <GuessFeed
           guesses={mine.guesses}
           label="Team guesses"
+          notice={mine.amDrawer ? presence?.message : null}
           emptyText={
             mine.amDrawer
               ? 'Your team’s guesses show up here.'

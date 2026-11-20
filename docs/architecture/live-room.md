@@ -111,7 +111,9 @@ the next one.`), no hint vote, not counted as a possible guesser for a
   move anyone including bots. Teams cap at 8.
 - `lobby.shuffle-teams` (host, lobby): seeded shuffle of all members into
   balanced teams (size difference ≤ 1).
-- `lobby.set-ready` (humans, lobby).
+- `lobby.set-ready` (humans, lobby). A `member.presence` disconnect in the
+  lobby clears that member's ready flag (mid-match drops leave it alone), so
+  a returning player readies up again.
 - `lobby.update-settings` (host, lobby): validate against
   `ROOM_SETTINGS_LIMITS`; rounds must be even; unknown pack ids are dropped;
   custom words are trimmed, whitespace-collapsed, stripped of control
@@ -149,10 +151,15 @@ the next one.`), no hint vote, not counted as a possible guesser for a
   `Pixel Pete, Doodlebot, Sketchy, Inkling, Scribbles, Smudge, Squiggles,
 Blotto`. Bots are always connected and ready and never have accounts.
 - `lobby.remove-member` (host, lobby, not self).
-- `match.start` (host, lobby): each team needs 2–8 members, and every
-  connected human other than the host must be ready (the host pressing Start
-  is their ready). Blockers appear in `LobbyView.blockers` in plain words,
-  e.g. `Moon needs at least 2 players`, `Waiting for Theo to ready up`.
+- `match.start` (host, lobby): each team needs 2–8 members, at least 2 of
+  them connected (bots always are), and every connected human other than
+  the host must be ready (the host pressing Start is their ready). Presence
+  is the `connected` flag, not the reconnect grace, so the projection needs
+  no clock. Offline members beyond the minimum do not block. Blockers appear
+  in `LobbyView.blockers` in plain words, e.g.
+  `Moon needs at least 2 players`,
+  `Dev is offline, so Moon would start with 1 player`,
+  `Waiting for Theo to ready up`.
 
 ### Drawer rotation
 
@@ -204,7 +211,12 @@ the teammate who took over. In a pair (or one human with one bot) nobody
 would be left to guess, so the turn waits for the drawer. With nobody
 connected the turn stays put, and the first teammate to connect (or join)
 takes it at once. A drawer who left with nobody to hand to is treated the
-same way, without the grace.
+same way, without the grace. The clock never pauses for any of this, so the
+web reads `members[].connected` (`turnPresenceNotice` in
+`apps/web/src/app/play/_lib/presence.ts`): guessers whose drawer is
+disconnected see "Cleo lost connection" in the clue banner and the guess
+box's status line, and a drawer whose teammates are all disconnected sees
+"Nobody on your team is online to guess right now." above the team feed.
 
 ### Word draft (the headline improvement)
 
@@ -661,10 +673,18 @@ Non-members get previews during play and full access in results/stats.
   16-byte salt) and constant-time comparison. Tokens are
   `<username>.<32 random bytes base64url>`; only SHA-256 hashes are stored;
   at most 10 sessions per account (oldest evicted).
-- History keeps the newest 1,000 word events and 50 match summaries.
-  `verifySession` derives memory: `avoid` = drew + seen-report ids;
-  `soft` = guessed, missed, offered, unknown-report ids (each capped by
-  `WORD_MEMORY_LIMITS`).
+- History keeps the newest 1,000 word events and 50 match summaries, for
+  display and the `soft` memory. Two lifetime sets outlive that log:
+  `drawn_words` (up to 5,000 ids, also behind `distinctWordsDrawn`) and
+  `seen_reports` (the newest 600 "Seen it" ids). `verifySession` derives
+  memory: `avoid` = the newest `WORD_MEMORY_LIMITS.avoid` (600) ids across
+  both sets, by last drawn or reported time; `soft` = guessed, missed,
+  offered, unknown-report ids from the event log (capped by
+  `WORD_MEMORY_LIMITS.soft`). The profile's `avoidedWordCount` is that same
+  `avoid` list's length, so /me counts exactly what rooms keep out of the
+  player's drafts. An account created before `seen_reports` existed gets the
+  table on its actor's first wake (`migrateAccountSchema`), seeded from the
+  reports still in its event log.
 - Rooms report word events at round end (and per showdown card, tagged
   `showdown: true` so /me can tell a relay card from the round word it
   repeats; the actor keeps that field only when it is exactly `true`), a
@@ -708,6 +728,13 @@ Non-members get previews during play and full access in results/stats.
   for coarse pointers. A keyboard button in the guess input row switches to
   the native keyboard and back (the choice persists); a "hide keyboard" key
   tucks the keys away for this screen and tapping the input brings them back.
+  A "123" key swaps the letter rows for digits and symbols at the same
+  height (custom words may hold digits; "ABC" or sending a guess goes back).
+- Controls a guesser taps mid-guess keep focus in the guess input
+  (`pointerdown` `preventDefault`, as on Send): the compact keys, the
+  keyboard switch, and the reveal vote. The whole one-line clue banner,
+  shown only while a keyboard is up, does the same, so tapping it never
+  closes the phone keyboard.
 - Keyboard-aware layout: `GameViewport` exposes `keyboardOpen` (device
   keyboard, from the visual viewport) and `inAppKeyboard` (the guess dock
   registers its compact keys with `useInAppKeyboard`). While either is up on

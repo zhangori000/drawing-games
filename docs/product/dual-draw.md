@@ -62,6 +62,32 @@ The room server, not a browser, owns every transition and deadline.
 Room settings are visible to everyone before ready-up. The host proposes
 changes; the game starts only when every connected player marks ready.
 
+Only players who are here count toward the two-per-team minimum. A team of
+two with one teammate offline (a closed tab, a locked phone) would leave the
+other drawing for nobody, and in a pair the turn waits for the missing
+drawer, so that team could not score. The host sees why Start is off, e.g.
+"Dev is offline, so Moon would start with 1 player", and can wait, move
+someone, add a practice bot, or remove the missing player. Offline players
+beyond the minimum do not hold up the start; they rejoin the match when
+they come back. Dropping out of the lobby also clears that player's Ready,
+so an offline player never shows as ready and a returning one taps Ready
+again.
+
+Removing a person asks the host first ("Remove Eve?", with Keep and
+Remove), because the ✕ sits beside the move button and a removed player has
+to join again with the room code and ready up. A practice bot goes at once;
+adding one back is a single tap.
+
+The host's setting changes save as they are made; changes made within
+about 300 ms go to the room together. A room needs at least one word pack
+on unless it uses only custom words (at least two drafts' worth), so a tap
+that would switch off the last pack does nothing and says why ("Keep at
+least one word pack on, or use only your own words") instead of sending a
+change the room would refuse. Quickly clearing every pack therefore keeps
+the last one on rather than undoing every tap. If the room still refuses
+changes sent together, each is tried on its own, so only the impossible one
+goes back to the room's value (with a message saying why).
+
 ## Teams, rotation, and word choice
 
 Player names must show something: invisible characters (zero-width spaces,
@@ -134,8 +160,12 @@ from correctness. A report is a personalization signal, not proof that a word
 must be deleted globally.
 
 Personal memory follows a player between rooms. An account's history lives on
-the server; a guest's browser keeps the same two kinds of memory locally and
-sends them when joining a room:
+the server: the newest 600 words it drew or reported "Seen it" on stay out
+of its drafts however many other words it meets (the account's word log
+keeps only its newest 1,000 events, but that log does not decide what
+comes back), and /me's "never offered again" count is exactly that list. A
+guest's browser keeps the same two kinds of memory locally and sends them
+when joining a room:
 
 - words the guest drew (still the drawer when the round ended) or reported
   "Seen it" on as drawer. Like an account's, these are never dealt to them as
@@ -255,6 +285,11 @@ drawer a card from the other team's hand (it could be their answer): on a
 list so short that nothing else is left, the swap is refused with "There are
 no other words left to swap in."
 
+Cards show curated terms as written: lowercase, except acronyms and letter
+names, which use capitals ("DNA", "watching TV", "T-shirt", "X-ray"). Guess
+matching ignores case, and a word's id never changes with its capitals, so
+histories and no-repeat memories saved earlier still name it.
+
 ## Drawing and guessing
 
 Each team has its own canvas. The initial tool set is:
@@ -321,7 +356,10 @@ Phone choices that follow from this (portrait and landscape):
   width with the phone keyboard open. A keyboard button next to the input
   switches between the compact and the phone keyboard; a "hide keyboard" key
   tucks the compact keys away to see the drawing larger, and tapping the
-  input brings them back. Nothing covers the keys: the `next dev` route
+  input brings them back. The compact keys' "123" key switches to digits and
+  symbols (a custom word such as "Catch 22" needs them) and "ABC" back;
+  sending a guess returns to the letters. Tapping the one-line clue,
+  including its reveal vote, keeps the phone keyboard up. Nothing covers the keys: the `next dev` route
   indicator, which sat on Backspace when the owner played from a phone on
   `pnpm dev`, is turned off.
 - **Landscape typing fits.** A landscape phone with its own keyboard up has
@@ -457,6 +495,16 @@ waiting out the clock; the other team is unaffected.
 Either way the new drawer is told why their screen switched from guessing to
 drawing, e.g. "Max left the room. You're picking your team's word now." or
 "Max lost connection. You're drawing now: same word, same canvas."
+
+Because the clock never pauses, the screen says when a turn partner is
+offline instead of leaving a blank canvas unexplained. While a team's drawer
+is disconnected (during the grace, and for as long as the turn waits for
+them), its guessers see "Cleo lost connection" in place of "Cleo is drawing"
+and "Cleo lost connection. Waiting for them to come back." in the guess
+box's status line (also on a Showdown card). A takeover replaces it with the
+new drawer's name. A drawer whose teammates are all offline sees "Nobody on
+your team is online to guess right now. Keep drawing for when they're back."
+above the team's guesses. Practice bots are always online.
 
 A drawer whose turn was taken over has already seen its cards (and maybe the
 word), so when they come back they watch the rest of that turn instead of
